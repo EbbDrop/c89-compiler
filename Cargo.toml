@@ -6,4 +6,4 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-antlr-rust = { git = "https://github.com/rrevenantt/antlr4rust/", tag = "antlr4-4.8-2-Rust0.3.0-beta" }
+antlr-rust = "0.3.0-beta"

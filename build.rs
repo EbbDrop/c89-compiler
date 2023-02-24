@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .expect("antlr returned a non 0 error code");
 
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed={}", antlr_bin.display());
+    println!("cargo:rerun-if-changed={}", grammer_in_dir.display());
 
     Ok(())
 }
