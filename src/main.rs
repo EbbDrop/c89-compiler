@@ -1,5 +1,6 @@
+mod ast;
 mod parser;
 
 fn main() {
-    parser::parse();
+    dbg!(parser::parse("2 + 3"));
 }

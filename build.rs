@@ -30,7 +30,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         .arg(&antlr_bin)
         .arg("main.g4")
         .arg("-Dlanguage=Rust")
-        .arg("-visitor")
         .arg("-o")
         .arg(&grammer_out_dir)
         .spawn()
