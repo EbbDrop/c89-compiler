@@ -2,10 +2,23 @@
 mod mainlistener;
 
 #[rustfmt::skip]
-pub mod mainlexer;
+mod mainlexer;
 
 #[rustfmt::skip]
-pub mod mainparser;
+mod mainparser;
 
-pub use mainlexer::*;
-pub use mainparser::*;
+pub use mainlexer::MainLexer as Lexer;
+pub use mainparser::MainParser as Parser;
+
+pub mod context {
+    #[rustfmt::skip]
+    pub use super::mainparser::{
+        CondAndContextAll       as CondAnd,
+        CondOrContextAll        as CondOr,
+        ExprArithContextAll     as ExprArith,
+        ExprContextAll          as Expr,
+        ExprFactorContextAll    as ExprFactor,
+        ExprTermContextAll      as ExprTerm,
+        FullExprContextAll      as FullExpr,
+    };
+}
