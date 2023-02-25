@@ -26,39 +26,42 @@ mod ast_builder {
     }
 
     fn build_from_cond_or(ctx: &context::CondOr) -> ast::Expression {
+        use context::CondOr;
         match ctx {
-            context::CondOr::CondOrSingularContext(singular) => {
+            CondOr::CondOrSingularContext(singular) => {
                 build_from_cond_and(singular.value.as_deref().unwrap())
             }
-            context::CondOr::CondOrComposedContext(composed) => ast::Expression::Binary(
+            CondOr::CondOrComposedContext(composed) => ast::Expression::Binary(
                 Box::new(build_from_cond_or(composed.lhs.as_deref().unwrap())),
                 ast::BinaryOperator::DoublePipe,
                 Box::new(build_from_cond_and(composed.rhs.as_deref().unwrap())),
             ),
-            context::CondOr::Error(_) => panic!(),
+            CondOr::Error(_) => panic!(),
         }
     }
 
     fn build_from_cond_and(ctx: &context::CondAnd) -> ast::Expression {
+        use context::CondAnd;
         match ctx {
-            context::CondAnd::CondAndSingularContext(singular) => {
+            CondAnd::CondAndSingularContext(singular) => {
                 build_from_expr(singular.value.as_deref().unwrap())
             }
-            context::CondAnd::CondAndComposedContext(composed) => ast::Expression::Binary(
+            CondAnd::CondAndComposedContext(composed) => ast::Expression::Binary(
                 Box::new(build_from_cond_and(composed.lhs.as_deref().unwrap())),
                 ast::BinaryOperator::DoubleAmpersand,
                 Box::new(build_from_expr(composed.rhs.as_deref().unwrap())),
             ),
-            context::CondAnd::Error(_) => panic!(),
+            CondAnd::Error(_) => panic!(),
         }
     }
 
     fn build_from_expr(ctx: &context::Expr) -> ast::Expression {
+        use context::Expr;
         match ctx {
-            context::Expr::ExprSingularContext(singular) => {
+            Expr::ExprSingularContext(singular) => {
                 build_from_expr_arith(singular.value.as_deref().unwrap())
             }
-            context::Expr::ExprComposedContext(composed) => ast::Expression::Binary(
+            Expr::ExprComposedContext(composed) => ast::Expression::Binary(
                 Box::new(build_from_expr(composed.lhs.as_deref().unwrap())),
                 match composed.op.as_deref().unwrap().get_text() {
                     "<" => ast::BinaryOperator::AngleLeft,
@@ -71,16 +74,17 @@ mod ast_builder {
                 },
                 Box::new(build_from_expr_arith(composed.rhs.as_deref().unwrap())),
             ),
-            context::Expr::Error(_) => panic!(),
+            Expr::Error(_) => panic!(),
         }
     }
 
     fn build_from_expr_arith(ctx: &context::ExprArith) -> ast::Expression {
+        use context::ExprArith;
         match ctx {
-            context::ExprArith::ExprArithSingularContext(singular) => {
+            ExprArith::ExprArithSingularContext(singular) => {
                 build_from_expr_term(singular.value.as_deref().unwrap())
             }
-            context::ExprArith::ExprArithComposedContext(composed) => ast::Expression::Binary(
+            ExprArith::ExprArithComposedContext(composed) => ast::Expression::Binary(
                 Box::new(build_from_expr_arith(composed.lhs.as_deref().unwrap())),
                 match composed.op.as_deref().unwrap().get_text() {
                     "+" => ast::BinaryOperator::Plus,
@@ -89,16 +93,17 @@ mod ast_builder {
                 },
                 Box::new(build_from_expr_term(composed.rhs.as_deref().unwrap())),
             ),
-            context::ExprArith::Error(_) => panic!(),
+            ExprArith::Error(_) => panic!(),
         }
     }
 
     fn build_from_expr_term(ctx: &context::ExprTerm) -> ast::Expression {
+        use context::ExprTerm;
         match ctx {
-            context::ExprTerm::ExprTermSingularContext(singular) => {
+            ExprTerm::ExprTermSingularContext(singular) => {
                 build_from_expr_factor(singular.value.as_deref().unwrap())
             }
-            context::ExprTerm::ExprTermComposedContext(composed) => ast::Expression::Binary(
+            ExprTerm::ExprTermComposedContext(composed) => ast::Expression::Binary(
                 Box::new(build_from_expr_term(composed.lhs.as_deref().unwrap())),
                 match composed.op.as_deref().unwrap().get_text() {
                     "*" => ast::BinaryOperator::Star,
@@ -107,16 +112,17 @@ mod ast_builder {
                 },
                 Box::new(build_from_expr_factor(composed.rhs.as_deref().unwrap())),
             ),
-            context::ExprTerm::Error(_) => panic!(),
+            ExprTerm::Error(_) => panic!(),
         }
     }
 
     fn build_from_expr_factor(ctx: &context::ExprFactor) -> ast::Expression {
+        use context::ExprFactor;
         match ctx {
-            context::ExprFactor::ExprFactorWrappedContext(wrapped) => {
+            ExprFactor::ExprFactorWrappedContext(wrapped) => {
                 build_from_full_expr(wrapped.inner.as_deref().unwrap())
             }
-            context::ExprFactor::ExprFactorUnaryOpContext(unary_op) => ast::Expression::Unary(
+            ExprFactor::ExprFactorUnaryOpContext(unary_op) => ast::Expression::Unary(
                 match unary_op.op.as_deref().unwrap().get_text() {
                     "!" => ast::UnaryOperator::Bang,
                     "+" => ast::UnaryOperator::Plus,
@@ -125,10 +131,10 @@ mod ast_builder {
                 },
                 Box::new(build_from_expr_factor(unary_op.value.as_deref().unwrap())),
             ),
-            context::ExprFactor::ExprFactorLiteralContext(literal) => {
+            ExprFactor::ExprFactorLiteralContext(literal) => {
                 ast::Expression::Literal(literal.value.as_deref().unwrap().get_text().to_owned())
             }
-            context::ExprFactor::Error(_) => panic!(),
+            ExprFactor::Error(_) => panic!(),
         }
     }
 }
