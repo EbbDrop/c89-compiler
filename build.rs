@@ -8,10 +8,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .expect("src/parser/grammar should exist");
 
     let mut grammer_in_file = grammer_in_dir.clone();
-    grammer_in_file.push("main.g4");
+    grammer_in_file.push("Main.g4");
     if !grammer_in_file.exists() {
         panic!(
-            "There should be a main.g4 file in: {}",
+            "There should be a Main.g4 file in: {}",
             grammer_in_dir.display()
         );
     }
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .current_dir(&grammer_in_dir)
         .arg("-jar")
         .arg(&antlr_bin)
-        .arg("main.g4")
+        .arg("Main.g4")
         .arg("-Dlanguage=Rust")
         .arg("-o")
         .arg(&grammer_out_dir)

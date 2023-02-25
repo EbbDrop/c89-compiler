@@ -1,8 +1,8 @@
 mod generated;
 
 use antlr_rust::{common_token_stream::CommonTokenStream, InputStream};
-use generated::mainLexer as Lexer;
-use generated::mainParser as Parser;
+use generated::MainLexer as Lexer;
+use generated::MainParser as Parser;
 
 use super::ast;
 
@@ -12,7 +12,7 @@ pub fn parse(input: &str) -> ast::Ast {
     let token_stream = CommonTokenStream::new(lexer);
     let mut parser = Parser::new(token_stream);
 
-    let full_expr = parser.full_expr().expect("parser error");
+    let full_expr = parser.fullExpr().expect("parser error");
 
     ast::Ast::Expression(ast_builder::build_from_full_expr(&*full_expr))
 }
@@ -23,40 +23,40 @@ mod ast_builder {
     use super::{
         ast,
         generated::{
-            Cond_andContextAll, Cond_orContextAll, ExprContextAll, Expr_arithContextAll,
-            Expr_factorContextAll, Expr_termContextAll, Full_exprContextAll,
+            CondAndContextAll, CondOrContextAll, ExprArithContextAll, ExprContextAll,
+            ExprFactorContextAll, ExprTermContextAll, FullExprContextAll,
         },
     };
 
-    pub fn build_from_full_expr(ctx: &Full_exprContextAll) -> ast::Expression {
+    pub fn build_from_full_expr(ctx: &FullExprContextAll) -> ast::Expression {
         build_from_cond_or(ctx.value.as_deref().unwrap())
     }
 
-    fn build_from_cond_or(ctx: &Cond_orContextAll) -> ast::Expression {
+    fn build_from_cond_or(ctx: &CondOrContextAll) -> ast::Expression {
         match ctx {
-            Cond_orContextAll::CondOrSingularContext(singular) => {
+            CondOrContextAll::CondOrSingularContext(singular) => {
                 build_from_cond_and(singular.value.as_deref().unwrap())
             }
-            Cond_orContextAll::CondOrComposedContext(composed) => ast::Expression::Binary(
+            CondOrContextAll::CondOrComposedContext(composed) => ast::Expression::Binary(
                 Box::new(build_from_cond_or(composed.lhs.as_deref().unwrap())),
                 ast::BinaryOperator::DoublePipe,
                 Box::new(build_from_cond_and(composed.rhs.as_deref().unwrap())),
             ),
-            Cond_orContextAll::Error(_) => panic!(),
+            CondOrContextAll::Error(_) => panic!(),
         }
     }
 
-    fn build_from_cond_and(ctx: &Cond_andContextAll) -> ast::Expression {
+    fn build_from_cond_and(ctx: &CondAndContextAll) -> ast::Expression {
         match ctx {
-            Cond_andContextAll::CondAndSingularContext(singular) => {
+            CondAndContextAll::CondAndSingularContext(singular) => {
                 build_from_expr(singular.value.as_deref().unwrap())
             }
-            Cond_andContextAll::CondAndComposedContext(composed) => ast::Expression::Binary(
+            CondAndContextAll::CondAndComposedContext(composed) => ast::Expression::Binary(
                 Box::new(build_from_cond_and(composed.lhs.as_deref().unwrap())),
                 ast::BinaryOperator::DoubleAmpersand,
                 Box::new(build_from_expr(composed.rhs.as_deref().unwrap())),
             ),
-            Cond_andContextAll::Error(_) => panic!(),
+            CondAndContextAll::Error(_) => panic!(),
         }
     }
 
@@ -82,12 +82,12 @@ mod ast_builder {
         }
     }
 
-    fn build_from_expr_arith(ctx: &Expr_arithContextAll) -> ast::Expression {
+    fn build_from_expr_arith(ctx: &ExprArithContextAll) -> ast::Expression {
         match ctx {
-            Expr_arithContextAll::ExprArithSingularContext(singular) => {
+            ExprArithContextAll::ExprArithSingularContext(singular) => {
                 build_from_expr_term(singular.value.as_deref().unwrap())
             }
-            Expr_arithContextAll::ExprArithComposedContext(composed) => ast::Expression::Binary(
+            ExprArithContextAll::ExprArithComposedContext(composed) => ast::Expression::Binary(
                 Box::new(build_from_expr_arith(composed.lhs.as_deref().unwrap())),
                 match composed.op.as_deref().unwrap().get_text() {
                     "+" => ast::BinaryOperator::Plus,
@@ -96,16 +96,16 @@ mod ast_builder {
                 },
                 Box::new(build_from_expr_term(composed.rhs.as_deref().unwrap())),
             ),
-            Expr_arithContextAll::Error(_) => panic!(),
+            ExprArithContextAll::Error(_) => panic!(),
         }
     }
 
-    fn build_from_expr_term(ctx: &Expr_termContextAll) -> ast::Expression {
+    fn build_from_expr_term(ctx: &ExprTermContextAll) -> ast::Expression {
         match ctx {
-            Expr_termContextAll::ExprTermSingularContext(singular) => {
+            ExprTermContextAll::ExprTermSingularContext(singular) => {
                 build_from_expr_factor(singular.value.as_deref().unwrap())
             }
-            Expr_termContextAll::ExprTermComposedContext(composed) => ast::Expression::Binary(
+            ExprTermContextAll::ExprTermComposedContext(composed) => ast::Expression::Binary(
                 Box::new(build_from_expr_term(composed.lhs.as_deref().unwrap())),
                 match composed.op.as_deref().unwrap().get_text() {
                     "*" => ast::BinaryOperator::Star,
@@ -114,16 +114,16 @@ mod ast_builder {
                 },
                 Box::new(build_from_expr_factor(composed.rhs.as_deref().unwrap())),
             ),
-            Expr_termContextAll::Error(_) => panic!(),
+            ExprTermContextAll::Error(_) => panic!(),
         }
     }
 
-    fn build_from_expr_factor(ctx: &Expr_factorContextAll) -> ast::Expression {
+    fn build_from_expr_factor(ctx: &ExprFactorContextAll) -> ast::Expression {
         match ctx {
-            Expr_factorContextAll::ExprFactorWrappedContext(wrapped) => {
+            ExprFactorContextAll::ExprFactorWrappedContext(wrapped) => {
                 build_from_full_expr(wrapped.inner.as_deref().unwrap())
             }
-            Expr_factorContextAll::ExprFactorUnaryOpContext(unary_op) => ast::Expression::Unary(
+            ExprFactorContextAll::ExprFactorUnaryOpContext(unary_op) => ast::Expression::Unary(
                 match unary_op.op.as_deref().unwrap().get_text() {
                     "!" => ast::UnaryOperator::Bang,
                     "+" => ast::UnaryOperator::Plus,
@@ -132,10 +132,10 @@ mod ast_builder {
                 },
                 Box::new(build_from_expr_factor(unary_op.value.as_deref().unwrap())),
             ),
-            Expr_factorContextAll::ExprFactorLiteralContext(literal) => {
+            ExprFactorContextAll::ExprFactorLiteralContext(literal) => {
                 ast::Expression::Literal(literal.value.as_deref().unwrap().get_text().to_owned())
             }
-            Expr_factorContextAll::Error(_) => panic!(),
+            ExprFactorContextAll::Error(_) => panic!(),
         }
     }
 }
