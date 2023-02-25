@@ -1,10 +1,9 @@
 mod generated;
 
 use antlr_rust::{
-    common_token_stream::CommonTokenStream, errors::ANTLRError, DefaultErrorStrategy, InputStream,
-    Parser as _,
+    error_listener::ErrorListener, errors::ANTLRError, recognizer::Recognizer, token::Token,
+    token_factory::TokenFactory,
 };
-use generated::{Lexer, Parser, ParserContextType};
 use std::{fmt, ops::DerefMut};
 
 use super::ast;
@@ -23,9 +22,15 @@ impl fmt::Display for UnspecifiedAntlrError {
 
 impl std::error::Error for UnspecifiedAntlrError {}
 
+type LexerInput<'a> = antlr_rust::InputStream<&'a str>;
+type Lexer<'a> = generated::MainLexer<'a, LexerInput<'a>>;
+type TokenStream<'a> = antlr_rust::common_token_stream::CommonTokenStream<'a, Lexer<'a>>;
+type ParserErrorStrategy<'a> = antlr_rust::BailErrorStrategy<'a, generated::MainParserContextType>;
+type Parser<'a> = generated::MainParser<'a, TokenStream<'a>, ParserErrorStrategy<'a>>;
+
 pub fn parse(input: &str) -> Result<ast::Ast, ParseError> {
     let lexer = build_lexer(input);
-    let token_stream = CommonTokenStream::new(lexer);
+    let token_stream = TokenStream::new(lexer);
     let mut parser = build_parser(token_stream);
 
     let full_expr = parser.fullExpr().map_err(ParseError)?;
@@ -35,28 +40,45 @@ pub fn parse(input: &str) -> Result<ast::Ast, ParseError> {
         .map_err(ParseError)
 }
 
-fn build_lexer(input: &str) -> Lexer<'_, InputStream<&str>> {
-    let input = InputStream::new(input.into());
+fn build_lexer(input: &str) -> Lexer {
+    let input = LexerInput::new(input.into());
     let mut lexer = Lexer::new(input);
     lexer.remove_error_listeners();
-    // TODO: add custom error listener
-    // lexer.add_error_listener(Box::new(ConsoleErrorListener {}));
+    lexer.add_error_listener(Box::new(CustomErrorListener {}));
     lexer
 }
 
-fn build_parser<'input>(
-    token_stream: CommonTokenStream<'input, Lexer<'input, InputStream<&'input str>>>,
-) -> Parser<
-    'input,
-    CommonTokenStream<'input, Lexer<'input, InputStream<&'input str>>>,
-    DefaultErrorStrategy<'input, ParserContextType>,
-> {
-    let mut parser = Parser::new(token_stream);
+fn build_parser(token_stream: TokenStream) -> Parser {
+    use antlr_rust::Parser as _;
+    let mut parser = Parser::with_strategy(token_stream, ParserErrorStrategy::new());
     let base_parser = parser.deref_mut();
     base_parser.remove_error_listeners();
-    // TODO: add custom error listener
-    // base_parser.add_error_listener(Box::new(DiagnosticErrorListener::new(false)));
+    base_parser.add_error_listener(Box::new(CustomErrorListener {}));
     parser
+}
+
+struct CustomErrorListener {}
+
+impl<'a, T: Recognizer<'a>> ErrorListener<'a, T> for CustomErrorListener
+where
+    // NOTE: this is only required to display the token data.
+    // This can probably be removed once `syntax_error` has a real implementation.
+    <T::TF as TokenFactory<'a>>::Data: std::fmt::Display,
+{
+    fn syntax_error(
+        &self,
+        _recognizer: &T,
+        offending_symbol: Option<&<T::TF as TokenFactory<'a>>::Inner>,
+        line: isize,
+        column: isize,
+        msg: &str,
+        _error: Option<&ANTLRError>,
+    ) {
+        eprintln!("Lexer error at line {}, column {}: {}", line, column, msg);
+        if let Some(token) = offending_symbol {
+            eprintln!("Found offending symbol: {}", token.get_text());
+        }
+    }
 }
 
 mod ast_builder {
