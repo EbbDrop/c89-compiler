@@ -8,7 +8,7 @@ mod mainlexer;
 mod mainparser;
 
 pub use mainlexer::MainLexer as Lexer;
-pub use mainparser::MainParser as Parser;
+pub use mainparser::{MainParser as Parser, MainParserContextType as ParserContextType};
 
 pub mod context {
     #[rustfmt::skip]
