@@ -4,7 +4,7 @@ use antlr_rust::{
     error_listener::ErrorListener, errors::ANTLRError, recognizer::Recognizer, token::Token,
     token_factory::TokenFactory,
 };
-use std::{fmt, ops::DerefMut};
+use std::fmt;
 
 use super::ast;
 
@@ -51,9 +51,8 @@ fn build_lexer(input: &str) -> Lexer {
 fn build_parser(token_stream: TokenStream) -> Parser {
     use antlr_rust::Parser as _;
     let mut parser = Parser::with_strategy(token_stream, ParserErrorStrategy::new());
-    let base_parser = parser.deref_mut();
-    base_parser.remove_error_listeners();
-    base_parser.add_error_listener(Box::new(CustomErrorListener {}));
+    parser.remove_error_listeners();
+    parser.add_error_listener(Box::new(CustomErrorListener {}));
     parser
 }
 
