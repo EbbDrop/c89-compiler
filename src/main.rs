@@ -1,5 +1,3 @@
-#![feature(box_into_inner)]
-
 mod ast;
 mod parser;
 

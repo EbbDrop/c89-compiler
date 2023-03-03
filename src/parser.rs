@@ -105,8 +105,8 @@ mod ast_builder {
             )),
             CondOr::Error(base_ctx) => Err(base_ctx
                 .exception
-                .clone()
-                .map(Box::into_inner)
+                .as_ref()
+                .map(|x| x.as_ref().clone())
                 .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
         }
     }
@@ -124,8 +124,8 @@ mod ast_builder {
             )),
             CondAnd::Error(base_ctx) => Err(base_ctx
                 .exception
-                .clone()
-                .map(Box::into_inner)
+                .as_ref()
+                .map(|x| x.as_ref().clone())
                 .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
         }
     }
@@ -151,8 +151,8 @@ mod ast_builder {
             )),
             Expr::Error(base_ctx) => Err(base_ctx
                 .exception
-                .clone()
-                .map(Box::into_inner)
+                .as_ref()
+                .map(|x| x.as_ref().clone())
                 .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
         }
     }
@@ -174,8 +174,8 @@ mod ast_builder {
             )),
             ExprArith::Error(base_ctx) => Err(base_ctx
                 .exception
-                .clone()
-                .map(Box::into_inner)
+                .as_ref()
+                .map(|x| x.as_ref().clone())
                 .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
         }
     }
@@ -197,8 +197,8 @@ mod ast_builder {
             )),
             ExprTerm::Error(base_ctx) => Err(base_ctx
                 .exception
-                .clone()
-                .map(Box::into_inner)
+                .as_ref()
+                .map(|x| x.as_ref().clone())
                 .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
         }
     }
@@ -223,8 +223,8 @@ mod ast_builder {
             )),
             ExprFactor::Error(base_ctx) => Err(base_ctx
                 .exception
-                .clone()
-                .map(Box::into_inner)
+                .as_ref()
+                .map(|x| x.as_ref().clone())
                 .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
         }
     }
