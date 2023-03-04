@@ -33,11 +33,9 @@ pub fn parse(input: &str) -> Result<ast::Ast, ParseError> {
     let token_stream = TokenStream::new(lexer);
     let mut parser = build_parser(token_stream);
 
-    let full_expr = parser.fullExpr().map_err(ParseError)?;
+    let tu = parser.translationUnit().map_err(ParseError)?;
 
-    ast_builder::build_from_full_expr(full_expr.as_ref())
-        .map(ast::Ast::Expression)
-        .map_err(ParseError)
+    ast_builder::build_from_translation_unit(tu.as_ref()).map_err(ParseError)
 }
 
 fn build_lexer(input: &str) -> Lexer {
@@ -81,151 +79,401 @@ where
 }
 
 mod ast_builder {
-    use antlr_rust::{errors::ANTLRError, token::Token};
-    use std::rc::Rc;
+    use super::{ast, generated::context, UnspecifiedAntlrError};
+    use antlr_rust::{
+        errors::ANTLRError, parser_rule_context::BaseParserRuleContext,
+        rule_context::CustomRuleContext, token::Token,
+    };
+    use std::{ops::Deref, rc::Rc};
 
-    use crate::parser::UnspecifiedAntlrError;
-
-    use super::{ast, generated::context};
-
-    pub fn build_from_full_expr(ctx: &context::FullExpr) -> Result<ast::Expression, ANTLRError> {
-        build_from_cond_or(ctx.value.as_deref().unwrap())
+    fn extract_unspecified_error<'a, Ctx>(ectx: &BaseParserRuleContext<'a, Ctx>) -> ANTLRError
+    where
+        Ctx: CustomRuleContext<'a>,
+    {
+        ectx.exception
+            .as_deref()
+            .cloned()
+            .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))
     }
 
-    fn build_from_cond_or(ctx: &context::CondOr) -> Result<ast::Expression, ANTLRError> {
-        use context::CondOr;
+    pub fn build_from_translation_unit(
+        ctx: &context::TranslationUnit,
+    ) -> Result<ast::Ast, ANTLRError> {
+        Ok(ast::Ast::BlockStatement(ast::BlockStatement(
+            ctx.content
+                .iter()
+                .filter_map(|x| build_from_statement(x))
+                .collect::<Result<Vec<_>, _>>()?,
+        )))
+    }
+
+    fn build_from_statement(
+        ctx: &context::Statement,
+    ) -> Option<Result<ast::Statement, ANTLRError>> {
+        use context::Statement;
         match ctx {
-            CondOr::CondOrSingularContext(singular) => {
-                build_from_cond_and(singular.value.as_deref().unwrap())
-            }
-            CondOr::CondOrComposedContext(composed) => Ok(ast::Expression::Binary(
-                Box::new(build_from_cond_or(composed.lhs.as_deref().unwrap())?),
-                ast::BinaryOperator::DoublePipe,
-                Box::new(build_from_cond_and(composed.rhs.as_deref().unwrap())?),
+            Statement::StatementExprContext(expr) => expr
+                .value
+                .as_deref()
+                .map(|e| build_from_expr(e).map(ast::Statement::Expression)),
+            Statement::StatementDeclarationContext(decl) => Some(build_from_declaration_statement(
+                decl.value.as_deref().unwrap(),
             )),
-            CondOr::Error(base_ctx) => Err(base_ctx
-                .exception
-                .as_ref()
-                .map(|x| x.as_ref().clone())
-                .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
+            Statement::StatementAssignmentContext(assignment) => Some(
+                build_from_assignment_statement(assignment.value.as_deref().unwrap()),
+            ),
+            Statement::StatementBlockContext(block) => {
+                Some(build_from_block_statement(block.value.as_deref().unwrap()))
+            }
+            Statement::Error(ectx) => Some(Err(extract_unspecified_error(ectx))),
         }
     }
 
-    fn build_from_cond_and(ctx: &context::CondAnd) -> Result<ast::Expression, ANTLRError> {
-        use context::CondAnd;
+    fn build_from_declaration_statement(
+        ctx: &context::DeclarationStatement,
+    ) -> Result<ast::Statement, ANTLRError> {
+        use context::DeclarationStatement;
         match ctx {
-            CondAnd::CondAndSingularContext(singular) => {
-                build_from_expr(singular.value.as_deref().unwrap())
+            DeclarationStatement::DeclarationStatementWithoutInitializerContext(decl) => {
+                Ok(ast::Statement::Declaration {
+                    type_name: build_from_type_name(decl.type_name.as_deref().unwrap())?,
+                    ident: decl.ident.as_ref().unwrap().get_text().to_owned(),
+                    initializer: None,
+                })
             }
-            CondAnd::CondAndComposedContext(composed) => Ok(ast::Expression::Binary(
-                Box::new(build_from_cond_and(composed.lhs.as_deref().unwrap())?),
-                ast::BinaryOperator::DoubleAmpersand,
-                Box::new(build_from_expr(composed.rhs.as_deref().unwrap())?),
-            )),
-            CondAnd::Error(base_ctx) => Err(base_ctx
-                .exception
-                .as_ref()
-                .map(|x| x.as_ref().clone())
-                .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
+            DeclarationStatement::DeclarationStatementWithInitializerContext(decl) => {
+                Ok(ast::Statement::Declaration {
+                    type_name: build_from_type_name(decl.type_name.as_deref().unwrap())?,
+                    ident: decl.ident.as_ref().unwrap().get_text().to_owned(),
+                    initializer: Some(build_from_expr(decl.rhs.as_deref().unwrap())?),
+                })
+            }
+            DeclarationStatement::Error(ectx) => Err(extract_unspecified_error(ectx)),
         }
     }
 
-    fn build_from_expr(ctx: &context::Expr) -> Result<ast::Expression, ANTLRError> {
-        use context::Expr;
+    fn build_from_assignment_statement(
+        ctx: &context::AssignmentStatement,
+    ) -> Result<ast::Statement, ANTLRError> {
+        Ok(ast::Statement::Assignment {
+            ident: ctx.ident.as_ref().unwrap().get_text().to_owned(),
+            rhs: build_from_expr(ctx.rhs.as_deref().unwrap())?,
+        })
+    }
+
+    fn build_from_block_statement(
+        ctx: &context::BlockStatement,
+    ) -> Result<ast::Statement, ANTLRError> {
+        Ok(ast::Statement::BlockStatement(ast::BlockStatement(
+            ctx.content
+                .iter()
+                .filter_map(|s| build_from_statement(s))
+                .collect::<Result<Vec<_>, _>>()?,
+        )))
+    }
+
+    fn build_from_type_name(ctx: &context::TypeName) -> Result<ast::QualifiedType, ANTLRError> {
+        use context::TypeName as TN;
+        use context::TypeSpecifier as TS;
         match ctx {
-            Expr::ExprSingularContext(singular) => {
-                build_from_expr_arith(singular.value.as_deref().unwrap())
+            TN::TypeNamePlainContext(plain) => {
+                if plain.specifiers.len() > 1 {
+                    unimplemented!("only one specifier supported for now");
+                }
+                let s = plain
+                    .specifiers
+                    .get(0)
+                    .expect("a type must contain at least one specifier");
+                match s.as_ref() {
+                    TS::TypeSpecifierPrimitiveContext(primitive_type) => with_qualifiers(
+                        ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                            build_from_primitive_type(primitive_type.tp.as_deref().unwrap())?,
+                        )),
+                        &plain.qualifiers,
+                    ),
+                    TS::Error(ectx) => Err(extract_unspecified_error(ectx)),
+                }
             }
-            Expr::ExprComposedContext(composed) => Ok(ast::Expression::Binary(
-                Box::new(build_from_expr(composed.lhs.as_deref().unwrap())?),
-                match composed.op.as_deref().unwrap().get_text() {
-                    "<" => ast::BinaryOperator::AngleLeft,
-                    ">" => ast::BinaryOperator::AngleRight,
-                    "==" => ast::BinaryOperator::DoubleEquals,
-                    "<=" => ast::BinaryOperator::AngleLeftEquals,
-                    ">=" => ast::BinaryOperator::AngleRightEquals,
-                    "!=" => ast::BinaryOperator::BangEquals,
-                    _ => unreachable!(),
-                },
-                Box::new(build_from_expr_arith(composed.rhs.as_deref().unwrap())?),
-            )),
-            Expr::Error(base_ctx) => Err(base_ctx
-                .exception
-                .as_ref()
-                .map(|x| x.as_ref().clone())
-                .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
+            TN::TypeNamePointerContext(ctx) => with_qualifiers(
+                ast::UnqualifiedType::PointerType(Box::new(build_from_type_name(
+                    ctx.inner.as_deref().unwrap(),
+                )?)),
+                &ctx.ptr_qualifiers,
+            ),
+            TN::Error(ectx) => Err(extract_unspecified_error(ectx)),
         }
     }
 
-    fn build_from_expr_arith(ctx: &context::ExprArith) -> Result<ast::Expression, ANTLRError> {
-        use context::ExprArith;
-        match ctx {
-            ExprArith::ExprArithSingularContext(singular) => {
-                build_from_expr_term(singular.value.as_deref().unwrap())
+    fn with_qualifiers(
+        unqualified_type: ast::UnqualifiedType,
+        qualifiers: &Vec<Rc<context::TypeQualifier>>,
+    ) -> Result<ast::QualifiedType, ANTLRError> {
+        use context::TypeQualifier as TQ;
+        let mut qualified_type = ast::QualifiedType {
+            is_const: false,
+            inner: unqualified_type,
+        };
+        for qualifier in qualifiers.iter() {
+            match qualifier.deref() {
+                TQ::TypeQualifierConstContext(_) => {
+                    qualified_type.is_const = true;
+                }
+                TQ::Error(ectx) => return Err(extract_unspecified_error(ectx)),
             }
-            ExprArith::ExprArithComposedContext(composed) => Ok(ast::Expression::Binary(
-                Box::new(build_from_expr_arith(composed.lhs.as_deref().unwrap())?),
-                match composed.op.as_deref().unwrap().get_text() {
-                    "+" => ast::BinaryOperator::Plus,
-                    "-" => ast::BinaryOperator::Minus,
-                    _ => unreachable!(),
-                },
-                Box::new(build_from_expr_term(composed.rhs.as_deref().unwrap())?),
-            )),
-            ExprArith::Error(base_ctx) => Err(base_ctx
-                .exception
-                .as_ref()
-                .map(|x| x.as_ref().clone())
-                .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
+        }
+        Ok(qualified_type)
+    }
+
+    fn build_from_primitive_type(
+        ctx: &context::PrimitiveType,
+    ) -> Result<ast::PrimitiveType, ANTLRError> {
+        use context::PrimitiveType;
+        match ctx {
+            PrimitiveType::PrimitiveTypeIntContext(_) => Ok(ast::PrimitiveType::Int),
+            PrimitiveType::PrimitiveTypeCharContext(_) => Ok(ast::PrimitiveType::Char),
+            PrimitiveType::PrimitiveTypeFloatContext(_) => Ok(ast::PrimitiveType::Float),
+            PrimitiveType::Error(ectx) => Err(extract_unspecified_error(ectx)),
         }
     }
 
-    fn build_from_expr_term(ctx: &context::ExprTerm) -> Result<ast::Expression, ANTLRError> {
-        use context::ExprTerm;
+    pub fn build_from_expr(ctx: &context::Expr) -> Result<ast::Expression, ANTLRError> {
+        build_from_cond_expr(ctx.value.as_deref().unwrap())
+    }
+
+    pub fn build_from_cond_expr(ctx: &context::CondExpr) -> Result<ast::Expression, ANTLRError> {
+        use context::CondExpr;
         match ctx {
-            ExprTerm::ExprTermSingularContext(singular) => {
-                build_from_expr_factor(singular.value.as_deref().unwrap())
+            CondExpr::CondExprSingularContext(singular) => {
+                build_from_logical_or_expr(singular.value.as_deref().unwrap())
             }
-            ExprTerm::ExprTermComposedContext(composed) => Ok(ast::Expression::Binary(
-                Box::new(build_from_expr_term(composed.lhs.as_deref().unwrap())?),
-                match composed.op.as_deref().unwrap().get_text() {
-                    "*" => ast::BinaryOperator::Star,
-                    "/" => ast::BinaryOperator::Slash,
-                    _ => unreachable!(),
-                },
-                Box::new(build_from_expr_factor(composed.rhs.as_deref().unwrap())?),
-            )),
-            ExprTerm::Error(base_ctx) => Err(base_ctx
-                .exception
-                .as_ref()
-                .map(|x| x.as_ref().clone())
-                .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
+            CondExpr::CondExprTernaryContext(_composed) => todo!("Ternary is not yet suported"),
+            CondExpr::Error(ectx) => Err(extract_unspecified_error(ectx)),
         }
     }
 
-    fn build_from_expr_factor(ctx: &context::ExprFactor) -> Result<ast::Expression, ANTLRError> {
-        use context::ExprFactor;
-        match ctx {
-            ExprFactor::ExprFactorWrappedContext(wrapped) => {
-                build_from_full_expr(wrapped.inner.as_deref().unwrap())
+    macro_rules! build_from_generic_binary_op {
+        (
+            $vis:vis $from:ident($context:tt :: $from_type:tt) {
+                $singular:tt => $next:ident,
+                $composed:tt => let $text:pat => $expr:expr
             }
-            ExprFactor::ExprFactorUnaryOpContext(unary_op) => Ok(ast::Expression::Unary(
-                match unary_op.op.as_deref().unwrap().get_text() {
+        ) => {
+            $vis fn $from(ctx: &$context::$from_type) -> Result<ast::Expression, ANTLRError> {
+                match ctx {
+                    $context::$from_type::$singular(singular) => $next(singular.value.as_deref().unwrap()),
+                    $context::$from_type::$composed(composed) => Ok(ast::Expression::Binary(
+                        Box::new($from(composed.lhs.as_deref().unwrap())?),
+                        {
+                            let $text = composed.op.as_deref().unwrap();
+                            $expr
+                        },
+                        Box::new($next(composed.rhs.as_deref().unwrap())?),
+                    )),
+                    $context::$from_type::Error(ectx) => Err(extract_unspecified_error(ectx)),
+                }
+            }
+        };
+    }
+
+    macro_rules! build_from_single_binary_op {
+        (
+            $vis:vis $from:ident($context:tt :: $from_type:tt) {
+                $singular:tt => $next:ident,
+                $composed:tt => $op:ident
+            }
+        ) => {
+            build_from_generic_binary_op! {
+                $vis $from($context::$from_type) {
+                    $singular => $next,
+                    $composed => let _ => ast::BinaryOperator::$op
+                }
+            }
+        };
+    }
+
+    macro_rules! build_from_multi_binary_op {
+        (
+            $vis:vis $from:ident($context:tt :: $from_type:tt) {
+                $singular:tt => $next:ident,
+                $composed:tt => match $op_text:ident {
+                    $($pat:pat => $op:ident),* $(,)?
+                }
+            }
+        ) => {
+            build_from_generic_binary_op! {
+                $vis $from($context::$from_type) {
+                    $singular => $next,
+                    $composed => let $op_text => {
+                        match $op_text.get_text() {
+                            $($pat => ast::BinaryOperator::$op,)*
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    build_from_single_binary_op! {
+        build_from_logical_or_expr(context::LogicalOrExpr) {
+            LogicalOrExprSingularContext => build_from_logical_and_expr,
+            LogicalOrExprComposedContext => DoublePipe
+        }
+    }
+
+    build_from_single_binary_op! {
+        build_from_logical_and_expr(context::LogicalAndExpr) {
+            LogicalAndExprSingularContext => build_from_bitwise_or_expr,
+            LogicalAndExprComposedContext => DoubleAmpersand
+        }
+    }
+
+    build_from_single_binary_op! {
+        build_from_bitwise_or_expr(context::BitwiseOrExpr) {
+            BitwiseOrExprSingularContext => build_from_bitwise_xor_expr,
+            BitwiseOrExprComposedContext => Pipe
+        }
+    }
+
+    build_from_single_binary_op! {
+        build_from_bitwise_xor_expr(context::BitwiseXorExpr) {
+            BitwiseXorExprSingularContext => build_from_bitwise_and_expr,
+            BitwiseXorExprComposedContext => Caret
+        }
+    }
+
+    build_from_single_binary_op! {
+        build_from_bitwise_and_expr(context::BitwiseAndExpr) {
+            BitwiseAndExprSingularContext => build_from_equality_expr,
+            BitwiseAndExprComposedContext => Ampersand
+        }
+    }
+
+    build_from_multi_binary_op! {
+        build_from_equality_expr(context::EqualityExpr) {
+            EqualityExprSingularContext => build_from_inequality_expr,
+            EqualityExprComposedContext => match text {
+                "==" => DoubleEquals,
+                "!=" => BangEquals,
+            }
+        }
+    }
+
+    build_from_multi_binary_op! {
+        build_from_inequality_expr(context::InequalityExpr) {
+            InequalityExprSingularContext => build_from_arith_expr,
+            InequalityExprComposedContext => match text {
+                ">" => AngleLeft,
+                "<" => AngleRight,
+                ">=" => AngleLeftEquals,
+                "<=" => AngleRightEquals,
+            }
+        }
+    }
+
+    build_from_multi_binary_op! {
+        build_from_arith_expr(context::ArithExpr) {
+            ArithExprSingularContext => build_from_term_expr,
+            ArithExprComposedContext => match text {
+                "+" => Plus,
+                "-" => Minus,
+            }
+        }
+    }
+
+    build_from_multi_binary_op! {
+        build_from_term_expr(context::TermExpr) {
+            TermExprSingularContext => build_from_cast_expr,
+            TermExprComposedContext => match text {
+                "*" => Star,
+                "/" => Slash,
+                "%" => Percent,
+            }
+        }
+    }
+
+    pub fn build_from_cast_expr(ctx: &context::CastExpr) -> Result<ast::Expression, ANTLRError> {
+        use context::CastExpr;
+        match ctx {
+            CastExpr::CastExprSingularContext(singular) => {
+                build_from_unary_expr(singular.value.as_deref().unwrap())
+            }
+            CastExpr::CastExprComposedContext(composed) => Ok(ast::Expression::Cast(
+                build_from_type_name(composed.type_name.as_deref().unwrap())?,
+                Box::new(build_from_cast_expr(composed.value.as_deref().unwrap())?),
+            )),
+            CastExpr::Error(ectx) => Err(extract_unspecified_error(ectx)),
+        }
+    }
+
+    pub fn build_from_unary_expr(ctx: &context::UnaryExpr) -> Result<ast::Expression, ANTLRError> {
+        use context::UnaryExpr;
+        match ctx {
+            UnaryExpr::UnaryExprPostfixContext(postfix) => {
+                build_from_postfix_expr(postfix.value.as_deref().unwrap())
+            }
+            UnaryExpr::UnaryExprPrefixContext(prefix) => Ok(ast::Expression::Unary(
+                match prefix.op.as_ref().unwrap().get_text() {
+                    "++" => ast::UnaryOperator::DoublePlusPrefix,
+                    "--" => ast::UnaryOperator::DoubleMinusPrefix,
                     "!" => ast::UnaryOperator::Bang,
                     "+" => ast::UnaryOperator::Plus,
                     "-" => ast::UnaryOperator::Minus,
+                    "~" => ast::UnaryOperator::Tilde,
+                    "&" => ast::UnaryOperator::Ampersand,
+                    "*" => ast::UnaryOperator::Star,
                     _ => unreachable!(),
                 },
-                Box::new(build_from_expr_factor(unary_op.value.as_deref().unwrap())?),
+                Box::new(build_from_cast_expr(prefix.value.as_deref().unwrap())?),
             )),
-            ExprFactor::ExprFactorLiteralContext(literal) => Ok(ast::Expression::Literal(
-                literal.value.as_deref().unwrap().get_text().to_owned(),
-            )),
-            ExprFactor::Error(base_ctx) => Err(base_ctx
-                .exception
-                .as_ref()
-                .map(|x| x.as_ref().clone())
-                .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))),
+            UnaryExpr::Error(ectx) => Err(extract_unspecified_error(ectx)),
         }
     }
+
+    pub fn build_from_postfix_expr(
+        ctx: &context::PostfixExpr,
+    ) -> Result<ast::Expression, ANTLRError> {
+        use context::PostfixExpr;
+        match ctx {
+            PostfixExpr::PostfixExprPrimaryContext(primary) => {
+                build_from_primary_expr(primary.value.as_deref().unwrap())
+            }
+            PostfixExpr::PostfixExprPostfixContext(postfix) => Ok(ast::Expression::Unary(
+                match postfix.op.as_ref().unwrap().get_text() {
+                    "++" => ast::UnaryOperator::DoublePlusPostfix,
+                    "--" => ast::UnaryOperator::DoubleMinusPostfix,
+                    _ => unreachable!(),
+                },
+                Box::new(build_from_postfix_expr(postfix.value.as_deref().unwrap())?),
+            )),
+            PostfixExpr::Error(ectx) => Err(extract_unspecified_error(ectx)),
+        }
+    }
+
+    pub fn build_from_primary_expr(
+        ctx: &context::PrimaryExpr,
+    ) -> Result<ast::Expression, ANTLRError> {
+        use context::PrimaryExpr;
+        match ctx {
+            PrimaryExpr::PrimaryExprWrappedContext(wrapped) => {
+                build_from_expr(wrapped.inner.as_deref().unwrap())
+            }
+            PrimaryExpr::PrimaryExprLiteralContext(literal) => Ok(ast::Expression::Literal(
+                literal.value.as_deref().unwrap().get_text(),
+            )),
+            PrimaryExpr::PrimaryExprIdentContext(ident) => Ok(ast::Expression::Ident(
+                ident.ident.as_deref().unwrap().get_text().to_owned(),
+            )),
+            PrimaryExpr::Error(ectx) => Err(extract_unspecified_error(ectx)),
+        }
+    }
+
+    // pub fn build_from_integer_literal(
+    //     ctx: &context::IntegerLiteral,
+    // ) -> Result<ast::Expression, ANTLRError> {
+    //     todo!()
+    // }
+    // pub fn build_from_literal(ctx: &context::Literal) -> Result<ast::Expression, ANTLRError> {
+    //     todo!()
+    // }
 }
