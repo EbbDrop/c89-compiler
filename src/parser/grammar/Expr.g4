@@ -90,14 +90,14 @@ integerLiteral
     ;
 
 CHAR_LITERAL : '\'' CHARACTER  '\'';
-FLOATING_POINT_LITERAL: ( [0-9]* '.' [0-9]+ | [0-9]+ '.' [0-9]* ) [eE] [+-]? [0-9]+;
+FLOATING_POINT_LITERAL: ( [0-9]* '.' [0-9]+ | [0-9]+ '.' [0-9]* ) ([eE] [+-]? [0-9]+)?;
 
 OCTAL_LITERAL: '0' [0-7]+;
 HEXADECIMAL_LITERAL: ('0x' | '0X') [1-9a-fA-F][0-9a-fA-F]*;
 DECIMAL_LITERAL: '0' | [1-9][0-9]*;
 
 CHARACTER
-    : [^\n\r\\']
+    : ~[\n\r\\']
     | '\\u' [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]
     | '\\U' [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]
     | '\\' ['"?\\abfnrtv]
