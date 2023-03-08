@@ -9,7 +9,15 @@ use std::fmt;
 use super::ast;
 
 #[derive(Debug)]
-pub struct ParseError(ANTLRError);
+pub struct ParseError();
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for ParseError {}
 
 #[derive(Debug)]
 pub struct UnspecifiedAntlrError;
@@ -33,9 +41,9 @@ pub fn parse(input: &str) -> Result<ast::Ast, ParseError> {
     let token_stream = TokenStream::new(lexer);
     let mut parser = build_parser(token_stream);
 
-    let tu = parser.translationUnit().map_err(ParseError)?;
+    let tu = parser.translationUnit().map_err(|_| ParseError())?;
 
-    ast_builder::build_from_translation_unit(tu.as_ref()).map_err(ParseError)
+    ast_builder::build_from_translation_unit(tu.as_ref()).map_err(|_| ParseError())
 }
 
 fn build_lexer(input: &str) -> Lexer {
