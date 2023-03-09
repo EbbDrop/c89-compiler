@@ -61,8 +61,23 @@ pub enum Expression {
     Binary(Box<Expression>, BinaryOperator, Box<Expression>),
     Unary(UnaryOperator, Box<Expression>),
     Cast(Type, Box<Expression>),
-    Literal(String),
+    Literal(Literal),
     Ident(String),
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct Literal {
+    pub value: LiteralValue,
+    pub t: UnqualifiedType,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum LiteralValue {
+    Integer(i128), //TODO change this to big int?
+    Float(f64),
+    // Void,
 }
 
 #[allow(dead_code)]

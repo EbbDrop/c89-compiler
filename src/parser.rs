@@ -467,7 +467,7 @@ mod ast_builder {
                 build_from_expr(wrapped.inner.as_deref().unwrap())
             }
             PrimaryExpr::PrimaryExprLiteralContext(literal) => Ok(ast::Expression::Literal(
-                literal.value.as_deref().unwrap().get_text(),
+                build_from_literal(literal.value.as_deref().unwrap())?,
             )),
             PrimaryExpr::PrimaryExprIdentContext(ident) => Ok(ast::Expression::Ident(
                 ident.ident.as_deref().unwrap().get_text().to_owned(),
@@ -476,12 +476,94 @@ mod ast_builder {
         }
     }
 
-    // pub fn build_from_integer_literal(
-    //     ctx: &context::IntegerLiteral,
-    // ) -> Result<ast::Expression, ANTLRError> {
-    //     todo!()
-    // }
-    // pub fn build_from_literal(ctx: &context::Literal) -> Result<ast::Expression, ANTLRError> {
-    //     todo!()
-    // }
+    pub fn build_from_literal(ctx: &context::Literal) -> Result<ast::Literal, ANTLRError> {
+        use context::Literal;
+        match ctx {
+            Literal::LiteralIntegerContext(literal) => {
+                // TODO set type based on size needed for value
+                let value = build_from_integer_literal(literal.value.as_deref().unwrap())?;
+                Ok(ast::Literal {
+                    value: ast::LiteralValue::Integer(value),
+                    t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                        ast::PrimitiveType::Int,
+                    )),
+                })
+            }
+            Literal::LiteralFloatingPointContext(literal) => {
+                // The rust parse f64 function allows for strictly more strings as the C grammar
+                // so should always return Ok.
+                // https://doc.rust-lang.org/nightly/core/primitive.f64.html#impl-FromStr-for-f64
+                let value = literal
+                    .value
+                    .as_deref()
+                    .unwrap()
+                    .get_text()
+                    .parse()
+                    .unwrap();
+                Ok(ast::Literal {
+                    value: ast::LiteralValue::Float(value),
+                    t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                        ast::PrimitiveType::Float,
+                    )),
+                })
+            }
+            Literal::LiteralCharContext(literal) => {
+                let value = literal.value.as_deref().unwrap().get_text();
+
+                // The grammar requires the first and last character to be a `'` so this will
+                // always be safe.
+                let value = &value[1..value.len() - 1];
+
+                let value = parse_string_literal(value);
+                let value = if value.len() == 1 {
+                    value.as_bytes()[0] as u8 as i128
+                } else {
+                    // Technically multi byte chars are allowed in the C standard but are
+                    // implementation defined. `g++ -ansi -pedantic` gives a warning
+                    // TODO give real error/warning
+                    return Err(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})));
+                };
+
+                Ok(ast::Literal {
+                    value: ast::LiteralValue::Integer(value),
+                    t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                        ast::PrimitiveType::Char,
+                    )),
+                })
+            }
+            Literal::Error(ectx) => Err(extract_unspecified_error(ectx)),
+        }
+    }
+
+    pub fn build_from_integer_literal(ctx: &context::IntegerLiteral) -> Result<i128, ANTLRError> {
+        use context::IntegerLiteral;
+        // All the unwraps here should be fine since the grammar ensures that the invariant are met
+        // for the various parse functions
+        match ctx {
+            IntegerLiteral::IntegerLiteralOctalContext(literal) => {
+                Ok(i128::from_str_radix(literal.value.as_deref().unwrap().get_text(), 8).unwrap())
+            }
+            IntegerLiteral::IntegerLiteralDecimalContext(literal) => Ok(literal
+                .value
+                .as_deref()
+                .unwrap()
+                .get_text()
+                .parse()
+                .unwrap()),
+            IntegerLiteral::IntegerLiteralHexadecimalLContext(literal) => {
+                let literal = literal.value.as_deref().unwrap().get_text();
+                // This is safe since the grammar ensures we start with `0x` or `0X`
+                let literal = &literal[2..];
+                Ok(i128::from_str_radix(literal, 16).unwrap())
+            }
+            IntegerLiteral::Error(ectx) => Err(extract_unspecified_error(ectx)),
+        }
+    }
+
+    fn parse_string_literal(value: &str) -> String {
+        if value.len() == 1 {
+            return value.to_owned();
+        }
+        todo!("Parsing strings/escaped chars is not yet implemented")
+    }
 }

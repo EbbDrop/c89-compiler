@@ -130,8 +130,24 @@ fn to_dot_expr(e: &Expression) -> DotTree {
             vec![("type", to_dot_qualified_type(t)), ("expr", to_dot_expr(e))],
         ),
         Expression::Ident(i) => to_dot_ident(i),
-        Expression::Literal(l) => DotTree::new_nc(l.clone()),
+        Expression::Literal(l) => to_dot_literal(l),
     }
+}
+
+fn to_dot_literal(l: &ast::Literal) -> DotTree {
+    DotTree::new(
+        "literal".to_string(),
+        vec![
+            ("type", to_dot_unqualified_type(&l.t)),
+            (
+                "value",
+                match l.value {
+                    ast::LiteralValue::Integer(i) => DotTree::new_nc(i.to_string()),
+                    ast::LiteralValue::Float(f) => DotTree::new_nc(f.to_string()),
+                },
+            ),
+        ],
+    )
 }
 
 fn to_dot_qualified_type(t: &QualifiedType) -> DotTree {
