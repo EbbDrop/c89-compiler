@@ -25,6 +25,7 @@ pub mod context {
         DeclarationStatementContextAll      as DeclarationStatement,
         EqualityExprContextAll              as EqualityExpr,
         ExprContextAll                      as Expr,
+        IdentifierContextAll                as Identifier,
         InequalityExprContextAll            as InequalityExpr,
         IntegerLiteralContextAll            as IntegerLiteral,
         LiteralContextAll                   as Literal,

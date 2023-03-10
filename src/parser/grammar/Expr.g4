@@ -74,7 +74,7 @@ postfixExpr
 primaryExpr
     : '(' inner=expr ')'    # PrimaryExprWrapped
     | value=literal         # PrimaryExprLiteral
-    | ident=IDENT           # PrimaryExprIdent
+    | ident=identifier      # PrimaryExprIdentifier
     ;
 
 literal

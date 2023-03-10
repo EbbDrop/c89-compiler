@@ -9,12 +9,12 @@ statement
     ;
 
 declarationStatement
-    : type_name=typeName ident=IDENT ';'                   # DeclarationStatementWithoutInitializer
-    | type_name=typeName ident=IDENT '=' rhs=expr ';'      # DeclarationStatementWithInitializer
+    : type_name=typeName ident=identifier ';'               # DeclarationStatementWithoutInitializer
+    | type_name=typeName ident=identifier '=' rhs=expr ';'  # DeclarationStatementWithInitializer
     ;
 
 assignmentStatement
-    : ident=IDENT '=' rhs=expr ';'
+    : ident=identifier '=' rhs=expr ';'
     ;
 
 blockStatement

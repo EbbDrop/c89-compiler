@@ -44,17 +44,15 @@ impl Display for DotTree {
 }
 
 pub fn to_dot(ast: &Ast) -> String {
-    let base = match ast {
-        Ast::BlockStatement(bs) => to_dot_block_statement(bs),
-    };
-
-    base.to_string()
+    to_dot_block_statement(&ast.global).to_string()
 }
 
 fn to_dot_block_statement(bs: &BlockStatement) -> DotTree {
     DotTree::new(
         "block".to_string(),
-        bs.0.iter().map(|s| ("stmt", to_dot_statement(s))).collect(),
+        bs.0.iter()
+            .map(|s| ("stmt", to_dot_statement(&s.data)))
+            .collect(),
     )
 }
 
@@ -66,21 +64,24 @@ fn to_dot_statement(s: &Statement) -> DotTree {
             initializer,
         } => {
             let mut children = vec![
-                ("type", to_dot_qualified_type(type_name)),
-                ("ident", to_dot_ident(ident)),
+                ("type", to_dot_qualified_type(&type_name.data)),
+                ("ident", to_dot_ident(&ident.data)),
             ];
             if let Some(initializer) = initializer {
-                children.push(("rhs", to_dot_expr(initializer)))
+                children.push(("rhs", to_dot_expr(&initializer.data)))
             }
 
             DotTree::new("declaration".to_string(), children)
         }
         ast::Statement::Assignment { ident, rhs } => DotTree::new(
             "assignement".to_string(),
-            vec![("ident", to_dot_ident(ident)), ("rhs", to_dot_expr(rhs))],
+            vec![
+                ("ident", to_dot_ident(&ident.data)),
+                ("rhs", to_dot_expr(&rhs.data)),
+            ],
         ),
 
-        ast::Statement::Expression(e) => to_dot_expr(e),
+        ast::Statement::Expression(e) => to_dot_expr(&e.data),
         ast::Statement::BlockStatement(bs) => to_dot_block_statement(bs),
     }
 }
@@ -88,7 +89,7 @@ fn to_dot_statement(s: &Statement) -> DotTree {
 fn to_dot_expr(e: &Expression) -> DotTree {
     match e {
         Expression::Binary(e1, bo, e2) => DotTree::new(
-            match bo {
+            match bo.data {
                 ast::BinaryOperator::Plus => "+",
                 ast::BinaryOperator::Minus => "-",
                 ast::BinaryOperator::Star => "*",
@@ -107,10 +108,13 @@ fn to_dot_expr(e: &Expression) -> DotTree {
                 ast::BinaryOperator::AngleRightEquals => ">=",
             }
             .to_string(),
-            vec![("lhs", to_dot_expr(e1)), ("rhs", to_dot_expr(e2))],
+            vec![
+                ("lhs", to_dot_expr(&e1.data)),
+                ("rhs", to_dot_expr(&e2.data)),
+            ],
         ),
         Expression::Unary(uo, e) => DotTree::new(
-            match uo {
+            match &uo.data {
                 ast::UnaryOperator::Bang => "!◌",
                 ast::UnaryOperator::Plus => "+◌",
                 ast::UnaryOperator::Minus => "-◌",
@@ -123,14 +127,17 @@ fn to_dot_expr(e: &Expression) -> DotTree {
                 ast::UnaryOperator::DoubleMinusPostfix => "◌--",
             }
             .to_string(),
-            vec![("", to_dot_expr(e))],
+            vec![("", to_dot_expr(&e.data))],
         ),
         Expression::Cast(t, e) => DotTree::new(
             "cast".to_string(),
-            vec![("type", to_dot_qualified_type(t)), ("expr", to_dot_expr(e))],
+            vec![
+                ("type", to_dot_qualified_type(&t.data)),
+                ("expr", to_dot_expr(&e.data)),
+            ],
         ),
-        Expression::Ident(i) => to_dot_ident(i),
-        Expression::Literal(l) => to_dot_literal(l),
+        Expression::Ident(i) => to_dot_ident(&i.data),
+        Expression::Literal(l) => to_dot_literal(&l.data),
     }
 }
 
@@ -138,7 +145,7 @@ fn to_dot_literal(l: &ast::Literal) -> DotTree {
     DotTree::new(
         "literal".to_string(),
         vec![
-            ("type", to_dot_unqualified_type(&l.t)),
+            // ("type", to_dot_unqualified_type(&l.t)),
             (
                 "value",
                 match l.value {
@@ -152,10 +159,10 @@ fn to_dot_literal(l: &ast::Literal) -> DotTree {
 
 fn to_dot_qualified_type(t: &QualifiedType) -> DotTree {
     let mut children = Vec::new();
-    if t.is_const {
+    if t.is_const.is_some() {
         children.push(("", DotTree::new_nc("const".to_string())));
     }
-    children.push(("iner", to_dot_unqualified_type(&t.inner)));
+    children.push(("iner", to_dot_unqualified_type(&t.inner.data)));
     DotTree::new("q_type".to_string(), children)
 }
 
@@ -163,7 +170,7 @@ fn to_dot_unqualified_type(t: &UnqualifiedType) -> DotTree {
     match t {
         ast::UnqualifiedType::PointerType(t) => DotTree::new(
             "pointer".to_string(),
-            vec![("type", to_dot_qualified_type(&t))],
+            vec![("type", to_dot_qualified_type(&t.data))],
         ),
         ast::UnqualifiedType::PlainType(t) => {
             DotTree::new("plain".to_string(), vec![("type", to_dot_plain_type(t))])

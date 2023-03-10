@@ -19,5 +19,9 @@ primitiveType
     | 'float'       # PrimitiveTypeFloat
     ;
 
+identifier
+    : value=IDENT
+    ;
+
 IDENT: [_a-zA-Z][_a-zA-Z0-9]*;
 

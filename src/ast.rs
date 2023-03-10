@@ -1,41 +1,62 @@
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub enum Ast {
-    BlockStatement(BlockStatement),
+pub struct Ast {
+    pub global: BlockStatement,
 }
 
 #[derive(Debug, Clone)]
-pub struct BlockStatement(pub Vec<Statement>);
+pub struct Span {
+    pub start: usize,
+    pub length: usize,
+}
 
 #[derive(Debug, Clone)]
+pub struct BlockStatement(pub Vec<StatementNode>);
 
+#[derive(Debug, Clone)]
+pub struct StatementNode {
+    pub span: Span,
+    pub data: Statement,
+}
+
+#[derive(Debug, Clone)]
 pub enum Statement {
     Declaration {
-        type_name: Type,
-        ident: String,
-        initializer: Option<Expression>,
+        type_name: QualifiedTypeNode,
+        ident: IdentNode,
+        initializer: Option<ExpressionNode>,
     },
     Assignment {
-        ident: String,
-        rhs: Expression,
+        ident: IdentNode,
+        rhs: ExpressionNode,
     },
-    Expression(Expression),
+    Expression(ExpressionNode),
     BlockStatement(BlockStatement),
 }
 
-type Type = QualifiedType;
+#[derive(Debug, Clone)]
+pub struct QualifiedTypeNode {
+    pub span: Span,
+    pub data: QualifiedType,
+}
 
 #[derive(Debug, Clone)]
 pub struct QualifiedType {
-    pub is_const: bool,
+    pub is_const: Option<Span>,
     // pub is_volitile: bool,
     // pub is_restrict: bool,
-    pub inner: UnqualifiedType,
+    pub inner: UnqualifiedTypeNode,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnqualifiedTypeNode {
+    pub span: Span,
+    pub data: UnqualifiedType,
 }
 
 #[derive(Debug, Clone)]
 pub enum UnqualifiedType {
-    PointerType(Box<QualifiedType>),
+    PointerType(Box<QualifiedTypeNode>),
     // ArrayType,
     // FunctionType,
     PlainType(PlainType),
@@ -55,24 +76,33 @@ pub enum PrimitiveType {
     Float,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub enum Expression {
-    Binary(Box<Expression>, BinaryOperator, Box<Expression>),
-    Unary(UnaryOperator, Box<Expression>),
-    Cast(Type, Box<Expression>),
-    Literal(Literal),
-    Ident(String),
+pub struct ExpressionNode {
+    pub span: Span,
+    pub data: Expression,
 }
 
-#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum Expression {
+    Binary(Box<ExpressionNode>, BinaryOperatorNode, Box<ExpressionNode>),
+    Unary(UnaryOperatorNode, Box<ExpressionNode>),
+    Cast(QualifiedTypeNode, Box<ExpressionNode>),
+    Literal(LiteralNode),
+    Ident(IdentNode),
+}
+
+#[derive(Debug, Clone)]
+pub struct LiteralNode {
+    pub span: Span,
+    pub data: Literal,
+}
+
 #[derive(Debug, Clone)]
 pub struct Literal {
     pub value: LiteralValue,
-    pub t: UnqualifiedType,
+    // pub t: Type,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum LiteralValue {
     Integer(i128), //TODO change this to big int?
@@ -80,7 +110,12 @@ pub enum LiteralValue {
     // Void,
 }
 
-#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct BinaryOperatorNode {
+    pub span: Span,
+    pub data: BinaryOperator,
+}
+
 #[derive(Debug, Clone)]
 pub enum BinaryOperator {
     Plus,
@@ -101,7 +136,12 @@ pub enum BinaryOperator {
     AngleRightEquals,
 }
 
-#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct UnaryOperatorNode {
+    pub span: Span,
+    pub data: UnaryOperator,
+}
+
 #[derive(Debug, Clone)]
 pub enum UnaryOperator {
     Bang,
@@ -114,4 +154,10 @@ pub enum UnaryOperator {
     Tilde,
     Ampersand,
     Star,
+}
+
+#[derive(Debug, Clone)]
+pub struct IdentNode {
+    pub span: Span,
+    pub data: String,
 }
