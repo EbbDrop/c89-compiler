@@ -190,6 +190,13 @@ impl<T> AggregateResult<T> {
         }
     }
 
+    pub fn is_not_ok(&self) -> bool {
+        match self {
+            Self::Ok(_) => false,
+            _ => true,
+        }
+    }
+
     /// If the types is a Ok, turn it into a Rec or Err based on whether it is recoverable or not.
     /// If it is Rec make it Err if the diagnostic is not recoverable. If the `Self` was
     /// already a `Err` just add the diagnostic.
@@ -257,6 +264,34 @@ impl<T> AggregateResult<T> {
     #[must_use]
     pub fn into_combined(self) -> AggregateResult<(T,)> {
         self.map(|t| (t,))
+    }
+
+    /// Converts from `AggregateResult<T>` to `Result<T, Aggregate>`, turning [`Rec`] into
+    /// [`Result::Ok`].
+    ///
+    /// Converts self into a `Result<T, Aggregate>`, consuming self, and discarding the aggregate in
+    /// case it's a `Rec(T, Aggregate)`, converting the value to a `Result::Ok` instead.
+    #[must_use]
+    pub fn rec_ok(self) -> Result<T, Aggregate> {
+        match self {
+            Self::Ok(t) => Result::Ok(t),
+            Self::Rec(t, _) => Result::Ok(t),
+            Self::Err(a) => Result::Err(a),
+        }
+    }
+
+    /// Converts from `AggregateResult<T>` to `Result<T, Aggregate>`, turning [`Rec`] into
+    /// [`Result::Err`].
+    ///
+    /// Converts self into a `Result<T, Aggregate>`, consuming self, and discarding the value in
+    /// case it's a `Rec(T, Aggregate)`, converting the aggregate to a `Result::Err` instead.
+    #[must_use]
+    pub fn rec_err(self) -> Result<T, Aggregate> {
+        match self {
+            Self::Ok(t) => Result::Ok(t),
+            Self::Rec(_, a) => Result::Err(a),
+            Self::Err(a) => Result::Err(a),
+        }
     }
 
     /// Gives references to the T and the Aggregate, turning both `Ok` and `Rec` into `Result::Ok`
