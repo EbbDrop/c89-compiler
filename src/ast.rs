@@ -1,13 +1,9 @@
+use crate::diagnostic::Span;
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Ast {
     pub global: BlockStatement,
-}
-
-#[derive(Debug, Clone)]
-pub struct Span {
-    pub start: usize,
-    pub length: usize,
 }
 
 #[derive(Debug, Clone)]

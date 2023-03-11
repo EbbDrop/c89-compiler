@@ -4,20 +4,12 @@ use antlr_rust::{
     error_listener::ErrorListener, errors::ANTLRError, recognizer::Recognizer, token::Token,
     token_factory::TokenFactory,
 };
-use std::fmt;
+use std::{cell::RefCell, fmt, rc::Rc};
 
-use super::ast;
-
-#[derive(Debug)]
-pub struct ParseError();
-
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for ParseError {}
+use crate::{
+    ast,
+    diagnostic::{self, Aggregate, AggregateResult, Code, DiagnosticBuilder, Span},
+};
 
 #[derive(Debug)]
 pub struct UnspecifiedAntlrError;
@@ -33,122 +25,205 @@ impl std::error::Error for UnspecifiedAntlrError {}
 type LexerInput<'a> = antlr_rust::InputStream<&'a str>;
 type Lexer<'a> = generated::MainLexer<'a, LexerInput<'a>>;
 type TokenStream<'a> = antlr_rust::common_token_stream::CommonTokenStream<'a, Lexer<'a>>;
-type ParserErrorStrategy<'a> = antlr_rust::BailErrorStrategy<'a, generated::MainParserContextType>;
+type ParserErrorStrategy<'a> =
+    antlr_rust::DefaultErrorStrategy<'a, generated::MainParserContextType>;
 type Parser<'a> = generated::MainParser<'a, TokenStream<'a>, ParserErrorStrategy<'a>>;
 
-pub fn parse(input: &str) -> Result<ast::Ast, ParseError> {
+pub fn parse(input: &str) -> AggregateResult<ast::Ast> {
+    let error_listener = AggregatingErrorListener::new();
+
     let lexer = build_lexer(input);
     let token_stream = TokenStream::new(lexer);
-    let mut parser = build_parser(token_stream);
+    let mut parser = build_parser(token_stream, error_listener.clone());
 
-    let tu = parser.translationUnit().map_err(|_| ParseError())?;
+    let tu = match parser.translationUnit() {
+        Ok(tu) => tu,
+        Err(_) => panic!("ICE: Internal ANTLR error"),
+    };
 
-    ast_builder::build_from_translation_unit(tu.as_ref()).map_err(|_| ParseError())
+    if error_listener.0.as_ref().borrow_mut().is_empty() {
+        ast_builder::build_from_translation_unit(tu.as_ref())
+    } else {
+        let a = error_listener.0.as_ref().take();
+        AggregateResult::Err(a)
+    }
 }
 
 fn build_lexer(input: &str) -> Lexer {
     let input = LexerInput::new(input.into());
     let mut lexer = Lexer::new(input);
     lexer.remove_error_listeners();
-    lexer.add_error_listener(Box::new(CustomErrorListener {}));
+    // We have a ERROR_TOKEN: . ; in the grammar with makes sure the lexer never errors
+    lexer.add_error_listener(Box::new(PanicErrorListener(
+        "ICE: The lexer should never encounter a error",
+    )));
     lexer
 }
 
-fn build_parser(token_stream: TokenStream) -> Parser {
+fn build_parser(token_stream: TokenStream, error_listener: AggregatingErrorListener) -> Parser {
     use antlr_rust::Parser as _;
     let mut parser = Parser::with_strategy(token_stream, ParserErrorStrategy::new());
     parser.remove_error_listeners();
-    parser.add_error_listener(Box::new(CustomErrorListener {}));
+    parser.add_error_listener(Box::new(error_listener));
     parser
 }
 
-struct CustomErrorListener {}
+struct PanicErrorListener(&'static str);
 
-impl<'a, T: Recognizer<'a>> ErrorListener<'a, T> for CustomErrorListener
-where
-    // NOTE: this is only required to display the token data.
-    // This can probably be removed once `syntax_error` has a real implementation.
-    <T::TF as TokenFactory<'a>>::Data: std::fmt::Display,
-{
+impl<'a, T: Recognizer<'a>> ErrorListener<'a, T> for PanicErrorListener {
     fn syntax_error(
         &self,
         _recognizer: &T,
-        offending_symbol: Option<&<T::TF as TokenFactory<'a>>::Inner>,
-        line: isize,
-        column: isize,
-        msg: &str,
+        _offending_symbol: Option<&<T::TF as TokenFactory<'a>>::Inner>,
+        _line: isize,
+        _column: isize,
+        _msg: &str,
         _error: Option<&ANTLRError>,
     ) {
-        eprintln!("Lexer error at line {}, column {}: {}", line, column, msg);
-        if let Some(token) = offending_symbol {
-            eprintln!("Found offending symbol: {}", token.get_text());
-        }
+        panic!("{}", self.0);
+    }
+}
+
+#[derive(Clone)]
+struct AggregatingErrorListener(Rc<RefCell<Aggregate>>);
+
+impl AggregatingErrorListener {
+    fn new() -> Self {
+        AggregatingErrorListener(Rc::new(RefCell::new(Aggregate::new())))
+    }
+}
+
+impl<'a, T: Recognizer<'a> + antlr_rust::Parser<'a>> ErrorListener<'a, T>
+    for AggregatingErrorListener
+{
+    fn syntax_error(
+        &self,
+        recognizer: &T,
+        offending_symbol: Option<&<T::TF as TokenFactory<'a>>::Inner>,
+        _line: isize,
+        _column: isize,
+        _msg: &str,
+        error: Option<&ANTLRError>,
+    ) {
+        let offending_symbol = offending_symbol.unwrap();
+
+        let vocabulary = recognizer.get_vocabulary();
+        let offending_symbol_name = vocabulary.get_display_name(offending_symbol.get_token_type());
+
+        let start = offending_symbol.get_start();
+        let end = offending_symbol.get_stop() + 1;
+
+        let span = Span {
+            start: start as usize,
+            length: (end - start).max(0) as usize,
+        };
+
+        let db = DiagnosticBuilder::new(span);
+
+        let d = match error {
+            Some(error) => {
+                let expected_tokens = match error {
+                    ANTLRError::NoAltError(e) => e.base.get_expected_tokens(recognizer),
+                    ANTLRError::InputMismatchError(e) => e.base.get_expected_tokens(recognizer),
+                    ANTLRError::PredicateError(e) => e.base.get_expected_tokens(recognizer),
+                    e => panic!("ICE: Unexpected ANTLRError: {}", e),
+                };
+
+                let expected_tokens = expected_tokens.to_token_string(vocabulary);
+
+                // TODO use build_lexer when we have a way to iterate over the expected_tokens ourselfs
+                db.build_custom(
+                    Code::UnspecifiedError,
+                    format!(
+                        "Unexpected token: {}. Expected one of: {}",
+                        offending_symbol_name, expected_tokens
+                    ),
+                )
+            }
+            None => db.build_custom(
+                Code::UnspecifiedError,
+                format!("Unexpected token: {}", offending_symbol_name),
+            ),
+        };
+
+        self.0.as_ref().borrow_mut().add_diagnostic(d);
     }
 }
 
 mod ast_builder {
-    use crate::ast::Span;
-
-    use super::{ast, generated::context, UnspecifiedAntlrError};
+    use super::{
+        ast,
+        diagnostic::{
+            Aggregate,
+            AggregateResult::{self, *},
+            Code, DiagnosticBuilder, Span,
+        },
+        generated::context,
+    };
     use antlr_rust::{
-        errors::ANTLRError,
         parser_rule_context::{BaseParserRuleContext, ParserRuleContext},
         rule_context::CustomRuleContext,
         token::Token,
+        TidAble,
     };
     use std::{ops::Deref, rc::Rc};
 
-    fn extract_unspecified_error<'a, Ctx>(ectx: &BaseParserRuleContext<'a, Ctx>) -> ANTLRError
+    fn extract_tree_error<'a, Ctx>(_ectx: &BaseParserRuleContext<'a, Ctx>) -> Aggregate
     where
-        Ctx: CustomRuleContext<'a>,
+        Ctx: CustomRuleContext<'a> + TidAble<'a>,
     {
-        ectx.exception
-            .as_deref()
-            .cloned()
-            .unwrap_or(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})))
+        // We should never get here since the ErrorListener should have caught the error already
+        panic!("ICE: Error inside ANTLR tree");
     }
 
     fn extract_span<'a>(ctx: &impl ParserRuleContext<'a>) -> Span {
         let start = ctx.start().get_start();
-        let end = ctx.stop().get_stop();
+        let end = ctx.stop().get_stop() + 1;
 
         Span {
             start: start as usize,
-            length: (end + 1 - start) as usize,
+            length: (end - start).max(0) as usize,
         }
     }
 
     fn extract_span_from_token(token: &impl Token) -> Span {
         let start = token.get_start();
-        let end = token.get_stop();
+        let end = token.get_stop() + 1;
 
         Span {
             start: start as usize,
-            length: (end + 1 - start) as usize,
+            length: (end - start).max(0) as usize,
         }
     }
 
     pub fn build_from_translation_unit(
         ctx: &context::TranslationUnit,
-    ) -> Result<ast::Ast, ANTLRError> {
-        Ok(ast::Ast {
-            global: ast::BlockStatement(
-                ctx.content
-                    .iter()
-                    .filter_map(|x| build_from_statement(x))
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
+    ) -> AggregateResult<ast::Ast> {
+        let mut res = AggregateResult::Ok(Vec::with_capacity(ctx.content.len()));
+
+        for statement in &ctx.content {
+            if let Some(statement) = build_from_statement(statement) {
+                res = res.combine_with(statement);
+            }
+        }
+
+        res.map(|mut stmts| {
+            stmts.shrink_to_fit();
+            ast::Ast {
+                global: ast::BlockStatement(stmts),
+            }
         })
     }
 
     fn build_from_statement(
         ctx: &context::Statement,
-    ) -> Option<Result<ast::StatementNode, ANTLRError>> {
+    ) -> Option<AggregateResult<ast::StatementNode>> {
         use context::Statement;
         let data = match ctx {
-            Statement::StatementExprContext(expr) => {
-                build_from_expr(expr.value.as_deref()?).map(ast::Statement::Expression)
-            }
+            Statement::StatementExprContext(expr) => match expr.value.as_deref() {
+                Some(value) => build_from_expr(value).map(ast::Statement::Expression),
+                None => return None,
+            },
             Statement::StatementDeclarationContext(decl) => {
                 build_from_declaration_statement(decl.value.as_deref().unwrap())
             }
@@ -158,7 +233,7 @@ mod ast_builder {
             Statement::StatementBlockContext(block) => {
                 build_from_block_statement(block.value.as_deref().unwrap())
             }
-            Statement::Error(ectx) => Err(extract_unspecified_error(ectx)),
+            Statement::Error(ectx) => return Some(Err(extract_tree_error(ectx))),
         };
 
         Some(data.map(|data| ast::StatementNode {
@@ -169,48 +244,63 @@ mod ast_builder {
 
     fn build_from_declaration_statement(
         ctx: &context::DeclarationStatement,
-    ) -> Result<ast::Statement, ANTLRError> {
+    ) -> AggregateResult<ast::Statement> {
         use context::DeclarationStatement;
         match ctx {
             DeclarationStatement::DeclarationStatementWithoutInitializerContext(decl) => {
-                Ok(ast::Statement::Declaration {
-                    type_name: build_from_type_name(decl.type_name.as_deref().unwrap())?,
-                    ident: build_from_identifier(decl.ident.as_deref().unwrap())?,
+                let res = build_from_type_name(decl.type_name.as_deref().unwrap()).into_combined();
+                let res = res.combine_with(build_from_identifier(decl.ident.as_deref().unwrap()));
+
+                res.map(|(type_name, ident)| ast::Statement::Declaration {
+                    type_name,
+                    ident,
                     initializer: None,
                 })
             }
             DeclarationStatement::DeclarationStatementWithInitializerContext(decl) => {
-                Ok(ast::Statement::Declaration {
-                    type_name: build_from_type_name(decl.type_name.as_deref().unwrap())?,
-                    ident: build_from_identifier(decl.ident.as_deref().unwrap())?,
-                    initializer: Some(build_from_expr(decl.rhs.as_deref().unwrap())?),
-                })
+                let res = build_from_type_name(decl.type_name.as_deref().unwrap()).into_combined();
+                let res = res.combine_with(build_from_identifier(decl.ident.as_deref().unwrap()));
+                let res = res.combine_with(build_from_expr(decl.rhs.as_deref().unwrap()));
+
+                res.map(
+                    |(type_name, ident, initializer)| ast::Statement::Declaration {
+                        type_name,
+                        ident,
+                        initializer: Some(initializer),
+                    },
+                )
             }
-            DeclarationStatement::Error(ectx) => Err(extract_unspecified_error(ectx)),
+            DeclarationStatement::Error(ectx) => Err(extract_tree_error(ectx)),
         }
     }
 
     fn build_from_assignment_statement(
         ctx: &context::AssignmentStatement,
-    ) -> Result<ast::Statement, ANTLRError> {
-        Ok(ast::Statement::Assignment {
-            ident: build_from_identifier(ctx.ident.as_deref().unwrap())?,
-            rhs: build_from_expr(ctx.rhs.as_deref().unwrap())?,
-        })
+    ) -> AggregateResult<ast::Statement> {
+        let res = build_from_identifier(ctx.ident.as_deref().unwrap()).into_combined();
+        let res = res.combine_with(build_from_expr(ctx.rhs.as_deref().unwrap()));
+
+        res.map(|(ident, rhs)| ast::Statement::Assignment { ident, rhs })
     }
 
     fn build_from_block_statement(
         ctx: &context::BlockStatement,
-    ) -> Result<ast::Statement, ANTLRError> {
-        Ok(ast::Statement::BlockStatement(ast::BlockStatement(
-            ctx.content
-                .iter()
-                .filter_map(|s| build_from_statement(s))
-                .collect::<Result<Vec<_>, _>>()?,
-        )))
+    ) -> AggregateResult<ast::Statement> {
+        let mut res = AggregateResult::Ok(Vec::with_capacity(ctx.content.len()));
+
+        for statement in &ctx.content {
+            if let Some(statement) = build_from_statement(statement) {
+                res = res.combine_with(statement);
+            }
+        }
+
+        res.map(|mut stmts| {
+            stmts.shrink_to_fit();
+            ast::Statement::BlockStatement(ast::BlockStatement(stmts))
+        })
     }
 
-    fn build_from_type_name(ctx: &context::TypeName) -> Result<ast::QualifiedTypeNode, ANTLRError> {
+    fn build_from_type_name(ctx: &context::TypeName) -> AggregateResult<ast::QualifiedTypeNode> {
         use context::TypeName as TN;
         use context::TypeSpecifier as TS;
         let data = match ctx {
@@ -223,31 +313,31 @@ mod ast_builder {
                     .get(0)
                     .expect("a type must contain at least one specifier");
                 match s.as_ref() {
-                    TS::TypeSpecifierPrimitiveContext(primitive_type) => {
+                    TS::TypeSpecifierPrimitiveContext(primitive_type) => build_from_primitive_type(
+                        primitive_type.tp.as_deref().unwrap(),
+                    )
+                    .and_then(|data| {
                         let unqualified_type_node = ast::UnqualifiedTypeNode {
                             span: extract_span(primitive_type),
-                            data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                                build_from_primitive_type(primitive_type.tp.as_deref().unwrap())?,
-                            )),
+                            data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(data)),
                         };
-                        with_qualifiers(unqualified_type_node, &plain.qualifiers)?
-                    }
-                    TS::Error(ectx) => return Err(extract_unspecified_error(ectx)),
+                        with_qualifiers(unqualified_type_node, &plain.qualifiers)
+                    }),
+                    TS::Error(ectx) => return Err(extract_tree_error(ectx)),
                 }
             }
-            TN::TypeNamePointerContext(ctx) => {
-                let unqualified_type_node = ast::UnqualifiedTypeNode {
-                    span: extract_span(ctx),
-                    data: ast::UnqualifiedType::PointerType(Box::new(build_from_type_name(
-                        ctx.inner.as_deref().unwrap(),
-                    )?)),
-                };
-                with_qualifiers(unqualified_type_node, &ctx.ptr_qualifiers)?
-            }
-            TN::Error(ectx) => return Err(extract_unspecified_error(ectx)),
+            TN::TypeNamePointerContext(ctx) => build_from_type_name(ctx.inner.as_deref().unwrap())
+                .and_then(|data| {
+                    let unqualified_type_node = ast::UnqualifiedTypeNode {
+                        span: extract_span(ctx),
+                        data: ast::UnqualifiedType::PointerType(Box::new(data)),
+                    };
+                    with_qualifiers(unqualified_type_node, &ctx.ptr_qualifiers)
+                }),
+            TN::Error(ectx) => return Err(extract_tree_error(ectx)),
         };
 
-        Ok(ast::QualifiedTypeNode {
+        data.map(|data| ast::QualifiedTypeNode {
             span: extract_span(ctx),
             data,
         })
@@ -256,56 +346,69 @@ mod ast_builder {
     fn with_qualifiers(
         unqualified_type_node: ast::UnqualifiedTypeNode,
         qualifiers: &Vec<Rc<context::TypeQualifier>>,
-    ) -> Result<ast::QualifiedType, ANTLRError> {
+    ) -> AggregateResult<ast::QualifiedType> {
         use context::TypeQualifier as TQ;
         let mut qualified_type = ast::QualifiedType {
             is_const: None,
             inner: unqualified_type_node,
         };
+
+        let mut res = AggregateResult::Ok(());
+
         for qualifier in qualifiers.iter() {
             // TODO if is_const is some => warning
             match qualifier.deref() {
                 TQ::TypeQualifierConstContext(ctx) => {
-                    qualified_type.is_const = Some(extract_span(ctx));
+                    let span = extract_span(ctx);
+
+                    if qualified_type.is_const.is_some() {
+                        res = res.add_diagnostic(
+                            DiagnosticBuilder::new(span).build_duplicate_qualifier("const"),
+                        )
+                    } else {
+                        qualified_type.is_const = Some(span);
+                    }
                 }
-                TQ::Error(ectx) => return Err(extract_unspecified_error(ectx)),
+                TQ::Error(ectx) => return Err(extract_tree_error(ectx)),
             }
         }
-        Ok(qualified_type)
+        res.map(|_| qualified_type)
     }
 
     fn build_from_primitive_type(
         ctx: &context::PrimitiveType,
-    ) -> Result<ast::PrimitiveType, ANTLRError> {
+    ) -> AggregateResult<ast::PrimitiveType> {
         use context::PrimitiveType;
         match ctx {
             PrimitiveType::PrimitiveTypeIntContext(_) => Ok(ast::PrimitiveType::Int),
             PrimitiveType::PrimitiveTypeCharContext(_) => Ok(ast::PrimitiveType::Char),
             PrimitiveType::PrimitiveTypeFloatContext(_) => Ok(ast::PrimitiveType::Float),
-            PrimitiveType::Error(ectx) => Err(extract_unspecified_error(ectx)),
+            PrimitiveType::Error(ectx) => Err(extract_tree_error(ectx)),
         }
     }
 
-    pub fn build_from_expr(ctx: &context::Expr) -> Result<ast::ExpressionNode, ANTLRError> {
+    pub fn build_from_expr(ctx: &context::Expr) -> AggregateResult<ast::ExpressionNode> {
         build_from_cond_expr(ctx.value.as_deref().unwrap())
     }
 
-    pub fn build_from_cond_expr(
-        ctx: &context::CondExpr,
-    ) -> Result<ast::ExpressionNode, ANTLRError> {
+    pub fn build_from_cond_expr(ctx: &context::CondExpr) -> AggregateResult<ast::ExpressionNode> {
         use context::CondExpr;
-        let _data = match ctx {
+        let data = match ctx {
             CondExpr::CondExprSingularContext(singular) => {
                 return build_from_logical_or_expr(singular.value.as_deref().unwrap())
             }
-            CondExpr::CondExprTernaryContext(_composed) => todo!("Ternary is not yet suported"),
-            CondExpr::Error(ectx) => return Err(extract_unspecified_error(ectx)),
+            CondExpr::CondExprTernaryContext(_composed) => AggregateResult::with_diagnostic_err(
+                DiagnosticBuilder::new(extract_span(ctx)).build_custom(
+                    Code::UnspecifiedError,
+                    "Ternary expr are not suported yet".to_owned(),
+                ),
+            ),
+            CondExpr::Error(ectx) => return Err(extract_tree_error(ectx)),
         };
 
-        #[allow(unreachable_code)]
-        Ok(ast::ExpressionNode {
+        data.map(|data| ast::ExpressionNode {
             span: extract_span(ctx),
-            data: _data,
+            data,
         })
     }
 
@@ -316,23 +419,33 @@ mod ast_builder {
                 $composed:tt => let $text:pat => $expr:expr
             }
         ) => {
-            $vis fn $from(ctx: &$context::$from_type) -> Result<ast::ExpressionNode, ANTLRError> {
+            $vis fn $from(ctx: &$context::$from_type) -> AggregateResult<ast::ExpressionNode> {
                 let data = match ctx {
                     $context::$from_type::$singular(singular) => return $next(singular.value.as_deref().unwrap()),
-                    $context::$from_type::$composed(composed) => ast::Expression::Binary(
-                        Box::new($from(composed.lhs.as_deref().unwrap())?),
+                    $context::$from_type::$composed(composed) => {
+                        let op =
                         {
                             let $text = composed.op.as_deref().unwrap();
                             $expr
-                        },
-                        Box::new($next(composed.rhs.as_deref().unwrap())?),
-                    ),
-                    $context::$from_type::Error(ectx) => return Err(extract_unspecified_error(ectx)),
+                        };
+                        let res = $from(composed.lhs.as_deref().unwrap()).into_combined();
+                        let res = res.combine_with($next(composed.rhs.as_deref().unwrap()));
+                        res.map(|(first, sec)| {
+                        ast::Expression::Binary(
+                        Box::new(first),
+                        op,
+                        Box::new(sec),
+                        )}
+                    )
+                },
+                    $context::$from_type::Error(ectx) => return Err(extract_tree_error(ectx)),
                 };
 
-                Ok(ast::ExpressionNode {
-                    span: extract_span(ctx),
-                    data,
+                data.map(|data| {
+                    ast::ExpressionNode {
+                        span: extract_span(ctx),
+                        data,
+                    }
                 })
             }
         };
@@ -464,30 +577,30 @@ mod ast_builder {
         }
     }
 
-    pub fn build_from_cast_expr(
-        ctx: &context::CastExpr,
-    ) -> Result<ast::ExpressionNode, ANTLRError> {
+    pub fn build_from_cast_expr(ctx: &context::CastExpr) -> AggregateResult<ast::ExpressionNode> {
         use context::CastExpr;
         let data = match ctx {
             CastExpr::CastExprSingularContext(singular) => {
                 return build_from_unary_expr(singular.value.as_deref().unwrap())
             }
-            CastExpr::CastExprComposedContext(composed) => ast::Expression::Cast(
-                build_from_type_name(composed.type_name.as_deref().unwrap())?,
-                Box::new(build_from_cast_expr(composed.value.as_deref().unwrap())?),
-            ),
-            CastExpr::Error(ectx) => return Err(extract_unspecified_error(ectx)),
+            CastExpr::CastExprComposedContext(composed) => {
+                let res =
+                    build_from_type_name(composed.type_name.as_deref().unwrap()).into_combined();
+                let res =
+                    res.combine_with(build_from_cast_expr(composed.value.as_deref().unwrap()));
+
+                res.map(|(type_name, expr)| ast::Expression::Cast(type_name, Box::new(expr)))
+            }
+            CastExpr::Error(ectx) => return Err(extract_tree_error(ectx)),
         };
 
-        Ok(ast::ExpressionNode {
+        data.map(|data| ast::ExpressionNode {
             span: extract_span(ctx),
             data,
         })
     }
 
-    pub fn build_from_unary_expr(
-        ctx: &context::UnaryExpr,
-    ) -> Result<ast::ExpressionNode, ANTLRError> {
+    pub fn build_from_unary_expr(ctx: &context::UnaryExpr) -> AggregateResult<ast::ExpressionNode> {
         use context::UnaryExpr;
         let data = match ctx {
             UnaryExpr::UnaryExprPostfixContext(postfix) => {
@@ -506,18 +619,20 @@ mod ast_builder {
                     "*" => ast::UnaryOperator::Star,
                     _ => unreachable!(),
                 };
-                ast::Expression::Unary(
-                    ast::UnaryOperatorNode {
-                        span: extract_span_from_token(op_token),
-                        data: op,
-                    },
-                    Box::new(build_from_cast_expr(prefix.value.as_deref().unwrap())?),
-                )
+                build_from_cast_expr(prefix.value.as_deref().unwrap()).map(|expr| {
+                    ast::Expression::Unary(
+                        ast::UnaryOperatorNode {
+                            span: extract_span_from_token(op_token),
+                            data: op,
+                        },
+                        Box::new(expr),
+                    )
+                })
             }
-            UnaryExpr::Error(ectx) => return Err(extract_unspecified_error(ectx)),
+            UnaryExpr::Error(ectx) => return Err(extract_tree_error(ectx)),
         };
 
-        Ok(ast::ExpressionNode {
+        data.map(|data| ast::ExpressionNode {
             span: extract_span(ctx),
             data,
         })
@@ -525,11 +640,11 @@ mod ast_builder {
 
     pub fn build_from_postfix_expr(
         ctx: &context::PostfixExpr,
-    ) -> Result<ast::ExpressionNode, ANTLRError> {
+    ) -> AggregateResult<ast::ExpressionNode> {
         use context::PostfixExpr;
         let data = match ctx {
             PostfixExpr::PostfixExprPrimaryContext(primary) => {
-                return build_from_primary_expr(primary.value.as_deref().unwrap())
+                return build_from_primary_expr(primary.value.as_deref().unwrap());
             }
             PostfixExpr::PostfixExprPostfixContext(postfix) => {
                 let op_token = postfix.op.as_deref().unwrap();
@@ -538,18 +653,20 @@ mod ast_builder {
                     "--" => ast::UnaryOperator::DoubleMinusPostfix,
                     _ => unreachable!(),
                 };
-                ast::Expression::Unary(
-                    ast::UnaryOperatorNode {
-                        span: extract_span_from_token(op_token),
-                        data: op,
-                    },
-                    Box::new(build_from_postfix_expr(postfix.value.as_deref().unwrap())?),
-                )
+                build_from_postfix_expr(postfix.value.as_deref().unwrap()).map(|expr| {
+                    ast::Expression::Unary(
+                        ast::UnaryOperatorNode {
+                            span: extract_span_from_token(op_token),
+                            data: op,
+                        },
+                        Box::new(expr),
+                    )
+                })
             }
-            PostfixExpr::Error(ectx) => return Err(extract_unspecified_error(ectx)),
+            PostfixExpr::Error(ectx) => Err(extract_tree_error(ectx)),
         };
 
-        Ok(ast::ExpressionNode {
+        data.map(|data| ast::ExpressionNode {
             span: extract_span(ctx),
             data,
         })
@@ -557,39 +674,40 @@ mod ast_builder {
 
     pub fn build_from_primary_expr(
         ctx: &context::PrimaryExpr,
-    ) -> Result<ast::ExpressionNode, ANTLRError> {
+    ) -> AggregateResult<ast::ExpressionNode> {
         use context::PrimaryExpr;
         let data = match ctx {
             PrimaryExpr::PrimaryExprWrappedContext(wrapped) => {
                 return build_from_expr(wrapped.inner.as_deref().unwrap())
             }
             PrimaryExpr::PrimaryExprLiteralContext(literal) => {
-                ast::Expression::Literal(build_from_literal(literal.value.as_deref().unwrap())?)
+                build_from_literal(literal.value.as_deref().unwrap()).map(ast::Expression::Literal)
             }
             PrimaryExpr::PrimaryExprIdentifierContext(ident) => {
-                ast::Expression::Ident(build_from_identifier(ident.ident.as_deref().unwrap())?)
+                build_from_identifier(ident.ident.as_deref().unwrap()).map(ast::Expression::Ident)
             }
-            PrimaryExpr::Error(ectx) => return Err(extract_unspecified_error(ectx)),
+            PrimaryExpr::Error(ectx) => return Err(extract_tree_error(ectx)),
         };
 
-        Ok(ast::ExpressionNode {
+        data.map(|data| ast::ExpressionNode {
             span: extract_span(ctx),
             data,
         })
     }
 
-    pub fn build_from_literal(ctx: &context::Literal) -> Result<ast::LiteralNode, ANTLRError> {
+    pub fn build_from_literal(ctx: &context::Literal) -> AggregateResult<ast::LiteralNode> {
         use context::Literal;
         let data = match ctx {
             Literal::LiteralIntegerContext(literal) => {
                 // TODO set type based on size needed for value
-                let value = build_from_integer_literal(literal.value.as_deref().unwrap())?;
-                ast::Literal {
-                    value: ast::LiteralValue::Integer(value),
-                    // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                    //     ast::PrimitiveType::Int,
-                    // )),
-                }
+                build_from_integer_literal(literal.value.as_deref().unwrap()).map(|value| {
+                    ast::Literal {
+                        value: ast::LiteralValue::Integer(value),
+                        // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                        //     ast::PrimitiveType::Int,
+                        // )),
+                    }
+                })
             }
             Literal::LiteralFloatingPointContext(literal) => {
                 // The rust parse f64 function allows for strictly more strings as the C grammar
@@ -602,12 +720,12 @@ mod ast_builder {
                     .get_text()
                     .parse()
                     .unwrap();
-                ast::Literal {
+                Ok(ast::Literal {
                     value: ast::LiteralValue::Float(value),
                     // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
                     //     ast::PrimitiveType::Float,
                     // )),
-                }
+                })
             }
             Literal::LiteralCharContext(literal) => {
                 let value = literal.value.as_deref().unwrap().get_text();
@@ -617,32 +735,39 @@ mod ast_builder {
                 let value = &value[1..value.len() - 1];
 
                 let value = parse_string_literal(value);
-                let value = if value.len() == 1 {
-                    value.as_bytes()[0] as u8 as i128
-                } else {
-                    // Technically multi byte chars are allowed in the C standard but are
-                    // implementation defined. `g++ -ansi -pedantic` gives a warning
-                    // TODO give real error/warning
-                    return Err(ANTLRError::FallThrough(Rc::new(UnspecifiedAntlrError {})));
+                let value = match &value[..] {
+                    [] => {
+                        panic!("ICE: Empty chars should not be allowed by the grammer");
+                    }
+                    [b] => Ok(*b as i128),
+                    multi_byte => AggregateResult::with_diagnostic(
+                        multi_byte[0] as i128,
+                        DiagnosticBuilder::new(extract_span(ctx)).build_custom(
+                            Code::MultiByteChar,
+                            "Multi byte chars are implementation defined".to_owned(),
+                        ),
+                    ),
                 };
 
-                ast::Literal {
-                    value: ast::LiteralValue::Integer(value),
-                    // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                    //     ast::PrimitiveType::Char,
-                    // )),
-                }
+                value.map(|value| {
+                    ast::Literal {
+                        value: ast::LiteralValue::Integer(value),
+                        // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                        //     ast::PrimitiveType::Char,
+                        // )),
+                    }
+                })
             }
-            Literal::Error(ectx) => return Err(extract_unspecified_error(ectx)),
+            Literal::Error(ectx) => return Err(extract_tree_error(ectx)),
         };
 
-        Ok(ast::LiteralNode {
+        data.map(|data| ast::LiteralNode {
             span: extract_span(ctx),
             data,
         })
     }
 
-    pub fn build_from_integer_literal(ctx: &context::IntegerLiteral) -> Result<i128, ANTLRError> {
+    pub fn build_from_integer_literal(ctx: &context::IntegerLiteral) -> AggregateResult<i128> {
         use context::IntegerLiteral;
         // All the unwraps here should be fine since the grammar ensures that the invariant are met
         // for the various parse functions
@@ -663,21 +788,22 @@ mod ast_builder {
                 let literal = &literal[2..];
                 Ok(i128::from_str_radix(literal, 16).unwrap())
             }
-            IntegerLiteral::Error(ectx) => Err(extract_unspecified_error(ectx)),
+            IntegerLiteral::Error(ectx) => Err(extract_tree_error(ectx)),
         }
     }
 
-    fn build_from_identifier(ctx: &context::Identifier) -> Result<ast::IdentNode, ANTLRError> {
-        Ok(ast::IdentNode {
+    fn build_from_identifier(ctx: &context::Identifier) -> AggregateResult<ast::IdentNode> {
+        AggregateResult::Ok(ast::IdentNode {
             span: extract_span(ctx),
             data: ctx.value.as_deref().unwrap().get_text().to_owned(),
         })
     }
 
-    fn parse_string_literal(value: &str) -> String {
+    fn parse_string_literal(value: &str) -> Vec<u8> {
+        // TODO actualy parse escapte sequenses
         if value.len() == 1 {
-            return value.to_owned();
+            return value.as_bytes().to_owned();
         }
-        todo!("Parsing strings/escaped chars is not yet implemented")
+        value.as_bytes().to_owned()
     }
 }

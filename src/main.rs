@@ -73,7 +73,16 @@ fn main() -> Result<()> {
         }
     };
 
-    let ast = parser::parse(&input_string)?;
+    let ast = match parser::parse(&input_string) {
+        comp::diagnostic::AggregateResult::Ok(t) => t,
+        comp::diagnostic::AggregateResult::Rec(t, a) => {
+            eprintln!("Parser Warnings:\n{a}");
+            t
+        }
+        comp::diagnostic::AggregateResult::Err(a) => {
+            return Err(a).context("Parser errors and warnings")
+        }
+    };
 
     let output = match args.emit {
         OutputFormat::Dot => to_dot(&ast).into_bytes(),
