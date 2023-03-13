@@ -1,4 +1,8 @@
-use std::{collections::LinkedList, error::Error, fmt::Display};
+use std::{
+    collections::LinkedList,
+    error::Error,
+    fmt::{Debug, Display},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
@@ -6,32 +10,46 @@ pub struct Span {
     pub length: usize,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy)]
+pub enum DiagnosticType {
+    Recoverable,
+    NonRecoverable,
+}
+
+#[derive(Debug, Clone)]
 pub struct Aggregate {
-    diagnostics: LinkedList<Diagnostic>,
+    diagnostics: LinkedList<(DiagnosticType, Diagnostic)>,
 }
 
 impl Aggregate {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    fn with_diagnostic(diagnostic: Diagnostic) -> Aggregate {
+    fn with_rec_diagnostic(diagnostic: Diagnostic) -> Aggregate {
         Self {
-            diagnostics: LinkedList::from([diagnostic]),
+            diagnostics: LinkedList::from([(DiagnosticType::Recoverable, diagnostic)]),
         }
     }
 
-    pub fn add_diagnostic(&mut self, diagnostic: Diagnostic) {
-        self.diagnostics.push_front(diagnostic);
+    fn with_non_rec_diagnostic(diagnostic: Diagnostic) -> Aggregate {
+        Self {
+            diagnostics: LinkedList::from([(DiagnosticType::NonRecoverable, diagnostic)]),
+        }
     }
 
-    pub fn combine_with(&mut self, mut other: Self) {
+    fn add_rec_diagnostic(&mut self, diagnostic: Diagnostic) {
+        self.diagnostics
+            .push_front((DiagnosticType::Recoverable, diagnostic));
+    }
+
+    fn add_non_rec_diagnostic(&mut self, diagnostic: Diagnostic) {
+        self.diagnostics
+            .push_front((DiagnosticType::NonRecoverable, diagnostic));
+    }
+
+    fn combine_with(&mut self, mut other: Self) {
         self.diagnostics.append(&mut other.diagnostics);
     }
 
-    pub fn diagnostics(&self) -> impl Iterator<Item = &Diagnostic> {
-        self.diagnostics.iter()
+    pub fn diagnostics(&self) -> impl Iterator<Item = (DiagnosticType, &Diagnostic)> {
+        self.diagnostics.iter().map(|(dt, d)| (*dt, d))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -41,8 +59,15 @@ impl Aggregate {
 
 impl Display for Aggregate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for diagnostic in self.diagnostics() {
-            writeln!(f, "{}", diagnostic)?;
+        for (t, diagnostic) in self.diagnostics() {
+            match t {
+                DiagnosticType::Recoverable => {
+                    writeln!(f, "W: {}", diagnostic)?;
+                }
+                DiagnosticType::NonRecoverable => {
+                    writeln!(f, "E: {}", diagnostic)?;
+                }
+            }
         }
         Ok(())
     }
@@ -50,28 +75,37 @@ impl Display for Aggregate {
 
 impl Error for Aggregate {}
 
+// WARNING: Don't change the order of these (Error codes will change)
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Code {
-    UnspecifiedError = 0,
+    Unspecified = 0,
     SyntaxError,
-
-    // Everyting afther this is a warning
-    DuplicateQualifier = 1 << 31,
+    Unimplemented,
+    DuplicateQualifier,
     MultiByteChar,
+    UnspecifiedType,
 }
 
 impl Code {
-    fn is_recoverable(&self) -> bool {
-        *self as u32 >> 31 & 0b1 != 0
+    /// Get a unique numeric code for this `Code`
+    fn to_code(&self) -> u32 {
+        *self as u32
+    }
+}
+
+impl Display for Code {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{:0>4x}", self.to_code())
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     code: Code,
-    span: Span,
     message: String,
+    main_span: (Span, Option<String>),
+    additional_spans: Vec<(Span, Option<String>)>,
 }
 
 impl Diagnostic {
@@ -79,66 +113,102 @@ impl Diagnostic {
         &self.code
     }
 
-    pub fn span(&self) -> &Span {
-        &self.span
-    }
-
     pub fn message(&self) -> &String {
         &self.message
     }
 
-    fn is_recoverable(&self) -> bool {
-        self.code.is_recoverable()
+    pub fn main_span(&self) -> &Span {
+        &self.main_span.0
+    }
+
+    pub fn main_span_message(&self) -> Option<&String> {
+        self.main_span.1.as_ref()
+    }
+
+    pub fn additional_spans(&self) -> impl Iterator<Item = (&Span, Option<&String>)> {
+        self.additional_spans.iter().map(|(s, m)| (s, m.as_ref()))
+    }
+
+    pub fn additional_spans_len(&self) -> usize {
+        self.additional_spans.len()
     }
 }
 
 impl Display for Diagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(
+        write!(
             f,
-            "Diagnostic: `{}` at {}-{}",
+            "`{}` at {}-{}",
             self.message,
-            self.span.start,
-            self.span.start + self.span.length
+            self.main_span().start,
+            self.main_span().start + self.main_span().length
         )
     }
 }
 
 pub struct DiagnosticBuilder {
     span: Span,
+    additional_spans: Vec<(Span, Option<String>)>,
 }
 
 impl DiagnosticBuilder {
     pub fn new(span: Span) -> Self {
-        Self { span }
+        Self {
+            span,
+            additional_spans: Vec::new(),
+        }
+    }
+
+    pub fn with_additional_span(mut self, span: Span, message: Option<String>) -> Self {
+        self.add_additional_span(span, message);
+        self
+    }
+
+    pub fn add_additional_span(&mut self, span: Span, message: Option<String>) {
+        self.additional_spans.push((span, message));
     }
 
     pub fn build_custom(self, code: Code, message: String) -> Diagnostic {
         Diagnostic {
             code,
-            span: self.span,
             message,
+            main_span: (self.span, None),
+            additional_spans: self.additional_spans,
         }
+    }
+
+    pub fn build_unimplemented(self, message: String) -> Diagnostic {
+        self.build_custom(Code::Unimplemented, message + " are not yet implemented")
     }
 
     pub fn build_syntax(self, unexpected: &str, expected: Vec<&str>) -> Diagnostic {
         let message = format!(
-            "Unexpected token: {}, expected one of: {}",
+            "unexpected token: {}, expected one of: {}",
             unexpected,
             expected.join(", ")
         );
         self.build_custom(Code::SyntaxError, message)
     }
 
-    pub fn build_duplicate_qualifier(self, qualifier: &str) -> Diagnostic {
-        let message = format!("Duplicate qualifier: {qualifier}",);
+    pub fn build_duplicate_qualifier(
+        mut self,
+        qualifier: &str,
+        first_qualifier: Span,
+    ) -> Diagnostic {
+        self.add_additional_span(first_qualifier, Some("first seen here".to_string()));
+        let message = format!("duplicate qualifier: {qualifier}",);
         self.build_custom(Code::DuplicateQualifier, message)
+    }
+
+    pub fn build_unspecified_type(self) -> Diagnostic {
+        self.build_custom(
+            Code::UnspecifiedType,
+            "missing type specifier; type defaults to int".to_owned(),
+        )
     }
 }
 
-/// A Result of some data and a Aggregate. The `AggregateResult` will only ever be a `Rec` if the
-/// `Aggregate` only contains `is_recoverable` diagnostic's. A Err could contain a `Aggregate`
-/// with only recoverable diagnostic but this is avoided as much as possible.
+/// A Result of some data and a Aggregate.
 #[derive(Debug, Clone)]
 pub enum AggregateResult<T> {
     Ok(T),
@@ -154,19 +224,15 @@ impl<T> AggregateResult<T> {
 
     /// Creates a Rec or a Err based on weather or not the diagnostic is recoverable. The data is
     /// only used if the diagnostic is recoverable.
-    pub fn with_diagnostic(data: T, diagnostic: Diagnostic) -> Self {
-        if diagnostic.is_recoverable() {
-            Self::Rec(data, Aggregate::with_diagnostic(diagnostic))
-        } else {
-            Self::Err(Aggregate::with_diagnostic(diagnostic))
-        }
+    pub fn with_rec_diagnostic(data: T, diagnostic: Diagnostic) -> Self {
+        Self::Rec(data, Aggregate::with_rec_diagnostic(diagnostic))
     }
 
     /// Always creates a `Err` with the diagnostic in the `Aggregate`. Try to only call this
     /// function with unrecoverable diagnostics but its not a violation of the contract to do so
     /// anyway.
-    pub fn with_diagnostic_err(diagnostic: Diagnostic) -> Self {
-        Self::Err(Aggregate::with_diagnostic(diagnostic))
+    pub fn with_non_rec_diagnostic(diagnostic: Diagnostic) -> Self {
+        Self::Err(Aggregate::with_non_rec_diagnostic(diagnostic))
     }
 
     pub fn is_ok(&self) -> bool {
@@ -197,29 +263,33 @@ impl<T> AggregateResult<T> {
         }
     }
 
-    /// If the types is a Ok, turn it into a Rec or Err based on whether it is recoverable or not.
-    /// If it is Rec make it Err if the diagnostic is not recoverable. If the `Self` was
-    /// already a `Err` just add the diagnostic.
+    /// If the types is a Ok, turn it into a Rec. If the `Self` was already a `Err` adds the diagnostic as a recoverable diagnostics.
     #[must_use]
-    pub fn add_diagnostic(self, diagnostic: Diagnostic) -> Self {
+    pub fn add_rec_diagnostic(self, diagnostic: Diagnostic) -> Self {
         match self {
-            Self::Ok(t) => {
-                if diagnostic.is_recoverable() {
-                    Self::Rec(t, Aggregate::with_diagnostic(diagnostic))
-                } else {
-                    Self::Err(Aggregate::with_diagnostic(diagnostic))
-                }
-            }
+            Self::Ok(t) => Self::Rec(t, Aggregate::with_rec_diagnostic(diagnostic)),
             Self::Rec(t, mut a) => {
-                if diagnostic.is_recoverable() {
-                    a.add_diagnostic(diagnostic);
-                    Self::Rec(t, a)
-                } else {
-                    Self::Err(Aggregate::with_diagnostic(diagnostic))
-                }
+                a.add_rec_diagnostic(diagnostic);
+                Self::Rec(t, a)
             }
             Self::Err(mut a) => {
-                a.add_diagnostic(diagnostic);
+                a.add_rec_diagnostic(diagnostic);
+                Self::Err(a)
+            }
+        }
+    }
+
+    /// Turn self into `Err` if it wasent already. Adding the diagnostics as a non recoverable one.
+    #[must_use]
+    pub fn add_non_rec_diagnostic(self, diagnostic: Diagnostic) -> Self {
+        match self {
+            Self::Ok(_) => Self::Err(Aggregate::with_non_rec_diagnostic(diagnostic)),
+            Self::Rec(_, mut a) => {
+                a.add_non_rec_diagnostic(diagnostic);
+                Self::Err(a)
+            }
+            Self::Err(mut a) => {
+                a.add_non_rec_diagnostic(diagnostic);
                 Self::Err(a)
             }
         }
@@ -431,13 +501,24 @@ mod tests {
 
     #[test]
     fn combine_one_err() {
+        let d1 = DiagnosticBuilder::new(Span {
+            start: 0,
+            length: 1,
+        })
+        .build_custom(Code::SyntaxError, "test".to_string());
+        let d2 = DiagnosticBuilder::new(Span {
+            start: 0,
+            length: 1,
+        })
+        .build_custom(Code::SyntaxError, "test2".to_string());
+
         let a = AggregateResult::<u8>::Ok(0);
-        let b = AggregateResult::<i8>::Err(Aggregate::new());
+        let b = AggregateResult::<i8>::with_non_rec_diagnostic(d1);
         let c = a.into_combined().combine_with(b);
 
         assert!(c.is_err());
 
-        let a = AggregateResult::<i8>::Err(Aggregate::new());
+        let a = AggregateResult::<i8>::with_non_rec_diagnostic(d2);
         let b = AggregateResult::<u8>::Ok(0);
         let c = a.into_combined().combine_with(b);
 
@@ -446,24 +527,18 @@ mod tests {
 
     #[test]
     fn combine_two_err() {
-        let mut ag_1 = Aggregate::new();
-        ag_1.add_diagnostic(
-            DiagnosticBuilder::new(Span {
-                start: 0,
-                length: 1,
-            })
-            .build_custom(Code::SyntaxError, "test".to_string()),
-        );
-        let mut ag_2 = Aggregate::new();
-        ag_2.add_diagnostic(
-            DiagnosticBuilder::new(Span {
-                start: 0,
-                length: 1,
-            })
-            .build_custom(Code::SyntaxError, "test2".to_string()),
-        );
-        let a = AggregateResult::<u8>::Err(ag_1);
-        let b = AggregateResult::<i8>::Err(ag_2);
+        let d1 = DiagnosticBuilder::new(Span {
+            start: 0,
+            length: 1,
+        })
+        .build_custom(Code::SyntaxError, "test".to_string());
+        let d2 = DiagnosticBuilder::new(Span {
+            start: 0,
+            length: 1,
+        })
+        .build_custom(Code::SyntaxError, "test2".to_string());
+        let a = AggregateResult::<u8>::with_non_rec_diagnostic(d1);
+        let b = AggregateResult::<i8>::with_non_rec_diagnostic(d2);
         let c = a.into_combined().combine_with(b);
 
         assert_eq!(c.as_ref_rec_ok().unwrap_err().diagnostics().count(), 2);
@@ -471,37 +546,38 @@ mod tests {
 
     #[test]
     fn combine_vec() {
+        let d1 = DiagnosticBuilder::new(Span {
+            start: 0,
+            length: 1,
+        })
+        .build_custom(Code::SyntaxError, "test".to_string());
+
         let a = AggregateResult::Ok(vec![0]);
         let b = AggregateResult::Ok(1);
 
         let a = a.combine_with(b);
         assert_eq!(a.as_ref_rec_err().unwrap(), &[0, 1]);
 
-        let a = a.combine_with(AggregateResult::Rec(3, Aggregate::new()));
+        let a = a.combine_with(AggregateResult::with_rec_diagnostic(3, d1));
 
         assert!(a.is_rec());
         assert_eq!(a.as_ref_rec_ok().unwrap(), &[0, 1, 3]);
+        assert_eq!(a.as_ref_rec_err().unwrap_err().diagnostics().count(), 1);
 
-        let mut ag_1 = Aggregate::new();
-        ag_1.add_diagnostic(
-            DiagnosticBuilder::new(Span {
-                start: 0,
-                length: 1,
-            })
-            .build_custom(Code::SyntaxError, "test".to_string()),
-        );
-        let mut ag_2 = Aggregate::new();
-        ag_2.add_diagnostic(
-            DiagnosticBuilder::new(Span {
-                start: 0,
-                length: 1,
-            })
-            .build_custom(Code::SyntaxError, "test2".to_string()),
-        );
-        let a = a.combine_with(AggregateResult::Err(ag_1));
-        let a = a.combine_with(AggregateResult::Err(ag_2));
+        let d1 = DiagnosticBuilder::new(Span {
+            start: 0,
+            length: 1,
+        })
+        .build_custom(Code::SyntaxError, "test".to_string());
+        let d2 = DiagnosticBuilder::new(Span {
+            start: 0,
+            length: 1,
+        })
+        .build_custom(Code::SyntaxError, "test2".to_string());
+        let a = a.combine_with(AggregateResult::with_non_rec_diagnostic(d1));
+        let a = a.combine_with(AggregateResult::with_non_rec_diagnostic(d2));
 
         assert!(a.is_err());
-        assert_eq!(a.as_ref_rec_ok().unwrap_err().diagnostics().count(), 2);
+        assert_eq!(a.as_ref_rec_ok().unwrap_err().diagnostics().count(), 3);
     }
 }

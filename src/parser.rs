@@ -4,23 +4,12 @@ use antlr_rust::{
     error_listener::ErrorListener, errors::ANTLRError, recognizer::Recognizer, token::Token,
     token_factory::TokenFactory,
 };
-use std::{cell::RefCell, fmt, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     ast,
-    diagnostic::{self, Aggregate, AggregateResult, Code, DiagnosticBuilder, Span},
+    diagnostic::{self, AggregateResult, Code, DiagnosticBuilder, Span},
 };
-
-#[derive(Debug)]
-pub struct UnspecifiedAntlrError;
-
-impl fmt::Display for UnspecifiedAntlrError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "unspecified ANTLR error")
-    }
-}
-
-impl std::error::Error for UnspecifiedAntlrError {}
 
 type LexerInput<'a> = antlr_rust::InputStream<&'a str>;
 type Lexer<'a> = generated::MainLexer<'a, LexerInput<'a>>;
@@ -32,21 +21,22 @@ type Parser<'a> = generated::MainParser<'a, TokenStream<'a>, ParserErrorStrategy
 pub fn parse(input: &str) -> AggregateResult<ast::Ast> {
     let error_listener = AggregatingErrorListener::new();
 
-    let lexer = build_lexer(input);
-    let token_stream = TokenStream::new(lexer);
-    let mut parser = build_parser(token_stream, error_listener.clone());
+    // A seperate scope is used here to make shure the refrences to the ErrorListener are droped.
+    let tu = {
+        let lexer = build_lexer(input);
+        let token_stream = TokenStream::new(lexer);
+        let mut parser = build_parser(token_stream, error_listener.clone());
 
-    let tu = match parser.translationUnit() {
-        Ok(tu) => tu,
-        Err(_) => panic!("ICE: Internal ANTLR error"),
+        match parser.translationUnit() {
+            Ok(tu) => tu,
+            Err(_) => panic!("ICE: Internal ANTLR error"),
+        }
     };
 
-    if error_listener.0.as_ref().borrow_mut().is_empty() {
-        ast_builder::build_from_translation_unit(tu.as_ref())
-    } else {
-        let a = error_listener.0.as_ref().take();
-        AggregateResult::Err(a)
-    }
+    Rc::try_unwrap(error_listener.0)
+        .expect("ICE: All refrences to the error_listener should be droped by now")
+        .into_inner()
+        .and_then(move |_| ast_builder::build_from_translation_unit(&tu))
 }
 
 fn build_lexer(input: &str) -> Lexer {
@@ -85,11 +75,11 @@ impl<'a, T: Recognizer<'a>> ErrorListener<'a, T> for PanicErrorListener {
 }
 
 #[derive(Clone)]
-struct AggregatingErrorListener(Rc<RefCell<Aggregate>>);
+struct AggregatingErrorListener(Rc<RefCell<AggregateResult<()>>>);
 
 impl AggregatingErrorListener {
     fn new() -> Self {
-        AggregatingErrorListener(Rc::new(RefCell::new(Aggregate::new())))
+        AggregatingErrorListener(Rc::new(RefCell::new(AggregateResult::Ok(()))))
     }
 }
 
@@ -133,20 +123,22 @@ impl<'a, T: Recognizer<'a> + antlr_rust::Parser<'a>> ErrorListener<'a, T>
 
                 // TODO use build_lexer when we have a way to iterate over the expected_tokens ourselfs
                 db.build_custom(
-                    Code::UnspecifiedError,
+                    Code::SyntaxError,
                     format!(
-                        "Unexpected token: {}. Expected one of: {}",
+                        "unexpected token: {}, expected one of: {}",
                         offending_symbol_name, expected_tokens
                     ),
                 )
             }
             None => db.build_custom(
-                Code::UnspecifiedError,
-                format!("Unexpected token: {}", offending_symbol_name),
+                Code::SyntaxError,
+                format!("unexpected token: {}", offending_symbol_name),
             ),
         };
 
-        self.0.as_ref().borrow_mut().add_diagnostic(d);
+        let ar = self.0.as_ref().replace(AggregateResult::Ok(()));
+        let ar = ar.add_non_rec_diagnostic(d);
+        self.0.as_ref().replace(ar);
     }
 }
 
@@ -303,28 +295,38 @@ mod ast_builder {
     fn build_from_type_name(ctx: &context::TypeName) -> AggregateResult<ast::QualifiedTypeNode> {
         use context::TypeName as TN;
         use context::TypeSpecifier as TS;
+
+        let span = extract_span(ctx);
+
         let data = match ctx {
             TN::TypeNamePlainContext(plain) => {
                 if plain.specifiers.len() > 1 {
-                    unimplemented!("only one specifier supported for now");
+                    return AggregateResult::with_non_rec_diagnostic(
+                        DiagnosticBuilder::new(span)
+                            .build_unimplemented("types with more than one specifier".to_owned()),
+                    );
                 }
-                let s = plain
-                    .specifiers
-                    .get(0)
-                    .expect("a type must contain at least one specifier");
-                match s.as_ref() {
-                    TS::TypeSpecifierPrimitiveContext(primitive_type) => build_from_primitive_type(
-                        primitive_type.tp.as_deref().unwrap(),
-                    )
-                    .and_then(|data| {
-                        let unqualified_type_node = ast::UnqualifiedTypeNode {
-                            span: extract_span(primitive_type),
-                            data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(data)),
-                        };
-                        with_qualifiers(unqualified_type_node, &plain.qualifiers)
-                    }),
-                    TS::Error(ectx) => return Err(extract_tree_error(ectx)),
-                }
+                let primitive = match plain.specifiers.get(0) {
+                    Some(s) => match s.as_ref() {
+                        TS::TypeSpecifierPrimitiveContext(primitive_type) => {
+                            build_from_primitive_type(primitive_type.tp.as_deref().unwrap())
+                                .map(|p| (p, extract_span(primitive_type)))
+                        }
+                        TS::Error(ectx) => return Err(extract_tree_error(ectx)),
+                    },
+                    None => AggregateResult::with_rec_diagnostic(
+                        (ast::PrimitiveType::Int, extract_span(plain)),
+                        DiagnosticBuilder::new(span.clone()).build_unspecified_type(),
+                    ),
+                };
+
+                primitive.and_then(|(primitive, span)| {
+                    let unqualified_type_node = ast::UnqualifiedTypeNode {
+                        span,
+                        data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(primitive)),
+                    };
+                    with_qualifiers(unqualified_type_node, &plain.qualifiers)
+                })
             }
             TN::TypeNamePointerContext(ctx) => build_from_type_name(ctx.inner.as_deref().unwrap())
                 .and_then(|data| {
@@ -337,10 +339,7 @@ mod ast_builder {
             TN::Error(ectx) => return Err(extract_tree_error(ectx)),
         };
 
-        data.map(|data| ast::QualifiedTypeNode {
-            span: extract_span(ctx),
-            data,
-        })
+        data.map(|data| ast::QualifiedTypeNode { span, data })
     }
 
     fn with_qualifiers(
@@ -361,9 +360,10 @@ mod ast_builder {
                 TQ::TypeQualifierConstContext(ctx) => {
                     let span = extract_span(ctx);
 
-                    if qualified_type.is_const.is_some() {
-                        res = res.add_diagnostic(
-                            DiagnosticBuilder::new(span).build_duplicate_qualifier("const"),
+                    if let Some(original_span) = &qualified_type.is_const {
+                        res = res.add_rec_diagnostic(
+                            DiagnosticBuilder::new(span)
+                                .build_duplicate_qualifier("const", original_span.clone()),
                         )
                     } else {
                         qualified_type.is_const = Some(span);
@@ -397,12 +397,12 @@ mod ast_builder {
             CondExpr::CondExprSingularContext(singular) => {
                 return build_from_logical_or_expr(singular.value.as_deref().unwrap())
             }
-            CondExpr::CondExprTernaryContext(_composed) => AggregateResult::with_diagnostic_err(
-                DiagnosticBuilder::new(extract_span(ctx)).build_custom(
-                    Code::UnspecifiedError,
-                    "Ternary expr are not suported yet".to_owned(),
-                ),
-            ),
+            CondExpr::CondExprTernaryContext(_composed) => {
+                AggregateResult::with_non_rec_diagnostic(
+                    DiagnosticBuilder::new(extract_span(ctx))
+                        .build_unimplemented("ternary expressions".to_owned()),
+                )
+            }
             CondExpr::Error(ectx) => return Err(extract_tree_error(ectx)),
         };
 
@@ -740,11 +740,11 @@ mod ast_builder {
                         panic!("ICE: Empty chars should not be allowed by the grammer");
                     }
                     [b] => Ok(*b as i128),
-                    multi_byte => AggregateResult::with_diagnostic(
+                    multi_byte => AggregateResult::with_rec_diagnostic(
                         multi_byte[0] as i128,
                         DiagnosticBuilder::new(extract_span(ctx)).build_custom(
                             Code::MultiByteChar,
-                            "Multi byte chars are implementation defined".to_owned(),
+                            "multi byte chars are implementation defined".to_owned(),
                         ),
                     ),
                 };

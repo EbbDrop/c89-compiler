@@ -1,12 +1,22 @@
 use std::{
     fs::{File, OpenOptions},
     io::{self, Read, Write},
+    ops::Range,
     path::PathBuf,
 };
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, ValueEnum};
-use comp::{generators::dot::to_dot, parser};
+use codespan_reporting::{
+    diagnostic::{Label, Severity},
+    files::SimpleFile,
+    term,
+};
+use comp::{
+    diagnostic::{Aggregate, Code, DiagnosticType, Span},
+    generators::dot::to_dot,
+    parser,
+};
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum OutputFormat {
@@ -31,6 +41,65 @@ impl From<&std::ffi::OsStr> for PathOrStd {
     }
 }
 
+fn span_to_range(span: &Span) -> Range<usize> {
+    span.start..span.start + span.length
+}
+
+fn eprint_aggregate<'files, F>(aggregate: &Aggregate, files: &'files F)
+where
+    F: codespan_reporting::files::Files<'files, FileId = ()>,
+{
+    let mut writer = term::termcolor::StandardStream::stderr(term::termcolor::ColorChoice::Auto);
+    let config = term::Config {
+        chars: term::Chars {
+            single_primary_caret: '─',
+            single_secondary_caret: '─',
+            multi_primary_caret_start: '╯',
+            multi_secondary_caret_start: '╯',
+            multi_primary_caret_end: '╯',
+            multi_secondary_caret_end: '╯',
+            ..term::Chars::box_drawing()
+        },
+
+        ..Default::default()
+    };
+
+    for (t, d) in aggregate.diagnostics() {
+        let severity = match t {
+            DiagnosticType::Recoverable => Severity::Warning,
+            DiagnosticType::NonRecoverable => Severity::Error,
+        };
+
+        let mut labels = Vec::with_capacity(1 + d.additional_spans_len());
+
+        labels.push({
+            let mut l = Label::primary((), span_to_range(d.main_span()));
+            if let Some(m) = d.main_span_message() {
+                l = l.with_message(m);
+            }
+            l
+        });
+
+        for (span, message) in d.additional_spans() {
+            let mut l = Label::secondary((), span_to_range(span));
+            if let Some(m) = message {
+                l = l.with_message(m);
+            }
+            labels.push(l);
+        }
+
+        let mut diagnostic = codespan_reporting::diagnostic::Diagnostic::new(severity)
+            .with_message(d.message())
+            .with_labels(labels);
+
+        if d.code() != &Code::Unspecified {
+            diagnostic = diagnostic.with_code(d.code().to_string())
+        }
+
+        term::emit(&mut writer, &config, files, &diagnostic).unwrap();
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -50,7 +119,7 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    let input_string = match args.input_path {
+    let source = match args.input_path {
         PathOrStd::Path(path) => {
             if !path.exists() {
                 bail!("Input file `{}` doesn't exist", path.display());
@@ -61,7 +130,8 @@ fn main() -> Result<()> {
             handle
                 .read_to_string(&mut s)
                 .with_context(|| format!("Failed to read from input file `{}`", path.display()))?;
-            s
+
+            SimpleFile::new(path.file_name().unwrap().to_string_lossy().into_owned(), s)
         }
         PathOrStd::StdStream => {
             let mut handle = io::stdin().lock();
@@ -69,18 +139,20 @@ fn main() -> Result<()> {
             handle
                 .read_to_string(&mut s)
                 .context("Failed to read from stdin")?;
-            s
+
+            SimpleFile::new("stdin stream".to_owned(), s)
         }
     };
 
-    let ast = match parser::parse(&input_string) {
+    let ast = match parser::parse(source.source()) {
         comp::diagnostic::AggregateResult::Ok(t) => t,
         comp::diagnostic::AggregateResult::Rec(t, a) => {
-            eprintln!("Parser Warnings:\n{a}");
+            eprint_aggregate(&a, &source);
             t
         }
         comp::diagnostic::AggregateResult::Err(a) => {
-            return Err(a).context("Parser errors and warnings")
+            eprint_aggregate(&a, &source);
+            bail!("Couldn't compile due to the previous errors");
         }
     };
 
