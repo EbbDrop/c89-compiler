@@ -3,10 +3,56 @@ use std::{
     fmt::{Debug, Display},
 };
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Span {
-    pub start: usize,
-    pub length: usize,
+    start: usize,
+    length: usize,
+}
+
+impl From<std::ops::Range<usize>> for Span {
+    fn from(value: std::ops::Range<usize>) -> Self {
+        Self {
+            start: value.start,
+            length: value.len(),
+        }
+    }
+}
+
+impl From<std::ops::RangeInclusive<usize>> for Span {
+    fn from(value: std::ops::RangeInclusive<usize>) -> Self {
+        let (start, end) = value.into_inner();
+        Self {
+            start,
+            length: end.saturating_sub(start),
+        }
+    }
+}
+
+impl Into<std::ops::Range<usize>> for Span {
+    fn into(self) -> std::ops::Range<usize> {
+        self.start..self.excl_end()
+    }
+}
+
+impl Debug for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let range: std::ops::Range<_> = (*self).into();
+        range.fmt(f)
+    }
+}
+
+impl Span {
+    pub fn start(&self) -> usize {
+        self.start
+    }
+
+    pub fn excl_end(&self) -> usize {
+        self.start + self.length
+    }
+
+    pub fn len(&self) -> usize {
+        self.length
+    }
 }
 
 // WARNING: Don't change the order of these (Error codes will change)

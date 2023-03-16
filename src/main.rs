@@ -1,7 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
     io::{self, Read, Write},
-    ops::Range,
     path::PathBuf,
 };
 
@@ -13,7 +12,7 @@ use codespan_reporting::{
     term,
 };
 use comp::{
-    diagnostic::{AggregateResult, Code, DiagnosticKind, Span},
+    diagnostic::{AggregateResult, Code, DiagnosticKind},
     generators::dot::to_dot,
     parser, passes,
 };
@@ -39,10 +38,6 @@ impl From<&std::ffi::OsStr> for PathOrStd {
             Self::Path(value.into())
         }
     }
-}
-
-fn span_to_range(span: &Span) -> Range<usize> {
-    span.start..span.start + span.length
 }
 
 fn eprint_aggregate<'files, T, F>(aggregate: &AggregateResult<T>, files: &'files F)
@@ -73,7 +68,7 @@ where
         let mut labels = Vec::with_capacity(1 + d.additional_spans_len());
 
         labels.push({
-            let mut l = Label::primary((), span_to_range(d.main_span()));
+            let mut l = Label::primary((), *d.main_span());
             if let Some(m) = d.main_span_message() {
                 l = l.with_message(m);
             }
@@ -81,7 +76,7 @@ where
         });
 
         for (span, message) in d.additional_spans() {
-            let mut l = Label::secondary((), span_to_range(span));
+            let mut l = Label::secondary((), *span);
             if let Some(m) = message {
                 l = l.with_message(m);
             }

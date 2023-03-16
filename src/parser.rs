@@ -100,15 +100,10 @@ impl<'a, T: Recognizer<'a> + antlr_rust::Parser<'a>> ErrorListener<'a, T>
         let vocabulary = recognizer.get_vocabulary();
         let offending_symbol_name = vocabulary.get_display_name(offending_symbol.get_token_type());
 
-        let start = offending_symbol.get_start();
-        let end = offending_symbol.get_stop() + 1;
+        let start: usize = offending_symbol.get_start().try_into().unwrap();
+        let end: usize = (offending_symbol.get_stop() + 1).try_into().unwrap();
 
-        let span = Span {
-            start: start as usize,
-            length: (end - start).max(0) as usize,
-        };
-
-        let db = DiagnosticBuilder::new(span);
+        let db = DiagnosticBuilder::new(Span::from(start..end));
 
         let d = match error {
             Some(error) => {
@@ -165,23 +160,17 @@ mod ast_builder {
     }
 
     fn extract_span<'a>(ctx: &impl ParserRuleContext<'a>) -> Span {
-        let start = ctx.start().get_start();
-        let end = ctx.stop().get_stop() + 1;
+        let start: usize = ctx.start().get_start().try_into().unwrap();
+        let end: usize = (ctx.stop().get_stop() + 1).try_into().unwrap();
 
-        Span {
-            start: start as usize,
-            length: (end - start).max(0) as usize,
-        }
+        Span::from(start..end)
     }
 
     fn extract_span_from_token(token: &impl Token) -> Span {
-        let start = token.get_start();
-        let end = token.get_stop() + 1;
+        let start: usize = token.get_start().try_into().unwrap();
+        let end: usize = (token.get_stop() + 1).try_into().unwrap();
 
-        Span {
-            start: start as usize,
-            length: (end - start).max(0) as usize,
-        }
+        Span::from(start..end)
     }
 
     pub fn build_from_translation_unit(
