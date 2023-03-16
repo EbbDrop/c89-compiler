@@ -13,7 +13,7 @@ use codespan_reporting::{
     term,
 };
 use comp::{
-    diagnostic::{Aggregate, Code, DiagnosticType, Span},
+    diagnostic::{AggregateResult, Code, DiagnosticKind, Span},
     generators::dot::to_dot,
     parser,
 };
@@ -45,7 +45,7 @@ fn span_to_range(span: &Span) -> Range<usize> {
     span.start..span.start + span.length
 }
 
-fn eprint_aggregate<'files, F>(aggregate: &Aggregate, files: &'files F)
+fn eprint_aggregate<'files, T, F>(aggregate: &AggregateResult<T>, files: &'files F)
 where
     F: codespan_reporting::files::Files<'files, FileId = ()>,
 {
@@ -66,8 +66,8 @@ where
 
     for (t, d) in aggregate.diagnostics() {
         let severity = match t {
-            DiagnosticType::Recoverable => Severity::Warning,
-            DiagnosticType::NonRecoverable => Severity::Error,
+            DiagnosticKind::Rec => Severity::Warning,
+            DiagnosticKind::Err => Severity::Error,
         };
 
         let mut labels = Vec::with_capacity(1 + d.additional_spans_len());
@@ -144,16 +144,13 @@ fn main() -> Result<()> {
         }
     };
 
-    let ast = match parser::parse(source.source()) {
-        comp::diagnostic::AggregateResult::Ok(t) => t,
-        comp::diagnostic::AggregateResult::Rec(t, a) => {
-            eprint_aggregate(&a, &source);
-            t
-        }
-        comp::diagnostic::AggregateResult::Err(a) => {
-            eprint_aggregate(&a, &source);
-            bail!("Couldn't compile due to the previous errors");
-        }
+    let parse_result = parser::parse(source.source());
+    if !parse_result.is_ok() {
+        eprint_aggregate(&parse_result, &source);
+    }
+    let ast = match parse_result.value() {
+        Some(ast) => ast,
+        None => bail!("couldn't compile due to the previous errors"),
     };
 
     let output = match args.emit {

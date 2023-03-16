@@ -1,79 +1,13 @@
 use std::{
     collections::LinkedList,
-    error::Error,
     fmt::{Debug, Display},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
     pub length: usize,
 }
-
-#[derive(Debug, Clone, Copy)]
-pub enum DiagnosticType {
-    Recoverable,
-    NonRecoverable,
-}
-
-#[derive(Debug, Clone)]
-pub struct Aggregate {
-    diagnostics: LinkedList<(DiagnosticType, Diagnostic)>,
-}
-
-impl Aggregate {
-    fn with_rec_diagnostic(diagnostic: Diagnostic) -> Aggregate {
-        Self {
-            diagnostics: LinkedList::from([(DiagnosticType::Recoverable, diagnostic)]),
-        }
-    }
-
-    fn with_non_rec_diagnostic(diagnostic: Diagnostic) -> Aggregate {
-        Self {
-            diagnostics: LinkedList::from([(DiagnosticType::NonRecoverable, diagnostic)]),
-        }
-    }
-
-    fn add_rec_diagnostic(&mut self, diagnostic: Diagnostic) {
-        self.diagnostics
-            .push_front((DiagnosticType::Recoverable, diagnostic));
-    }
-
-    fn add_non_rec_diagnostic(&mut self, diagnostic: Diagnostic) {
-        self.diagnostics
-            .push_front((DiagnosticType::NonRecoverable, diagnostic));
-    }
-
-    fn combine_with(&mut self, mut other: Self) {
-        self.diagnostics.append(&mut other.diagnostics);
-    }
-
-    pub fn diagnostics(&self) -> impl Iterator<Item = (DiagnosticType, &Diagnostic)> {
-        self.diagnostics.iter().map(|(dt, d)| (*dt, d))
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.diagnostics.is_empty()
-    }
-}
-
-impl Display for Aggregate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (t, diagnostic) in self.diagnostics() {
-            match t {
-                DiagnosticType::Recoverable => {
-                    writeln!(f, "W: {}", diagnostic)?;
-                }
-                DiagnosticType::NonRecoverable => {
-                    writeln!(f, "E: {}", diagnostic)?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl Error for Aggregate {}
 
 // WARNING: Don't change the order of these (Error codes will change)
 #[repr(u32)]
@@ -100,7 +34,7 @@ impl Display for Code {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Diagnostic {
     code: Code,
     message: String,
@@ -196,7 +130,7 @@ impl DiagnosticBuilder {
         first_qualifier: Span,
     ) -> Diagnostic {
         self.add_additional_span(first_qualifier, Some("first seen here".to_string()));
-        let message = format!("duplicate qualifier: {qualifier}",);
+        let message = format!("duplicate qualifier: {qualifier}");
         self.build_custom(Code::DuplicateQualifier, message)
     }
 
@@ -208,376 +142,314 @@ impl DiagnosticBuilder {
     }
 }
 
-/// A Result of some data and a Aggregate.
+/// Specifies the possibles types of diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticKind {
+    /// For recoverable diagnostics. (cfr. warnings)
+    Rec,
+    /// For non-recoverable diagnostics. (cfr. errors)
+    Err,
+}
+
+/// A result combining a value with aggregated diagnostics.
+///
+/// Can be in one of three states:
+/// - _ok_: The result contains a value and has no diagnostics. Corresponds to `Result::Ok`.
+/// - _rec_: recoverable: The result contains a (recovered) value and has only diagnostics of the
+///   kind [`DiagnosticKind::Rec`].
+/// - _err_: non-recoverable: The result does not contain a value and has at least one diagnostic of
+///   the kind [`DiagnosticKind::Err`].
+///
+/// It is guaranteed that the result will never be completely empty (i.e. no value nor diagnostics).
 #[derive(Debug, Clone)]
-pub enum AggregateResult<T> {
-    Ok(T),
-    Rec(T, Aggregate),
-    Err(Aggregate),
+pub struct AggregateResult<T> {
+    value: Option<T>,
+    diagnostics: LinkedList<(DiagnosticKind, Diagnostic)>,
+}
+
+impl<T: Default> Default for AggregateResult<T> {
+    /// Creates an `AggregateResult<T>` in an _ok_ state containing the default value for `T`.
+    fn default() -> Self {
+        Self {
+            value: Some(T::default()),
+            diagnostics: LinkedList::default(),
+        }
+    }
 }
 
 impl<T> AggregateResult<T> {
-    /// Creates a Ok with T as data
-    pub fn with_value(data: T) -> Self {
-        Self::Ok(data)
+    /// Creates an `AggregateResult` in an _ok_ state containing the specified value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use comp::diagnostic::*;
+    /// let res = AggregateResult::new_ok(2);
+    ///
+    /// assert!(res.is_ok());
+    /// assert_eq!(res.value(), Some(&2));
+    /// assert!(res.diagnostics().next().is_none());
+    /// ```
+    pub fn new_ok(value: T) -> Self {
+        Self {
+            value: Some(value),
+            diagnostics: LinkedList::new(),
+        }
     }
 
-    /// Creates a Rec or a Err based on weather or not the diagnostic is recoverable. The data is
-    /// only used if the diagnostic is recoverable.
-    pub fn with_rec_diagnostic(data: T, diagnostic: Diagnostic) -> Self {
-        Self::Rec(data, Aggregate::with_rec_diagnostic(diagnostic))
+    /// Creates an `AggregateResult` in a _rec_ state containing the specified value and diagnostic.
+    ///
+    /// The diagnostic will be given the kind [`DiagnosticKind::Rec`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use comp::diagnostic::*;
+    /// # let diagnostic = DiagnosticBuilder::new(Span::default()).build_unimplemented("".to_owned());
+    /// let res = AggregateResult::new_rec("hi", diagnostic.clone());
+    ///
+    /// assert!(res.is_rec());
+    /// assert_eq!(res.value(), Some(&"hi"));
+    /// let mut diags = res.diagnostics();
+    /// assert_eq!(diags.next(), Some((DiagnosticKind::Rec, &diagnostic)));
+    /// assert!(diags.next().is_none());
+    /// ```
+    pub fn new_rec(value: T, diagnostic: Diagnostic) -> Self {
+        Self {
+            value: Some(value),
+            diagnostics: LinkedList::from([(DiagnosticKind::Rec, diagnostic)]),
+        }
     }
 
-    /// Always creates a `Err` with the diagnostic in the `Aggregate`. Try to only call this
-    /// function with unrecoverable diagnostics but its not a violation of the contract to do so
-    /// anyway.
-    pub fn with_non_rec_diagnostic(diagnostic: Diagnostic) -> Self {
-        Self::Err(Aggregate::with_non_rec_diagnostic(diagnostic))
+    /// Creates an `AggregateResult` in an _err_ state containing the specified diagnostic.
+    ///
+    /// The diagnostic will be given the kind [`DiagnosticKind::Err`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use comp::diagnostic::*;
+    /// # let diagnostic = DiagnosticBuilder::new(Span::default()).build_unimplemented("".to_owned());
+    /// let res = AggregateResult::<()>::new_err(diagnostic.clone());
+    ///
+    /// assert!(res.is_err());
+    /// assert!(res.value().is_none());
+    /// let mut diags = res.diagnostics();
+    /// assert_eq!(diags.next(), Some((DiagnosticKind::Err, &diagnostic)));
+    /// assert!(diags.next().is_none());
+    /// ```
+    pub fn new_err(diagnostic: Diagnostic) -> Self {
+        Self {
+            value: None,
+            diagnostics: LinkedList::from([(DiagnosticKind::Err, diagnostic)]),
+        }
     }
 
+    /// Returns `true` if the result is in an _ok_ state.
+    ///
+    /// A result in an _ok_ state is guaranteed to contain a value and have no diagnostics.
     pub fn is_ok(&self) -> bool {
-        match self {
-            AggregateResult::Ok(_) => true,
-            _ => false,
-        }
+        self.value.is_some() && self.diagnostics.is_empty()
     }
 
+    /// Returns `true` if the result is in a _rec_ state.
+    ///
+    /// A result in a _rec_ state is guaranteed to contain a (recovered) value and only diagnostics
+    /// of the kind [`DiagnosticKind::Rec`]. It will contain at least one diagnostic.
     pub fn is_rec(&self) -> bool {
-        match self {
-            AggregateResult::Rec(_, _) => true,
-            _ => false,
-        }
+        self.value.is_some() && !self.diagnostics.is_empty()
     }
 
+    /// Returns `true` if the result is in an _err_ state.
+    ///
+    /// A result in an _err_ state is guaranteed to contain no value and only diagnostics of the
+    /// kind [`DiagnosticKind::Err`]. It will contain at least one diagnostic.
     pub fn is_err(&self) -> bool {
-        match self {
-            AggregateResult::Err(_) => true,
-            _ => false,
-        }
+        self.value.is_none()
     }
 
-    pub fn is_not_ok(&self) -> bool {
-        match self {
-            Self::Ok(_) => false,
-            _ => true,
-        }
+    /// Returns the contained value for _ok_ and _rec_ results.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use comp::diagnostic::*;
+    /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("".to_owned());
+    /// # let diagnostic2 = diagnostic1.clone();
+    ///
+    /// let ok = AggregateResult::new_ok(1);
+    /// let rec = AggregateResult::new_rec(2, diagnostic1);
+    /// let err = AggregateResult::<()>::new_err(diagnostic2);
+    ///
+    /// assert_eq!(ok.value(), Some(&1));
+    /// assert_eq!(rec.value(), Some(&2));
+    /// assert!(err.value().is_none());
+    /// ```
+    pub fn value(&self) -> Option<&T> {
+        self.value.as_ref()
     }
 
-    /// If the types is a Ok, turn it into a Rec. If the `Self` was already a `Err` adds the diagnostic as a recoverable diagnostics.
-    #[must_use]
-    pub fn add_rec_diagnostic(self, diagnostic: Diagnostic) -> Self {
-        match self {
-            Self::Ok(t) => Self::Rec(t, Aggregate::with_rec_diagnostic(diagnostic)),
-            Self::Rec(t, mut a) => {
-                a.add_rec_diagnostic(diagnostic);
-                Self::Rec(t, a)
-            }
-            Self::Err(mut a) => {
-                a.add_rec_diagnostic(diagnostic);
-                Self::Err(a)
-            }
-        }
+    /// Converts from `&mut AggregateResult<T>` to `Option<&mut T>`, returning `Some(&mut T)` for
+    /// _ok_ and _rec_ results.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use comp::diagnostic::*;
+    /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("".to_owned());
+    /// # let diagnostic2 = diagnostic1.clone();
+    ///
+    /// let mut ok = AggregateResult::new_ok(1);
+    /// let mut rec = AggregateResult::new_rec(2, diagnostic1);
+    /// let mut err = AggregateResult::<()>::new_err(diagnostic2);
+    ///
+    /// assert_eq!(ok.value_mut(), Some(&mut 1));
+    /// assert_eq!(rec.value_mut(), Some(&mut 2));
+    /// assert!(err.value_mut().is_none());
+    /// ```
+    pub fn value_mut(&mut self) -> Option<&mut T> {
+        self.value.as_mut()
     }
 
-    /// Turn self into `Err` if it wasent already. Adding the diagnostics as a non recoverable one.
-    #[must_use]
-    pub fn add_non_rec_diagnostic(self, diagnostic: Diagnostic) -> Self {
-        match self {
-            Self::Ok(_) => Self::Err(Aggregate::with_non_rec_diagnostic(diagnostic)),
-            Self::Rec(_, mut a) => {
-                a.add_non_rec_diagnostic(diagnostic);
-                Self::Err(a)
-            }
-            Self::Err(mut a) => {
-                a.add_non_rec_diagnostic(diagnostic);
-                Self::Err(a)
-            }
-        }
+    /// Returns an iterator over the diagnostics for _rec_ and _err_ results.
+    ///
+    /// If this is a _rec_ result, all diagnostics are guaranteed to be of the kind
+    /// [`DiagnosticKind::Rec`].
+    pub fn diagnostics(&self) -> impl Iterator<Item = (DiagnosticKind, &Diagnostic)> {
+        self.diagnostics.iter().map(|(dt, d)| (*dt, d))
     }
 
+    /// Adds a recoverable diagnostic to the result.
+    ///
+    /// An _ok_ result will become a _rec_ result.
+    pub fn add_rec_diagnostic(&mut self, diagnostic: Diagnostic) {
+        self.diagnostics
+            .push_back((DiagnosticKind::Rec, diagnostic));
+    }
+
+    /// Adds a non-recoverable diagnostic to the result.
+    ///
+    /// The result will become an _err_ result, dropping a contained value.
+    pub fn add_err(&mut self, diagnostic: Diagnostic) {
+        self.value = None;
+        self.diagnostics
+            .push_back((DiagnosticKind::Err, diagnostic));
+    }
+
+    /// Maps an `AggregateResult<T, E>` to `AggregateResult<U, E>` by applying a function to a
+    /// contained value, leaving diagnostics untouched.
     #[must_use]
     pub fn map<U, F>(self, op: F) -> AggregateResult<U>
     where
         F: FnOnce(T) -> U,
     {
-        match self {
-            Self::Ok(t) => AggregateResult::Ok(op(t)),
-            Self::Rec(t, a) => AggregateResult::Rec(op(t), a),
-            Self::Err(a) => AggregateResult::Err(a),
+        AggregateResult {
+            value: self.value.map(op),
+            diagnostics: self.diagnostics,
         }
     }
 
-    /// If `self` is `Ok` or `Rec` calls `op` on the data. The returned `AggregateResult` is then
-    /// combined with this `AggregateResult` in the usual whey.
+    /// Combines the values of `self` and `other` using `f`, aggregating their diagnostics.
+    ///
+    /// If either `self` or `other` is in an _err_ state, the returned result will be in an _err_
+    /// state as well. Otherwise, the result will contain the value returned by `f`.
     #[must_use]
-    pub fn and_then<U, F>(self, op: F) -> AggregateResult<U>
+    pub fn and<U, F, R>(mut self, mut other: AggregateResult<U>, f: F) -> AggregateResult<R>
+    where
+        F: FnOnce(T, U) -> R,
+    {
+        AggregateResult {
+            value: self.value.and_then(|t| other.value.map(|u| f(t, u))),
+            diagnostics: {
+                self.diagnostics.append(&mut other.diagnostics);
+                self.diagnostics
+            },
+        }
+    }
+
+    /// Calls `op` if the result has a value, aggregating the diagnostics of `self` with the result
+    /// returned by `op`.
+    ///
+    /// The value of `self` will always be discarded.
+    #[must_use]
+    pub fn and_then<U, F>(mut self, op: F) -> AggregateResult<U>
     where
         F: FnOnce(T) -> AggregateResult<U>,
     {
-        match self {
-            Self::Ok(t) => op(t),
-            Self::Rec(t, mut a) => match op(t) {
-                AggregateResult::Ok(u) => AggregateResult::Rec(u, a),
-                AggregateResult::Rec(u, a2) => {
-                    a.combine_with(a2);
-                    AggregateResult::Rec(u, a)
-                }
-                AggregateResult::Err(a2) => {
-                    a.combine_with(a2);
-                    AggregateResult::Err(a)
-                }
-            },
-            Self::Err(a) => AggregateResult::Err(a),
-        }
-    }
-
-    #[must_use]
-    pub fn into_combined(self) -> AggregateResult<(T,)> {
-        self.map(|t| (t,))
-    }
-
-    /// Converts from `AggregateResult<T>` to `Result<T, Aggregate>`, turning [`Rec`] into
-    /// [`Result::Ok`].
-    ///
-    /// Converts self into a `Result<T, Aggregate>`, consuming self, and discarding the aggregate in
-    /// case it's a `Rec(T, Aggregate)`, converting the value to a `Result::Ok` instead.
-    #[must_use]
-    pub fn rec_ok(self) -> Result<T, Aggregate> {
-        match self {
-            Self::Ok(t) => Result::Ok(t),
-            Self::Rec(t, _) => Result::Ok(t),
-            Self::Err(a) => Result::Err(a),
-        }
-    }
-
-    /// Converts from `AggregateResult<T>` to `Result<T, Aggregate>`, turning [`Rec`] into
-    /// [`Result::Err`].
-    ///
-    /// Converts self into a `Result<T, Aggregate>`, consuming self, and discarding the value in
-    /// case it's a `Rec(T, Aggregate)`, converting the aggregate to a `Result::Err` instead.
-    #[must_use]
-    pub fn rec_err(self) -> Result<T, Aggregate> {
-        match self {
-            Self::Ok(t) => Result::Ok(t),
-            Self::Rec(_, a) => Result::Err(a),
-            Self::Err(a) => Result::Err(a),
-        }
-    }
-
-    /// Gives references to the T and the Aggregate, turning both `Ok` and `Rec` into `Result::Ok`
-    #[must_use]
-    pub fn as_ref_rec_ok(&self) -> Result<&T, &Aggregate> {
-        match self {
-            Self::Ok(t) => Result::Ok(t),
-            Self::Rec(t, _) => Result::Ok(t),
-            Self::Err(a) => Result::Err(a),
-        }
-    }
-
-    /// Gives references to the T and the Aggregate, turning only `Ok` into `Result::Ok`
-    #[must_use]
-    pub fn as_ref_rec_err(&self) -> Result<&T, &Aggregate> {
-        match self {
-            Self::Ok(t) => Result::Ok(t),
-            Self::Rec(_, a) => Result::Err(a),
-            Self::Err(a) => Result::Err(a),
-        }
-    }
-}
-
-impl<T> AggregateResult<Vec<T>> {
-    /// Combines two `AggregateResult`s
-    ///
-    /// If both are not `Err` then the T of the other `AggregateResult` will be pushed to the
-    /// `Vec`. Any possible `Aggregate`s will also be combined. The resulting variant will be as
-    /// Close to Ok as possible.
-    #[must_use]
-    pub fn combine_with(self, other: AggregateResult<T>) -> Self {
-        match self {
-            Self::Ok(mut v) => match other {
-                AggregateResult::Ok(t) => {
-                    v.push(t);
-                    Self::Ok(v)
-                }
-                AggregateResult::Rec(t, a) => {
-                    v.push(t);
-                    Self::Rec(v, a)
-                }
-                AggregateResult::Err(a) => Self::Err(a),
-            },
-            Self::Rec(mut v, mut a) => match other {
-                AggregateResult::Ok(t) => {
-                    v.push(t);
-                    Self::Rec(v, a)
-                }
-                AggregateResult::Rec(t, a2) => {
-                    v.push(t);
-                    a.combine_with(a2);
-                    Self::Rec(v, a)
-                }
-                AggregateResult::Err(a2) => {
-                    a.combine_with(a2);
-                    Self::Err(a)
-                }
-            },
-            Self::Err(mut a) => match other {
-                AggregateResult::Ok(_) => Self::Err(a),
-                AggregateResult::Rec(_, a2) => {
-                    a.combine_with(a2);
-                    Self::Err(a)
-                }
-                AggregateResult::Err(a2) => {
-                    a.combine_with(a2);
-                    Self::Err(a)
-                }
-            },
-        }
-    }
-}
-
-macro_rules! impl_aggregate_result_combine {
-    () => (
-
-    );
-    ( $new:ident $($from:ident)*) => (
-        impl<$($from),*> AggregateResult<($($from,)*)> {
-            #[allow(non_snake_case)]
-            pub fn combine_with<$new>(self, other: AggregateResult<$new>) -> AggregateResult<($($from,)* $new,)> {
-                match self {
-                    Self::Ok(($($from,)*)) => match other {
-                        AggregateResult::Ok($new) => AggregateResult::Ok(($($from,)* $new,)),
-                        AggregateResult::Rec($new, a) => AggregateResult::Rec(($($from,)* $new,), a),
-                        AggregateResult::Err(a) => AggregateResult::Err(a),
-                    },
-                    Self::Rec(($($from,)*), mut a) => match other {
-                        AggregateResult::Ok($new) => AggregateResult::Rec(($($from,)* $new,), a),
-                        AggregateResult::Rec($new, a2) => {
-                            a.combine_with(a2);
-                            AggregateResult::Rec(($($from,)* $new,), a)
-                        }
-                        AggregateResult::Err(a2) => {
-                            a.combine_with(a2);
-                            AggregateResult::Err(a)
-                        }
-                    },
-                    Self::Err(mut a) => match other {
-                        AggregateResult::Ok(_) => AggregateResult::Err(a),
-                        AggregateResult::Rec(_, a2) => {
-                            a.combine_with(a2);
-                            AggregateResult::Err(a)
-                        }
-                        AggregateResult::Err(a2) => {
-                            a.combine_with(a2);
-                            AggregateResult::Err(a)
-                        }
-                    },
-                }
+        match self.value {
+            Some(t) => {
+                let mut other = op(t);
+                self.diagnostics.append(&mut other.diagnostics);
+                other.diagnostics = self.diagnostics;
+                other
             }
+            None => AggregateResult {
+                value: None,
+                diagnostics: self.diagnostics,
+            },
         }
-
-        impl_aggregate_result_combine!{$($from)*}
-    );
-}
-
-impl_aggregate_result_combine! { A B C D E F }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn combine_oks() {
-        let a = AggregateResult::<u8>::Ok(0);
-        let b = AggregateResult::<i8>::Ok(-1);
-        let res = a.into_combined().combine_with(b);
-
-        assert_eq!(res.as_ref_rec_err().unwrap(), &(0, -1));
-
-        let d = AggregateResult::<char>::Ok('a');
-        let res = res.combine_with(d);
-
-        assert_eq!(res.as_ref_rec_err().unwrap(), &(0, -1, 'a'));
     }
 
-    #[test]
-    fn combine_one_err() {
-        let d1 = DiagnosticBuilder::new(Span {
-            start: 0,
-            length: 1,
-        })
-        .build_custom(Code::SyntaxError, "test".to_string());
-        let d2 = DiagnosticBuilder::new(Span {
-            start: 0,
-            length: 1,
-        })
-        .build_custom(Code::SyntaxError, "test2".to_string());
-
-        let a = AggregateResult::<u8>::Ok(0);
-        let b = AggregateResult::<i8>::with_non_rec_diagnostic(d1);
-        let c = a.into_combined().combine_with(b);
-
-        assert!(c.is_err());
-
-        let a = AggregateResult::<i8>::with_non_rec_diagnostic(d2);
-        let b = AggregateResult::<u8>::Ok(0);
-        let c = a.into_combined().combine_with(b);
-
-        assert!(c.is_err());
+    /// Zips the values of `self` and `other`, aggregating their diagnostics.
+    ///
+    /// If either `self` or `other` is in an _err_ state, the returned result will be in an _err_
+    /// state as well. Otherwise, the returned result will contain a tuple with the values of `self`
+    /// and `other`.
+    ///
+    /// This method is roughly equivalent to
+    ///
+    /// ```ignore
+    /// self.and(other, |t, u| (t, u))
+    /// ```
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use comp::diagnostic::*;
+    /// # let rec_diag = DiagnosticBuilder::new(Span::default()).build_unimplemented("rec".to_owned());
+    /// # let err_diag = DiagnosticBuilder::new(Span::default()).build_unimplemented("err".to_owned());
+    /// let ok = AggregateResult::new_ok(1);
+    /// let rec = AggregateResult::new_rec("hi", rec_diag);
+    /// let err = AggregateResult::<()>::new_err(err_diag);
+    ///
+    /// assert_eq!(err.clone().zip(rec.clone()).value(), None);
+    /// assert_eq!(ok.clone().zip(err).value(), None);
+    /// assert_eq!(ok.clone().zip(rec).value(), Some(&(1, "hi")));
+    /// assert_eq!(ok.clone().zip(ok).value(), Some(&(1, 1)));
+    /// ```
+    pub fn zip<U>(mut self, mut other: AggregateResult<U>) -> AggregateResult<(T, U)> {
+        AggregateResult {
+            value: self.value.zip(other.value),
+            diagnostics: {
+                self.diagnostics.append(&mut other.diagnostics);
+                self.diagnostics
+            },
+        }
     }
 
-    #[test]
-    fn combine_two_err() {
-        let d1 = DiagnosticBuilder::new(Span {
-            start: 0,
-            length: 1,
-        })
-        .build_custom(Code::SyntaxError, "test".to_string());
-        let d2 = DiagnosticBuilder::new(Span {
-            start: 0,
-            length: 1,
-        })
-        .build_custom(Code::SyntaxError, "test2".to_string());
-        let a = AggregateResult::<u8>::with_non_rec_diagnostic(d1);
-        let b = AggregateResult::<i8>::with_non_rec_diagnostic(d2);
-        let c = a.into_combined().combine_with(b);
-
-        assert_eq!(c.as_ref_rec_ok().unwrap_err().diagnostics().count(), 2);
-    }
-
-    #[test]
-    fn combine_vec() {
-        let d1 = DiagnosticBuilder::new(Span {
-            start: 0,
-            length: 1,
-        })
-        .build_custom(Code::SyntaxError, "test".to_string());
-
-        let a = AggregateResult::Ok(vec![0]);
-        let b = AggregateResult::Ok(1);
-
-        let a = a.combine_with(b);
-        assert_eq!(a.as_ref_rec_err().unwrap(), &[0, 1]);
-
-        let a = a.combine_with(AggregateResult::with_rec_diagnostic(3, d1));
-
-        assert!(a.is_rec());
-        assert_eq!(a.as_ref_rec_ok().unwrap(), &[0, 1, 3]);
-        assert_eq!(a.as_ref_rec_err().unwrap_err().diagnostics().count(), 1);
-
-        let d1 = DiagnosticBuilder::new(Span {
-            start: 0,
-            length: 1,
-        })
-        .build_custom(Code::SyntaxError, "test".to_string());
-        let d2 = DiagnosticBuilder::new(Span {
-            start: 0,
-            length: 1,
-        })
-        .build_custom(Code::SyntaxError, "test2".to_string());
-        let a = a.combine_with(AggregateResult::with_non_rec_diagnostic(d1));
-        let a = a.combine_with(AggregateResult::with_non_rec_diagnostic(d2));
-
-        assert!(a.is_err());
-        assert_eq!(a.as_ref_rec_ok().unwrap_err().diagnostics().count(), 3);
+    /// Add `self` to `other`, combining their values using `f`, and aggregating their diagnostics.
+    ///
+    /// This method has similar semantics to
+    ///
+    /// ```ignore
+    /// {
+    ///     other = other.and(self, |mut u, t| {
+    ///         f(&mut u, t);
+    ///         u
+    ///     });
+    /// }
+    /// ```
+    ///
+    /// except that `other` is modified in-place.
+    pub fn add_to<U, F>(mut self, other: &mut AggregateResult<U>, f: F)
+    where
+        F: FnOnce(&mut U, T),
+    {
+        if let Some((u, t)) = other.value.as_mut().zip(self.value) {
+            f(u, t);
+        } else {
+            other.value = None;
+        }
+        other.diagnostics.append(&mut self.diagnostics);
     }
 }
