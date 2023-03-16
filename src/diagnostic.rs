@@ -311,12 +311,42 @@ impl<T> AggregateResult<T> {
         self.value.as_mut()
     }
 
+    /// Converts from `AggregateResult<T>` to `Option<T>`, returning `Some(T)` for _ok_ and _rec_
+    /// results, and consuming `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use comp::diagnostic::*;
+    /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("".to_owned());
+    /// # let diagnostic2 = diagnostic1.clone();
+    ///
+    /// let mut ok = AggregateResult::new_ok(1);
+    /// let mut rec = AggregateResult::new_rec(2, diagnostic1);
+    /// let mut err = AggregateResult::<()>::new_err(diagnostic2);
+    ///
+    /// assert_eq!(ok.into_value(), Some(1));
+    /// assert_eq!(rec.into_value(), Some(2));
+    /// assert!(err.into_value().is_none());
+    /// ```
+    pub fn into_value(self) -> Option<T> {
+        self.value
+    }
+
     /// Returns an iterator over the diagnostics for _rec_ and _err_ results.
     ///
     /// If this is a _rec_ result, all diagnostics are guaranteed to be of the kind
     /// [`DiagnosticKind::Rec`].
     pub fn diagnostics(&self) -> impl Iterator<Item = (DiagnosticKind, &Diagnostic)> {
         self.diagnostics.iter().map(|(dt, d)| (*dt, d))
+    }
+
+    /// Returns a consuming iterator over the diagnostics for _rec_ and _err_ results.
+    ///
+    /// If this is a _rec_ result, all diagnostics are guaranteed to be of the kind
+    /// [`DiagnosticKind::Rec`].
+    pub fn into_diagnostics(self) -> impl Iterator<Item = (DiagnosticKind, Diagnostic)> {
+        self.diagnostics.into_iter()
     }
 
     /// Adds a recoverable diagnostic to the result.
