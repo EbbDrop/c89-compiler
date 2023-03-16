@@ -15,7 +15,7 @@ use codespan_reporting::{
 use comp::{
     diagnostic::{AggregateResult, Code, DiagnosticKind, Span},
     generators::dot::to_dot,
-    parser,
+    parser, passes,
 };
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -144,18 +144,20 @@ fn main() -> Result<()> {
         }
     };
 
-    let parse_result = parser::parse(source.source());
+    let mut parse_result = parser::parse(source.source());
     if !parse_result.is_ok() {
         eprint_aggregate(&parse_result, &source);
     }
-    let ast = match parse_result.value() {
+    let ast = match parse_result.value_mut() {
         Some(ast) => ast,
         None => bail!("couldn't compile due to the previous errors"),
     };
 
+    passes::const_fold::const_fold(ast);
+
     let output = match args.emit {
-        OutputFormat::Dot => to_dot(&ast).into_bytes(),
-        OutputFormat::RustDbg => format!("{:#?}\n", &ast).into_bytes(),
+        OutputFormat::Dot => to_dot(ast).into_bytes(),
+        OutputFormat::RustDbg => format!("{:#?}\n", ast).into_bytes(),
     };
 
     match args.output_path {
