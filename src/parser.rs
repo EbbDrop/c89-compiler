@@ -8,7 +8,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     ast,
-    diagnostic::{self, AggregateResult, Code, DiagnosticBuilder, Span},
+    diagnostic::{self, AggregateResult, DiagnosticBuilder},
 };
 
 type LexerInput<'a> = antlr_rust::InputStream<&'a str>;
@@ -103,7 +103,7 @@ impl<'a, T: Recognizer<'a> + antlr_rust::Parser<'a>> ErrorListener<'a, T>
         let start: usize = offending_symbol.get_start().try_into().unwrap();
         let end: usize = (offending_symbol.get_stop() + 1).try_into().unwrap();
 
-        let db = DiagnosticBuilder::new(Span::from(start..end));
+        let db = DiagnosticBuilder::new(start..end);
 
         let d = match error {
             Some(error) => {
@@ -116,19 +116,11 @@ impl<'a, T: Recognizer<'a> + antlr_rust::Parser<'a>> ErrorListener<'a, T>
 
                 let expected_tokens = expected_tokens.to_token_string(vocabulary);
 
-                // TODO use build_lexer when we have a way to iterate over the expected_tokens ourselfs
-                db.build_custom(
-                    Code::SyntaxError,
-                    format!(
-                        "unexpected token: {}, expected one of: {}",
-                        offending_symbol_name, expected_tokens
-                    ),
-                )
+                // TODO: Find a way to iterator through the expected tokens instead of using the
+                // ANTLR-provided string (and splitting it on ',').
+                db.build_syntax_error(&offending_symbol_name, expected_tokens.split(",").collect())
             }
-            None => db.build_custom(
-                Code::SyntaxError,
-                format!("unexpected token: {}", offending_symbol_name),
-            ),
+            None => db.build_syntax_error(&offending_symbol_name, vec![]),
         };
 
         let mut ar = self.0.as_ref().take();
@@ -140,7 +132,7 @@ impl<'a, T: Recognizer<'a> + antlr_rust::Parser<'a>> ErrorListener<'a, T>
 mod ast_builder {
     use super::{
         ast,
-        diagnostic::{AggregateResult, Code, DiagnosticBuilder, Span},
+        diagnostic::{AggregateResult, DiagnosticBuilder, Span},
         generated::context,
     };
     use antlr_rust::{
@@ -285,7 +277,7 @@ mod ast_builder {
                 if plain.specifiers.len() > 1 {
                     return AggregateResult::new_err(
                         DiagnosticBuilder::new(span)
-                            .build_unimplemented("types with more than one specifier".to_owned()),
+                            .build_unimplemented("types with more than one specifier"),
                     );
                 }
                 let primitive = match plain.specifiers.get(0) {
@@ -298,7 +290,7 @@ mod ast_builder {
                     },
                     None => AggregateResult::new_rec(
                         (ast::PrimitiveType::Int, extract_span(plain)),
-                        DiagnosticBuilder::new(span.clone()).build_unspecified_type(),
+                        DiagnosticBuilder::new(span).build_unspecified_type(),
                     ),
                 };
 
@@ -381,7 +373,7 @@ mod ast_builder {
             }
             CondExpr::CondExprTernaryContext(_composed) => AggregateResult::new_err(
                 DiagnosticBuilder::new(extract_span(ctx))
-                    .build_unimplemented("ternary expressions".to_owned()),
+                    .build_unimplemented("ternary expressions"),
             ),
             CondExpr::Error(ectx) => tree_error(ectx),
         };
@@ -789,10 +781,7 @@ mod ast_builder {
             [b] => AggregateResult::new_ok(b),
             [b, ..] => AggregateResult::new_rec(
                 b,
-                DiagnosticBuilder::new(Span::from(start_index..literal_end)).build_custom(
-                    Code::MultiByteChar,
-                    "multi byte chars are implementation defined".to_owned(),
-                ),
+                DiagnosticBuilder::new(start_index..literal_end).build_multi_byte_char(),
             ),
         })
     }
@@ -817,19 +806,13 @@ mod ast_builder {
                     if let Some(0) = byte.value() {
                         let span_end = seq.peek().map_or(literal_end, |(i, _)| *i);
                         byte.add_rec_diagnostic(
-                            DiagnosticBuilder::new(Span::from(index..span_end)).build_custom(
-                                Code::EmbeddedNullInString,
-                                "embedded 0 byte in string literal".to_owned(),
-                            ),
+                            DiagnosticBuilder::new(index..span_end).build_embedded_null_in_string(),
                         )
                     }
                     byte.add_to(&mut out, |out, b| out.push(b));
                 }
                 '\0' => out.add_err(
-                    DiagnosticBuilder::new(Span::from(index..(index + 1))).build_custom(
-                        Code::EmbeddedNullInString,
-                        "embedded 0 byte in string literal".to_owned(),
-                    ),
+                    DiagnosticBuilder::new(index..(index + 1)).build_embedded_null_in_string(),
                 ),
                 _ => {
                     if let Some(out) = out.value_mut() {
@@ -885,23 +868,18 @@ mod ast_builder {
 
                 if value > u8::MAX as u32 {
                     result.add_rec_diagnostic(
-                        DiagnosticBuilder::new(Span::from(
+                        DiagnosticBuilder::new(
                             escape_start..seq.peek().map_or(literal_end, |(i, _)| *i),
-                        ))
-                        .build_custom(
-                            Code::EscapeSequenceOutOfRange,
-                            "octal escape sequence out of range".to_owned(),
-                        ),
+                        )
+                        .build_escape_sequence_out_of_range("octal"),
                     )
                 }
 
                 result
             }
             _ => AggregateResult::new_err(
-                DiagnosticBuilder::new(Span::from(
-                    escape_start..seq.peek().map_or(literal_end, |(i, _)| *i),
-                ))
-                .build_unknown_escape_sequence(&format!("\\{escaped_char}")),
+                DiagnosticBuilder::new(escape_start..seq.peek().map_or(literal_end, |(i, _)| *i))
+                    .build_unknown_escape_sequence(&format!("\\{escaped_char}")),
             ),
         }
     }
@@ -926,15 +904,8 @@ mod ast_builder {
             Some((_, c)) => AggregateResult::new_ok(c.to_digit(16).unwrap() as u8),
             None => {
                 return AggregateResult::new_err(
-                    DiagnosticBuilder::new(Span::from(escape_start..index))
-                        .with_additional_span(
-                            Span::from(index..index),
-                            Some("expected hex digit".to_owned()),
-                        )
-                        .build_custom(
-                            Code::IncompleteEscapeSequence,
-                            "incomplete hex escape sequence".to_owned(),
-                        ),
+                    DiagnosticBuilder::new(escape_start..index)
+                        .build_incomplete_hex_escape_sequence(),
                 );
             }
         };
@@ -948,13 +919,8 @@ mod ast_builder {
         }
         if overflowed {
             result.add_rec_diagnostic(
-                DiagnosticBuilder::new(Span::from(
-                    escape_start..seq.peek().map_or(literal_end, |(i, _)| *i),
-                ))
-                .build_custom(
-                    Code::EscapeSequenceOutOfRange,
-                    "hex escape sequence out of range".to_owned(),
-                ),
+                DiagnosticBuilder::new(escape_start..seq.peek().map_or(literal_end, |(i, _)| *i))
+                    .build_escape_sequence_out_of_range("hex"),
             )
         }
         result

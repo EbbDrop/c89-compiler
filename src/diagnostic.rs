@@ -1,7 +1,11 @@
+mod builder;
+
 use std::{
     collections::LinkedList,
     fmt::{Debug, Display},
 };
+
+pub use builder::DiagnosticBuilder;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Span {
@@ -59,6 +63,7 @@ impl Span {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Code {
+    /// This is an internal code that should never be used for actual diagnostics.
     Unspecified = 0,
     SyntaxError,
     Unimplemented,
@@ -115,85 +120,6 @@ impl Diagnostic {
 
     pub fn additional_spans_len(&self) -> usize {
         self.additional_spans.len()
-    }
-}
-
-impl Display for Diagnostic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "`{}` at {}-{}",
-            self.message,
-            self.main_span().start,
-            self.main_span().start + self.main_span().length
-        )
-    }
-}
-
-pub struct DiagnosticBuilder {
-    span: Span,
-    additional_spans: Vec<(Span, Option<String>)>,
-}
-
-impl DiagnosticBuilder {
-    pub fn new(span: Span) -> Self {
-        Self {
-            span,
-            additional_spans: Vec::new(),
-        }
-    }
-
-    pub fn with_additional_span(mut self, span: Span, message: Option<String>) -> Self {
-        self.add_additional_span(span, message);
-        self
-    }
-
-    pub fn add_additional_span(&mut self, span: Span, message: Option<String>) {
-        self.additional_spans.push((span, message));
-    }
-
-    pub fn build_custom(self, code: Code, message: String) -> Diagnostic {
-        Diagnostic {
-            code,
-            message,
-            main_span: (self.span, None),
-            additional_spans: self.additional_spans,
-        }
-    }
-
-    pub fn build_unimplemented(self, message: String) -> Diagnostic {
-        self.build_custom(Code::Unimplemented, message + " are not yet implemented")
-    }
-
-    pub fn build_syntax(self, unexpected: &str, expected: Vec<&str>) -> Diagnostic {
-        let message = format!(
-            "unexpected token: {}, expected one of: {}",
-            unexpected,
-            expected.join(", ")
-        );
-        self.build_custom(Code::SyntaxError, message)
-    }
-
-    pub fn build_duplicate_qualifier(
-        mut self,
-        qualifier: &str,
-        first_qualifier: Span,
-    ) -> Diagnostic {
-        self.add_additional_span(first_qualifier, Some("first seen here".to_string()));
-        let message = format!("duplicate qualifier: {qualifier}");
-        self.build_custom(Code::DuplicateQualifier, message)
-    }
-
-    pub fn build_unknown_escape_sequence(self, escape_seq: &str) -> Diagnostic {
-        let message = format!("unknown escape sequence: {escape_seq}");
-        self.build_custom(Code::UnknownEscapeSequence, message)
-    }
-
-    pub fn build_unspecified_type(self) -> Diagnostic {
-        self.build_custom(
-            Code::UnspecifiedType,
-            "missing type specifier; type defaults to int".to_owned(),
-        )
     }
 }
 
@@ -260,7 +186,7 @@ impl<T> AggregateResult<T> {
     ///
     /// ```
     /// # use comp::diagnostic::*;
-    /// # let diagnostic = DiagnosticBuilder::new(Span::default()).build_unimplemented("".to_owned());
+    /// # let diagnostic = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// let res = AggregateResult::new_rec("hi", diagnostic.clone());
     ///
     /// assert!(res.is_rec());
@@ -284,7 +210,7 @@ impl<T> AggregateResult<T> {
     ///
     /// ```
     /// # use comp::diagnostic::*;
-    /// # let diagnostic = DiagnosticBuilder::new(Span::default()).build_unimplemented("".to_owned());
+    /// # let diagnostic = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// let res = AggregateResult::<()>::new_err(diagnostic.clone());
     ///
     /// assert!(res.is_err());
@@ -329,7 +255,7 @@ impl<T> AggregateResult<T> {
     ///
     /// ```
     /// # use comp::diagnostic::*;
-    /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("".to_owned());
+    /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// # let diagnostic2 = diagnostic1.clone();
     ///
     /// let ok = AggregateResult::new_ok(1);
@@ -351,7 +277,7 @@ impl<T> AggregateResult<T> {
     ///
     /// ```
     /// # use comp::diagnostic::*;
-    /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("".to_owned());
+    /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// # let diagnostic2 = diagnostic1.clone();
     ///
     /// let mut ok = AggregateResult::new_ok(1);
@@ -373,7 +299,7 @@ impl<T> AggregateResult<T> {
     ///
     /// ```
     /// # use comp::diagnostic::*;
-    /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("".to_owned());
+    /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// # let diagnostic2 = diagnostic1.clone();
     ///
     /// let mut ok = AggregateResult::new_ok(1);
@@ -491,8 +417,8 @@ impl<T> AggregateResult<T> {
     ///
     /// ```
     /// # use comp::diagnostic::*;
-    /// # let rec_diag = DiagnosticBuilder::new(Span::default()).build_unimplemented("rec".to_owned());
-    /// # let err_diag = DiagnosticBuilder::new(Span::default()).build_unimplemented("err".to_owned());
+    /// # let rec_diag = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
+    /// # let err_diag = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// let ok = AggregateResult::new_ok(1);
     /// let rec = AggregateResult::new_rec("hi", rec_diag);
     /// let err = AggregateResult::<()>::new_err(err_diag);
