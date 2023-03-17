@@ -65,6 +65,10 @@ pub enum Code {
     DuplicateQualifier,
     MultiByteChar,
     UnspecifiedType,
+    UnknownEscapeSequence,
+    IncompleteEscapeSequence,
+    EscapeSequenceOutOfRange,
+    EmbeddedNullInString,
 }
 
 impl Code {
@@ -180,6 +184,11 @@ impl DiagnosticBuilder {
         self.build_custom(Code::DuplicateQualifier, message)
     }
 
+    pub fn build_unknown_escape_sequence(self, escape_seq: &str) -> Diagnostic {
+        let message = format!("unknown escape sequence: {escape_seq}");
+        self.build_custom(Code::UnknownEscapeSequence, message)
+    }
+
     pub fn build_unspecified_type(self) -> Diagnostic {
         self.build_custom(
             Code::UnspecifiedType,
@@ -207,7 +216,7 @@ pub enum DiagnosticKind {
 ///   the kind [`DiagnosticKind::Err`].
 ///
 /// It is guaranteed that the result will never be completely empty (i.e. no value nor diagnostics).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AggregateResult<T> {
     value: Option<T>,
     diagnostics: LinkedList<(DiagnosticKind, Diagnostic)>,

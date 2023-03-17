@@ -706,24 +706,11 @@ mod ast_builder {
                 // always be safe.
                 let value = &value[1..value.len() - 1];
 
-                let value = parse_string_literal(value);
-                let value = match &value[..] {
-                    [] => {
-                        panic!("ICE: Empty chars should not be allowed by the grammer");
-                    }
-                    [b] => AggregateResult::new_ok(*b as i128),
-                    multi_byte => AggregateResult::new_rec(
-                        multi_byte[0] as i128,
-                        DiagnosticBuilder::new(extract_span(ctx)).build_custom(
-                            Code::MultiByteChar,
-                            "multi byte chars are implementation defined".to_owned(),
-                        ),
-                    ),
-                };
+                let span = extract_span(ctx);
 
-                value.map(|value| {
+                parse_char_literal(value, span.start() + 1).map(|byte| {
                     ast::Literal {
-                        value: ast::LiteralValue::Integer(value),
+                        value: ast::LiteralValue::Integer(byte as i128),
                         // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
                         //     ast::PrimitiveType::Char,
                         // )),
@@ -771,11 +758,238 @@ mod ast_builder {
         })
     }
 
-    fn parse_string_literal(value: &str) -> Vec<u8> {
-        // TODO actualy parse escapte sequenses
-        if value.len() == 1 {
-            return value.as_bytes().to_owned();
+    /// Parses a char literal that may contain escaped characters.
+    ///
+    /// `start_index` must give the byte offset of the start of `value`.
+    ///
+    /// Note that `value` and `start_index` concern the inner literal, without surrounding quotes
+    /// (`'` or `"`).
+    fn parse_char_literal(value: &str, start_index: usize) -> AggregateResult<u8> {
+        let literal_end = start_index + value.len();
+        let mut seq = value
+            .char_indices()
+            .map(|(i, c)| (start_index + i, c))
+            .peekable();
+        let mut out = AggregateResult::new_ok(Vec::new());
+        while let Some((index, current_char)) = seq.next() {
+            match current_char {
+                '\\' => {
+                    parse_escape_sequence(&mut seq, index, literal_end)
+                        .add_to(&mut out, |out, b| out.push(b));
+                }
+                _ => {
+                    if let Some(out) = out.value_mut() {
+                        out.extend_from_slice(current_char.encode_utf8(&mut [0; 4]).as_bytes());
+                    }
+                }
+            };
         }
-        value.as_bytes().to_owned()
+        out.and_then(|v| match v[..] {
+            [] => panic!("ICE: empty char literals are impossible by grammar"),
+            [b] => AggregateResult::new_ok(b),
+            [b, ..] => AggregateResult::new_rec(
+                b,
+                DiagnosticBuilder::new(Span::from(start_index..literal_end)).build_custom(
+                    Code::MultiByteChar,
+                    "multi byte chars are implementation defined".to_owned(),
+                ),
+            ),
+        })
+    }
+
+    /// Parses a string literal that may contain escaped characters.
+    ///
+    /// `start_index` must give the byte offset of the start of `value`.
+    ///
+    /// Note that `value` and `start_index` concern the inner literal, without surrounding quotes
+    /// (`'` or `"`).
+    fn parse_string_literal(value: &str, start_index: usize) -> AggregateResult<Vec<u8>> {
+        let literal_end = start_index + value.len();
+        let mut seq = value
+            .char_indices()
+            .map(|(i, c)| (start_index + i, c))
+            .peekable();
+        let mut out = AggregateResult::new_ok(Vec::new());
+        while let Some((index, current_char)) = seq.next() {
+            match current_char {
+                '\\' => {
+                    let mut byte = parse_escape_sequence(&mut seq, index, literal_end);
+                    if let Some(0) = byte.value() {
+                        let span_end = seq.peek().map_or(literal_end, |(i, _)| *i);
+                        byte.add_rec_diagnostic(
+                            DiagnosticBuilder::new(Span::from(index..span_end)).build_custom(
+                                Code::EmbeddedNullInString,
+                                "embedded 0 byte in string literal".to_owned(),
+                            ),
+                        )
+                    }
+                    byte.add_to(&mut out, |out, b| out.push(b));
+                }
+                '\0' => out.add_err(
+                    DiagnosticBuilder::new(Span::from(index..(index + 1))).build_custom(
+                        Code::EmbeddedNullInString,
+                        "embedded 0 byte in string literal".to_owned(),
+                    ),
+                ),
+                _ => {
+                    if let Some(out) = out.value_mut() {
+                        out.extend_from_slice(current_char.encode_utf8(&mut [0; 4]).as_bytes());
+                    }
+                }
+            };
+        }
+        out
+    }
+
+    /// Parses an escape sequence following a `\` in a char or string literal.
+    ///
+    /// The following requirements apply to the arguments:
+    /// - The `\` escape prefix must already be consumed from `seq`.
+    /// - The indices in `seq` must represent the byte offset of the input start (not the escape
+    ///   start), i.e. indices that can be used to construct spans.
+    /// - `escape_start` must give the byte offset of the `\` that started the escape sequence.
+    /// - `literal_end` must give the byte offset of the exclusive end of the literal (i.e. the
+    ///   index of the past-the-end byte). This will be used as the upper bound of a span if `seq`
+    ///   is fully consumed.
+    fn parse_escape_sequence(
+        seq: &mut std::iter::Peekable<impl Iterator<Item = (usize, char)>>,
+        escape_start: usize,
+        literal_end: usize,
+    ) -> AggregateResult<u8> {
+        let (_, escaped_char) = seq
+            .next()
+            .expect("ICE: empty escape sequences are impossible by grammar");
+        match escaped_char {
+            'x' => parse_hex_escape(seq, escape_start, literal_end),
+            '\'' => AggregateResult::new_ok(b'\''),
+            '"' => AggregateResult::new_ok(b'"'),
+            '?' => AggregateResult::new_ok(b'?'),
+            '\\' => AggregateResult::new_ok(b'\\'),
+            'a' => AggregateResult::new_ok(0x07),
+            'b' => AggregateResult::new_ok(0x08),
+            'f' => AggregateResult::new_ok(0x0c),
+            'n' => AggregateResult::new_ok(b'\n'),
+            'r' => AggregateResult::new_ok(b'\r'),
+            't' => AggregateResult::new_ok(b'\t'),
+            'v' => AggregateResult::new_ok(0x0b),
+            o1 @ '0'..='7' => {
+                let mut value: u32 = o1.to_digit(8).unwrap();
+                if let Some((_, o2)) = seq.next_if(|(_, c)| matches!(c, '0'..='7')) {
+                    value = value * 0o10 + o2.to_digit(8).unwrap();
+                    if let Some((_, o3)) = seq.next_if(|(_, c)| matches!(c, '0'..='7')) {
+                        value = value * 0o10 + o3.to_digit(8).unwrap();
+                    }
+                }
+
+                let mut result = AggregateResult::new_ok(value as u8);
+
+                if value > u8::MAX as u32 {
+                    result.add_rec_diagnostic(
+                        DiagnosticBuilder::new(Span::from(
+                            escape_start..seq.peek().map_or(literal_end, |(i, _)| *i),
+                        ))
+                        .build_custom(
+                            Code::EscapeSequenceOutOfRange,
+                            "octal escape sequence out of range".to_owned(),
+                        ),
+                    )
+                }
+
+                result
+            }
+            _ => AggregateResult::new_err(
+                DiagnosticBuilder::new(Span::from(
+                    escape_start..seq.peek().map_or(literal_end, |(i, _)| *i),
+                ))
+                .build_unknown_escape_sequence(&format!("\\{escaped_char}")),
+            ),
+        }
+    }
+
+    /// Parse the hex digits after a `\x` escape in a char or string literal.
+    ///
+    /// The following requirements apply to the arguments:
+    /// - The `\x` escape prefix must already be consumed from `seq`.
+    /// - The indices in `seq` must represent the byte offset from the input start (not the escape
+    ///   start), i.e. indices that can be used to construct spans.
+    /// - `escape_start` must give the byte offset of the `\` that started the escape sequence.
+    /// - `literal_end` must give the byte offset of the exclusive end of the literal (i.e. the
+    ///   index of the past-the-end byte). This will be used as the upper bound of a span if `seq`
+    ///   is fully consumed.
+    fn parse_hex_escape(
+        seq: &mut std::iter::Peekable<impl Iterator<Item = (usize, char)>>,
+        escape_start: usize,
+        literal_end: usize,
+    ) -> AggregateResult<u8> {
+        let index = seq.peek().map_or(literal_end, |(i, _)| *i);
+        let mut result = match seq.next_if(|(_, c)| c.is_ascii_hexdigit()) {
+            Some((_, c)) => AggregateResult::new_ok(c.to_digit(16).unwrap() as u8),
+            None => {
+                return AggregateResult::new_err(
+                    DiagnosticBuilder::new(Span::from(escape_start..index))
+                        .with_additional_span(
+                            Span::from(index..index),
+                            Some("expected hex digit".to_owned()),
+                        )
+                        .build_custom(
+                            Code::IncompleteEscapeSequence,
+                            "incomplete hex escape sequence".to_owned(),
+                        ),
+                );
+            }
+        };
+        let mut overflowed = false;
+        while let Some((_, c)) = seq.next_if(|(_, c)| c.is_ascii_hexdigit()) {
+            if let Some(value) = result.value_mut() {
+                let (r, of) = value.overflowing_mul(0x10);
+                *value = r + c.to_digit(16).unwrap() as u8;
+                overflowed |= of;
+            }
+        }
+        if overflowed {
+            result.add_rec_diagnostic(
+                DiagnosticBuilder::new(Span::from(
+                    escape_start..seq.peek().map_or(literal_end, |(i, _)| *i),
+                ))
+                .build_custom(
+                    Code::EscapeSequenceOutOfRange,
+                    "hex escape sequence out of range".to_owned(),
+                ),
+            )
+        }
+        result
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_parse_escape_sequence() {
+            use AggregateResult as AG;
+            // hex escape sequence
+            let parsed =
+                parse_escape_sequence(&mut "\\x28".char_indices().skip(1).peekable(), 0, 4);
+            assert_eq!(parsed, AG::new_ok(0x28));
+
+            // octal escape sequence
+            let parsed =
+                parse_escape_sequence(&mut "\\137".char_indices().skip(1).peekable(), 0, 4);
+            assert_eq!(parsed, AG::new_ok(0o137));
+
+            // common escaped characters
+            let mut input = r#"\n\r\?\f\\"#.char_indices().filter(|(i, _)| i % 2 != 0).peekable();
+            assert_eq!(AG::new_ok(b'\n'), parse_escape_sequence(&mut input, 0, 10));
+            assert_eq!(AG::new_ok(b'\r'), parse_escape_sequence(&mut input, 2, 10));
+            assert_eq!(AG::new_ok(b'?'), parse_escape_sequence(&mut input, 4, 10));
+            assert_eq!(AG::new_ok(0x0c), parse_escape_sequence(&mut input, 6, 10));
+            assert_eq!(AG::new_ok(b'\\'), parse_escape_sequence(&mut input, 8, 10));
+        }
+
+        #[test]
+        fn test_parse_hex_escape() {
+            let parsed = parse_hex_escape(&mut "24".char_indices().peekable(), 0, 4);
+            assert_eq!(parsed, AggregateResult::new_ok(0x24));
+        }
     }
 }
