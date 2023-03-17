@@ -5,7 +5,7 @@ grammar Main;
 import Statement, Error;
 
 translationUnit
-    : (content+=statement)*
+    : (content+=statement)* EOF
     ;
 
 WS: [ \n\t\r]+ -> skip;

@@ -89,20 +89,20 @@ integerLiteral
     | value=HEXADECIMAL_LITERAL       # IntegerLiteralHexadecimalL
     ;
 
-CHAR_LITERAL : '\'' CHARACTER  '\'';
+CHAR_LITERAL
+    : '\'' (
+        | ~[\n\r\\']
+        | '\\u' [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]
+        | '\\U' [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]
+        | '\\' ['"?\\abfnrtv]
+        | '\\' [0-7]
+        | '\\' [0-7][0-7]
+        | '\\' [0-7][0-7][0-7]
+        | '\\x' [0-9a-fA-F]+
+    ) '\'';
+
 FLOATING_POINT_LITERAL: ( [0-9]* '.' [0-9]+ | [0-9]+ '.' [0-9]* ) ([eE] [+-]? [0-9]+)?;
 
 OCTAL_LITERAL: '0' [0-7]+;
-HEXADECIMAL_LITERAL: ('0x' | '0X') [1-9a-fA-F][0-9a-fA-F]*;
+HEXADECIMAL_LITERAL: ('0x' | '0X') [0-9a-fA-F]+;
 DECIMAL_LITERAL: '0' | [1-9][0-9]*;
-
-CHARACTER
-    : ~[\n\r\\']
-    | '\\u' [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]
-    | '\\U' [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]
-    | '\\' ['"?\\abfnrtv]
-    | '\\' [0-7]
-    | '\\' [0-7][0-7]
-    | '\\' [0-7][0-7][0-7]
-    | '\\x' [0-9a-fA-F]+
-    ;
