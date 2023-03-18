@@ -642,7 +642,7 @@ mod ast_builder {
         use context::PrimaryExpr;
         let data = match ctx {
             PrimaryExpr::PrimaryExprWrappedContext(wrapped) => {
-                return build_from_expr(wrapped.inner.as_deref().unwrap())
+                build_from_expr(wrapped.inner.as_deref().unwrap()).map(|en| en.data)
             }
             PrimaryExpr::PrimaryExprLiteralContext(literal) => {
                 build_from_literal(literal.value.as_deref().unwrap()).map(ast::Expression::Literal)
