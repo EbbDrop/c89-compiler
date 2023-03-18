@@ -1,22 +1,23 @@
 grammar Statement;
-import Expr;
+import Tokens, Expr;
 
 statement
-    : value=expr? ';'             # StatementExpr
-    | value=declarationStatement  # StatementDeclaration
-    | value=assignmentStatement   # StatementAssignment
-    | value=blockStatement        # StatementBlock
+    : value=expr? SEMICOLON                                     # StatementExpr
+    | value=declarationStatement                                # StatementDeclaration
+    | value=assignmentStatement                                 # StatementAssignment
+    | value=blockStatement                                      # StatementBlock
     ;
 
 declarationStatement
-    : type_name=typeName ident=identifier ';'               # DeclarationStatementWithoutInitializer
-    | type_name=typeName ident=identifier '=' rhs=expr ';'  # DeclarationStatementWithInitializer
+    : type_name=typeName ident=identifier SEMICOLON             # DeclarationStatementWithoutInitializer
+    | type_name=typeName ident=identifier
+      EQUALS rhs=expr SEMICOLON                                 # DeclarationStatementWithInitializer
     ;
 
 assignmentStatement
-    : ident=identifier '=' rhs=expr ';'
+    : ident=identifier EQUALS rhs=expr SEMICOLON
     ;
 
 blockStatement
-    : '{' (content+=statement)* '}'
+    : BRACE_LEFT (content+=statement)* BRACE_RIGHT
     ;

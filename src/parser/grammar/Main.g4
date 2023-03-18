@@ -2,10 +2,10 @@
 // https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf
 
 grammar Main;
-import Statement, Error;
+import Statement;
 
 translationUnit
     : (content+=statement)* EOF
     ;
 
-WS: [ \n\t\r]+ -> skip;
+

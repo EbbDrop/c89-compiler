@@ -1,12 +1,13 @@
 grammar Type;
+import Tokens;
 
 typeName
-    : ((qualifiers+=typeQualifier) | (specifiers+=typeSpecifier))+   # TypeNamePlain
-    | inner=typeName '*' (ptr_qualifiers+=typeQualifier)*            # TypeNamePointer
+    : ((qualifiers+=typeQualifier) | (specifiers+=typeSpecifier))+  # TypeNamePlain
+    | inner=typeName STAR (ptr_qualifiers+=typeQualifier)*          # TypeNamePointer
     ;
 
 typeQualifier
-    : 'const'           # TypeQualifierConst
+    : KW_CONST          # TypeQualifierConst
     ;
 
 typeSpecifier
@@ -14,14 +15,11 @@ typeSpecifier
     ;
 
 primitiveType
-    : 'char'        # PrimitiveTypeChar
-    | 'int'         # PrimitiveTypeInt
-    | 'float'       # PrimitiveTypeFloat
+    : KW_CHAR           # PrimitiveTypeChar
+    | KW_INT            # PrimitiveTypeInt
+    | KW_FLOAT          # PrimitiveTypeFloat
     ;
 
 identifier
     : value=IDENT
     ;
-
-IDENT: [_a-zA-Z][_a-zA-Z0-9]*;
-
