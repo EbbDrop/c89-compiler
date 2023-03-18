@@ -733,7 +733,7 @@ mod ast_builder {
                 .get_text()
                 .parse()
                 .unwrap(),
-            IntegerLiteral::IntegerLiteralHexadecimalLContext(literal) => {
+            IntegerLiteral::IntegerLiteralHexadecimalContext(literal) => {
                 let literal = literal.value.as_deref().unwrap().get_text();
                 // This is safe since the grammar ensures we start with `0x` or `0X`
                 let literal = &literal[2..];

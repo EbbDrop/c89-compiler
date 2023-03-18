@@ -93,6 +93,6 @@ literal
 integerLiteral
     : value=DECIMAL_LITERAL                                     # IntegerLiteralDecimal
     | value=OCTAL_LITERAL                                       # IntegerLiteralOctal
-    | value=HEXADECIMAL_LITERAL                                 # IntegerLiteralHexadecimalL
+    | value=HEXADECIMAL_LITERAL                                 # IntegerLiteralHexadecimal
     ;
 
