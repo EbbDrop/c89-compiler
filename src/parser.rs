@@ -515,10 +515,10 @@ mod ast_builder {
         build_from_inequality_expr(context::InequalityExpr) {
             InequalityExprSingularContext => build_from_arith_expr,
             InequalityExprComposedContext => match text {
-                ">" => AngleLeft,
-                "<" => AngleRight,
-                ">=" => AngleLeftEquals,
-                "<=" => AngleRightEquals,
+                "<" => AngleLeft,
+                ">" => AngleRight,
+                "<=" => AngleLeftEquals,
+                ">=" => AngleRightEquals,
             }
         }
     }
