@@ -1,19 +1,19 @@
 #[rustfmt::skip]
-mod mainlistener;
+mod cparserlistener;
 
 #[rustfmt::skip]
-mod mainlexer;
+pub mod clexer;
 
 #[rustfmt::skip]
 #[allow(unused_parens)]
-mod mainparser;
+pub mod cparser;
 
-pub use mainlexer::{MainLexer, MainLexerActions};
-pub use mainparser::{MainParser, MainParserContextType, MainParserExt};
+pub use clexer::{CLexer, CLexerActions};
+pub use cparser::{CParser, CParserContextType, CParserExt};
 
 pub mod context {
     #[rustfmt::skip]
-    pub use super::mainparser::{
+    pub use super::cparser::{
         ArithExprContextAll                 as ArithExpr,
         AssignmentStatementContextAll       as AssignmentStatement,
         BitwiseAndExprContextAll            as BitwiseAndExpr,

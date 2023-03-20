@@ -12,11 +12,10 @@ use crate::{
 };
 
 type LexerInput<'a> = antlr_rust::InputStream<&'a str>;
-type Lexer<'a> = generated::MainLexer<'a, LexerInput<'a>>;
+type Lexer<'a> = generated::CLexer<'a, LexerInput<'a>>;
 type TokenStream<'a> = antlr_rust::common_token_stream::CommonTokenStream<'a, Lexer<'a>>;
-type ParserErrorStrategy<'a> =
-    antlr_rust::DefaultErrorStrategy<'a, generated::MainParserContextType>;
-type Parser<'a> = generated::MainParser<'a, TokenStream<'a>, ParserErrorStrategy<'a>>;
+type ParserErrorStrategy<'a> = antlr_rust::DefaultErrorStrategy<'a, generated::CParserContextType>;
+type Parser<'a> = generated::CParser<'a, TokenStream<'a>, ParserErrorStrategy<'a>>;
 
 pub fn parse(input: &str) -> AggregateResult<ast::Ast> {
     let error_listener = AggregatingErrorListener::new();
@@ -133,7 +132,7 @@ mod ast_builder {
     use super::{
         ast,
         diagnostic::{AggregateResult, DiagnosticBuilder, Span},
-        generated::context,
+        generated::{self, context},
     };
     use antlr_rust::{
         parser_rule_context::{BaseParserRuleContext, ParserRuleContext},
@@ -443,21 +442,21 @@ mod ast_builder {
         (
             $vis:vis $from:ident($context:tt :: $from_type:tt) {
                 $singular:tt => $next:ident,
-                $composed:tt => match $op_text:ident {
-                    $($pat:pat => $op:ident),* $(,)?
+                $composed:tt => match $op_tok:ident {
+                    $($tok_type:ident => $op:ident),* $(,)?
                 }
             }
         ) => {
             build_from_generic_binary_op! {
                 $vis $from($context::$from_type) {
                     $singular => $next,
-                    $composed => let $op_text => {
-                        let data = match $op_text.get_text() {
-                            $($pat => ast::BinaryOperator::$op,)*
+                    $composed => let $op_tok => {
+                        let data = match $op_tok.token_type {
+                            $(generated::clexer::$tok_type => ast::BinaryOperator::$op,)*
                             _ => unreachable!(),
                         };
                         ast::BinaryOperatorNode {
-                            span: extract_span_from_token($op_text),
+                            span: extract_span_from_token($op_tok),
                             data,
                         }
                     }
@@ -504,9 +503,9 @@ mod ast_builder {
     build_from_multi_binary_op! {
         build_from_equality_expr(context::EqualityExpr) {
             EqualityExprSingularContext => build_from_inequality_expr,
-            EqualityExprComposedContext => match text {
-                "==" => DoubleEquals,
-                "!=" => BangEquals,
+            EqualityExprComposedContext => match token {
+                DOUBLE_EQUALS => DoubleEquals,
+                BANG_EQUALS => BangEquals,
             }
         }
     }
@@ -514,11 +513,11 @@ mod ast_builder {
     build_from_multi_binary_op! {
         build_from_inequality_expr(context::InequalityExpr) {
             InequalityExprSingularContext => build_from_arith_expr,
-            InequalityExprComposedContext => match text {
-                "<" => AngleLeft,
-                ">" => AngleRight,
-                "<=" => AngleLeftEquals,
-                ">=" => AngleRightEquals,
+            InequalityExprComposedContext => match token {
+                ANGLE_LEFT => AngleLeft,
+                ANGLE_RIGHT => AngleRight,
+                ANGLE_LEFT_EQUALS => AngleLeftEquals,
+                ANGLE_RIGHT_EQUALS => AngleRightEquals,
             }
         }
     }
@@ -526,9 +525,9 @@ mod ast_builder {
     build_from_multi_binary_op! {
         build_from_arith_expr(context::ArithExpr) {
             ArithExprSingularContext => build_from_term_expr,
-            ArithExprComposedContext => match text {
-                "+" => Plus,
-                "-" => Minus,
+            ArithExprComposedContext => match token {
+                PLUS => Plus,
+                MINUS => Minus,
             }
         }
     }
@@ -536,10 +535,10 @@ mod ast_builder {
     build_from_multi_binary_op! {
         build_from_term_expr(context::TermExpr) {
             TermExprSingularContext => build_from_cast_expr,
-            TermExprComposedContext => match text {
-                "*" => Star,
-                "/" => Slash,
-                "%" => Percent,
+            TermExprComposedContext => match token {
+                STAR => Star,
+                SLASH => Slash,
+                PERCENT => Percent,
             }
         }
     }
@@ -571,16 +570,17 @@ mod ast_builder {
                 return build_from_postfix_expr(postfix.value.as_deref().unwrap())
             }
             UnaryExpr::UnaryExprPrefixContext(prefix) => {
+                use generated::clexer as g;
                 let op_token = prefix.op.as_deref().unwrap();
-                let op = match op_token.get_text() {
-                    "++" => ast::UnaryOperator::DoublePlusPrefix,
-                    "--" => ast::UnaryOperator::DoubleMinusPrefix,
-                    "!" => ast::UnaryOperator::Bang,
-                    "+" => ast::UnaryOperator::Plus,
-                    "-" => ast::UnaryOperator::Minus,
-                    "~" => ast::UnaryOperator::Tilde,
-                    "&" => ast::UnaryOperator::Ampersand,
-                    "*" => ast::UnaryOperator::Star,
+                let op = match op_token.token_type {
+                    g::DOUBLE_PLUS => ast::UnaryOperator::DoublePlusPrefix,
+                    g::DOUBLE_MINUS => ast::UnaryOperator::DoubleMinusPrefix,
+                    g::BANG => ast::UnaryOperator::Bang,
+                    g::PLUS => ast::UnaryOperator::Plus,
+                    g::MINUS => ast::UnaryOperator::Minus,
+                    g::TILDE => ast::UnaryOperator::Tilde,
+                    g::AMPERSAND => ast::UnaryOperator::Ampersand,
+                    g::STAR => ast::UnaryOperator::Star,
                     _ => unreachable!(),
                 };
                 build_from_cast_expr(prefix.value.as_deref().unwrap()).map(|expr| {
@@ -611,10 +611,11 @@ mod ast_builder {
                 return build_from_primary_expr(primary.value.as_deref().unwrap());
             }
             PostfixExpr::PostfixExprPostfixContext(postfix) => {
+                use generated::clexer as g;
                 let op_token = postfix.op.as_deref().unwrap();
-                let op = match op_token.get_text() {
-                    "++" => ast::UnaryOperator::DoublePlusPostfix,
-                    "--" => ast::UnaryOperator::DoubleMinusPostfix,
+                let op = match op_token.token_type {
+                    g::DOUBLE_PLUS => ast::UnaryOperator::DoublePlusPostfix,
+                    g::DOUBLE_MINUS => ast::UnaryOperator::DoubleMinusPostfix,
                     _ => unreachable!(),
                 };
                 build_from_postfix_expr(postfix.value.as_deref().unwrap()).map(|expr| {

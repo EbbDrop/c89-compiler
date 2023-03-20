@@ -1,5 +1,5 @@
-grammar Statement;
-import Tokens, Expr;
+parser grammar Statement;
+import Expr;
 
 statement
     : value=expr? SEMICOLON                                     # StatementExpr

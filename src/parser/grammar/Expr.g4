@@ -1,5 +1,5 @@
-grammar Expr;
-import Tokens, Type;
+parser grammar Expr;
+import Type;
 
 expr
     : value=condExpr

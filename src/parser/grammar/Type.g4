@@ -1,5 +1,4 @@
-grammar Type;
-import Tokens;
+parser grammar Type;
 
 typeName
     : ((qualifiers+=typeQualifier) | (specifiers+=typeSpecifier))+  # TypeNamePlain
