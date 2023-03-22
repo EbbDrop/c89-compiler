@@ -40,8 +40,7 @@ impl Into<std::ops::Range<usize>> for Span {
 
 impl Debug for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let range: std::ops::Range<_> = (*self).into();
-        range.fmt(f)
+        write!(f, "{}..{}", self.start, self.excl_end())
     }
 }
 
