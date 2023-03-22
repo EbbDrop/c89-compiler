@@ -289,7 +289,7 @@ mod ast_builder {
                     },
                     None => AggregateResult::new_rec(
                         (ast::PrimitiveType::Int, extract_span(plain)),
-                        DiagnosticBuilder::new(span.clone()).build_unspecified_type(),
+                        DiagnosticBuilder::new(span).build_unspecified_type(),
                     ),
                 };
 

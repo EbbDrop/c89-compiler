@@ -68,7 +68,7 @@ where
         let mut labels = Vec::with_capacity(1 + d.additional_spans_len());
 
         labels.push({
-            let mut l = Label::primary((), d.main_span().clone());
+            let mut l = Label::primary((), *d.main_span());
             if let Some(m) = d.main_span_message() {
                 l = l.with_message(m);
             }
@@ -76,7 +76,7 @@ where
         });
 
         for (span, message) in d.additional_spans() {
-            let mut l = Label::secondary((), span.clone());
+            let mut l = Label::secondary((), *span);
             if let Some(m) = message {
                 l = l.with_message(m);
             }

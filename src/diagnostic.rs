@@ -7,7 +7,7 @@ use std::{
 
 pub use builder::DiagnosticBuilder;
 
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Span {
     start: usize,
     length: usize,
@@ -40,7 +40,8 @@ impl Into<std::ops::Range<usize>> for Span {
 
 impl Debug for Span {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}..{}", self.start, self.excl_end())
+        let range: std::ops::Range<_> = (*self).into();
+        range.fmt(f)
     }
 }
 
