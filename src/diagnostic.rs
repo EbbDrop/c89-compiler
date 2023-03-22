@@ -32,9 +32,9 @@ impl From<std::ops::RangeInclusive<usize>> for Span {
     }
 }
 
-impl Into<std::ops::Range<usize>> for Span {
-    fn into(self) -> std::ops::Range<usize> {
-        self.start..self.excl_end()
+impl From<Span> for std::ops::Range<usize> {
+    fn from(val: Span) -> Self {
+        val.start..val.excl_end()
     }
 }
 
@@ -55,6 +55,10 @@ impl Span {
 
     pub fn len(&self) -> usize {
         self.length
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
     }
 }
 
@@ -77,14 +81,14 @@ pub enum Code {
 
 impl Code {
     /// Get a unique numeric code for this `Code`
-    fn to_code(&self) -> u32 {
+    fn as_code(&self) -> u32 {
         *self as u32
     }
 }
 
 impl Display for Code {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "#{:0>4x}", self.to_code())
+        write!(f, "#{:0>4x}", self.as_code())
     }
 }
 

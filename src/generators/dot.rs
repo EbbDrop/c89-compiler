@@ -195,6 +195,6 @@ fn to_dot_primitive_type(t: &PrimitiveType) -> DotTree {
     }
 }
 
-fn to_dot_ident(i: &String) -> DotTree {
-    DotTree::new_nc(i.clone())
+fn to_dot_ident(i: &str) -> DotTree {
+    DotTree::new_nc(i.to_owned())
 }

@@ -39,7 +39,7 @@ pub fn parse(input: &str) -> AggregateResult<ast::Ast> {
 }
 
 fn build_lexer(input: &str) -> Lexer {
-    let input = LexerInput::new(input.into());
+    let input = LexerInput::new(input);
     let mut lexer = Lexer::new(input);
     lexer.remove_error_listeners();
     // We have a ERROR_TOKEN: . ; in the grammar with makes sure the lexer never errors
@@ -117,7 +117,7 @@ impl<'a, T: Recognizer<'a> + antlr_rust::Parser<'a>> ErrorListener<'a, T>
 
                 // TODO: Find a way to iterator through the expected tokens instead of using the
                 // ANTLR-provided string (and splitting it on ',').
-                db.build_syntax_error(&offending_symbol_name, expected_tokens.split(",").collect())
+                db.build_syntax_error(&offending_symbol_name, expected_tokens.split(',').collect())
             }
             None => db.build_syntax_error(&offending_symbol_name, vec![]),
         };
@@ -317,7 +317,7 @@ mod ast_builder {
 
     fn with_qualifiers(
         unqualified_type_node: ast::UnqualifiedTypeNode,
-        qualifiers: &Vec<Rc<context::TypeQualifier>>,
+        qualifiers: &[Rc<context::TypeQualifier>],
     ) -> AggregateResult<ast::QualifiedType> {
         use context::TypeQualifier as TQ;
         let mut qualified_type = ast::QualifiedType {
@@ -336,7 +336,7 @@ mod ast_builder {
                     if let Some(original_span) = &qualified_type.is_const {
                         res.add_rec_diagnostic(
                             DiagnosticBuilder::new(span)
-                                .build_duplicate_qualifier("const", original_span.clone()),
+                                .build_duplicate_qualifier("const", *original_span),
                         )
                     } else {
                         qualified_type.is_const = Some(span);
@@ -793,6 +793,7 @@ mod ast_builder {
     ///
     /// Note that `value` and `start_index` concern the inner literal, without surrounding quotes
     /// (`'` or `"`).
+    #[allow(dead_code)]
     fn parse_string_literal(value: &str, start_index: usize) -> AggregateResult<Vec<u8>> {
         let literal_end = start_index + value.len();
         let mut seq = value

@@ -198,7 +198,7 @@ impl Folder {
 
 fn replace_with_literal(expr_node: &mut ExpressionNode, value: LiteralValue) {
     expr_node.data = Expression::Literal(LiteralNode {
-        span: expr_node.span.clone(),
+        span: expr_node.span,
         data: Literal { value },
     })
 }
