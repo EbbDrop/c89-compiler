@@ -386,7 +386,7 @@ impl<T> AggregateResult<T> {
     /// If either `self` or `other` is in an _err_ state, the returned result will be in an _err_
     /// state as well. Otherwise, the result will contain the value returned by `f`.
     #[must_use]
-    pub fn and<U, F, R>(mut self, mut other: AggregateResult<U>, f: F) -> AggregateResult<R>
+    pub fn combine<U, F, R>(mut self, mut other: AggregateResult<U>, f: F) -> AggregateResult<R>
     where
         F: FnOnce(T, U) -> R,
     {
@@ -395,6 +395,25 @@ impl<T> AggregateResult<T> {
             diagnostics: {
                 self.diagnostics.append(&mut other.diagnostics);
                 self.diagnostics
+            },
+        }
+    }
+
+    /// Returns `other` if the result has a value, aggregating their diagnostics. Otherwise returns
+    /// an _err_ `AggregateResult<U>` with the diagnostics of `self`.
+    ///
+    /// The value of `self` will always be discarded.
+    #[must_use]
+    pub fn and<U>(mut self, mut other: AggregateResult<U>) -> AggregateResult<U> {
+        match self.value {
+            Some(_) => {
+                self.diagnostics.append(&mut other.diagnostics);
+                other.diagnostics = self.diagnostics;
+                other
+            }
+            None => AggregateResult {
+                value: None,
+                diagnostics: self.diagnostics,
             },
         }
     }
@@ -430,8 +449,13 @@ impl<T> AggregateResult<T> {
     ///
     /// This method is roughly equivalent to
     ///
-    /// ```ignore
-    /// self.and(other, |t, u| (t, u))
+    /// ```
+    /// # use comp::diagnostic::*;
+    /// # let self_ = AggregateResult::new_ok(1);
+    /// # let other = AggregateResult::new_ok(2);
+    /// # let _ =
+    /// self_.combine(other, |t, u| (t, u))
+    /// # ;
     /// ```
     ///
     /// # Examples
@@ -463,9 +487,13 @@ impl<T> AggregateResult<T> {
     ///
     /// This method has similar semantics to
     ///
-    /// ```ignore
+    /// ```
+    /// # use comp::diagnostic::*;
+    /// # let self_ = AggregateResult::new_ok(1);
+    /// # let mut other = AggregateResult::new_ok(2);
+    /// # fn f(_: &mut u8, _: u8) {}
     /// {
-    ///     other = other.and(self, |mut u, t| {
+    ///     other = other.combine(self_, |mut u, t| {
     ///         f(&mut u, t);
     ///         u
     ///     });
