@@ -1,4 +1,4 @@
-mod builder;
+pub mod builder;
 
 use std::{
     collections::LinkedList,
@@ -77,6 +77,12 @@ pub enum Code {
     IncompleteEscapeSequence,
     EscapeSequenceOutOfRange,
     EmbeddedNullInString,
+    NeedConst,
+    UnexpectedType,
+    NeedLvalue,
+    InvalidCast,
+    LossyImplicitConversion,
+    IncompatibleAssign,
 }
 
 impl Code {
@@ -360,6 +366,18 @@ impl<T> AggregateResult<T> {
         AggregateResult {
             value: self.value.map(op),
             diagnostics: self.diagnostics,
+        }
+    }
+
+    /// Always returns false if this `AggregateResult` is _err_. Otherwise calls `f` on the inner
+    /// value and returns its result.
+    pub fn has_value_and<F>(&mut self, f: F) -> bool
+    where
+        F: FnOnce(&T) -> bool,
+    {
+        match &self.value {
+            Some(v) => f(v),
+            None => false,
         }
     }
 

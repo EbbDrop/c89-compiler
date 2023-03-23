@@ -19,9 +19,10 @@ use comp::{
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 enum OutputFormat {
+    AstDot,
+    AstRustDbg,
     #[default]
-    Dot,
-    RustDbg,
+    IrRustDbg,
 }
 
 #[derive(Debug, Clone)]
@@ -151,8 +152,19 @@ fn main() -> Result<()> {
     passes::const_fold::const_fold(ast);
 
     let output = match args.emit {
-        OutputFormat::Dot => to_dot(ast).into_bytes(),
-        OutputFormat::RustDbg => format!("{:#?}\n", ast).into_bytes(),
+        OutputFormat::AstDot => to_dot(ast).into_bytes(),
+        OutputFormat::AstRustDbg => format!("{:#?}\n", ast).into_bytes(),
+        _ => {
+            let build_result = passes::ast_to_ir::build_ir_from_ast(ast);
+            if !build_result.is_ok() {
+                eprint_aggregate(&build_result, &source);
+            }
+            let ir = match build_result.value() {
+                Some(ir) => ir,
+                None => bail!("couldn't compile due to the previous errors"),
+            };
+            format!("{:#?}\n", ir).into_bytes()
+        }
     };
 
     match args.output_path {
