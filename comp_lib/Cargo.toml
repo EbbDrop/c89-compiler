@@ -1,0 +1,7 @@
+[package]
+name = "comp_lib"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+antlr-rust = { git = "https://github.com/jonatcln/antlr4rust.git", branch = "comp-fixes" }

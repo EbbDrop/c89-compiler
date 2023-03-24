@@ -11,7 +11,7 @@ use codespan_reporting::{
     files::SimpleFile,
     term,
 };
-use comp::{
+use comp_lib::{
     diagnostic::{AggregateResult, Code, DiagnosticKind},
     generators::dot::to_dot,
     parser, passes,

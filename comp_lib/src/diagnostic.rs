@@ -173,7 +173,7 @@ impl<T> AggregateResult<T> {
     /// # Examples
     ///
     /// ```
-    /// # use comp::diagnostic::*;
+    /// # use comp_lib::diagnostic::*;
     /// let res = AggregateResult::new_ok(2);
     ///
     /// assert!(res.is_ok());
@@ -194,7 +194,7 @@ impl<T> AggregateResult<T> {
     /// # Examples
     ///
     /// ```
-    /// # use comp::diagnostic::*;
+    /// # use comp_lib::diagnostic::*;
     /// # let diagnostic = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// let res = AggregateResult::new_rec("hi", diagnostic.clone());
     ///
@@ -218,7 +218,7 @@ impl<T> AggregateResult<T> {
     /// # Examples
     ///
     /// ```
-    /// # use comp::diagnostic::*;
+    /// # use comp_lib::diagnostic::*;
     /// # let diagnostic = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// let res = AggregateResult::<()>::new_err(diagnostic.clone());
     ///
@@ -263,7 +263,7 @@ impl<T> AggregateResult<T> {
     /// # Examples
     ///
     /// ```
-    /// # use comp::diagnostic::*;
+    /// # use comp_lib::diagnostic::*;
     /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// # let diagnostic2 = diagnostic1.clone();
     ///
@@ -285,7 +285,7 @@ impl<T> AggregateResult<T> {
     /// # Examples
     ///
     /// ```
-    /// # use comp::diagnostic::*;
+    /// # use comp_lib::diagnostic::*;
     /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// # let diagnostic2 = diagnostic1.clone();
     ///
@@ -307,7 +307,7 @@ impl<T> AggregateResult<T> {
     /// # Examples
     ///
     /// ```
-    /// # use comp::diagnostic::*;
+    /// # use comp_lib::diagnostic::*;
     /// # let diagnostic1 = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// # let diagnostic2 = diagnostic1.clone();
     ///
@@ -450,7 +450,7 @@ impl<T> AggregateResult<T> {
     /// This method is roughly equivalent to
     ///
     /// ```
-    /// # use comp::diagnostic::*;
+    /// # use comp_lib::diagnostic::*;
     /// # let self_ = AggregateResult::new_ok(1);
     /// # let other = AggregateResult::new_ok(2);
     /// # let _ =
@@ -461,7 +461,7 @@ impl<T> AggregateResult<T> {
     /// # Examples
     ///
     /// ```
-    /// # use comp::diagnostic::*;
+    /// # use comp_lib::diagnostic::*;
     /// # let rec_diag = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// # let err_diag = DiagnosticBuilder::new(Span::default()).build_unimplemented("");
     /// let ok = AggregateResult::new_ok(1);
@@ -488,7 +488,7 @@ impl<T> AggregateResult<T> {
     /// This method has similar semantics to
     ///
     /// ```
-    /// # use comp::diagnostic::*;
+    /// # use comp_lib::diagnostic::*;
     /// # let self_ = AggregateResult::new_ok(1);
     /// # let mut other = AggregateResult::new_ok(2);
     /// # fn f(_: &mut u8, _: u8) {}

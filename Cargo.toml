@@ -1,12 +1,2 @@
-[package]
-name = "comp"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-antlr-rust = { git = "https://github.com/jonatcln/antlr4rust.git", branch = "comp-fixes" }
-anyhow = "1.0.69"
-clap = { version = "4.1.8", features = ["derive"] }
-codespan-reporting = "0.11.1"
+[workspace]
+members = ["comp", "comp_lib"]
