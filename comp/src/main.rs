@@ -13,8 +13,7 @@ use codespan_reporting::{
 };
 use comp_lib::{
     diagnostic::{AggregateResult, Code, DiagnosticKind},
-    generators::dot::to_dot,
-    parser, passes,
+    passes,
 };
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
@@ -140,31 +139,21 @@ fn main() -> Result<()> {
         }
     };
 
-    let mut parse_result = parser::parse(source.source());
-    if !parse_result.is_ok() {
-        eprint_aggregate(&parse_result, &source);
+    // TODO: add to dot & other output formats
+
+    let res = passes::parse::parse(source.source())
+        .and_then(|cst| passes::lower_cst::build_from_translation_unit(&cst))
+        .and_then(|mut ast| {
+            passes::const_fold::const_fold(&mut ast);
+            passes::lower_ast::build_ir_from_ast(&ast)
+        })
+        .map(|ir| format!("{:#?}\n", ir).into_bytes());
+
+    if !res.is_ok() {
+        eprint_aggregate(&res, &source);
     }
-    let ast = match parse_result.value_mut() {
-        Some(ast) => ast,
-        None => bail!("couldn't compile due to the previous errors"),
-    };
-
-    passes::const_fold::const_fold(ast);
-
-    let output = match args.emit {
-        OutputFormat::AstDot => to_dot(ast).into_bytes(),
-        OutputFormat::AstRustDbg => format!("{:#?}\n", ast).into_bytes(),
-        _ => {
-            let build_result = passes::ast_to_ir::build_ir_from_ast(ast);
-            if !build_result.is_ok() {
-                eprint_aggregate(&build_result, &source);
-            }
-            let ir = match build_result.value() {
-                Some(ir) => ir,
-                None => bail!("couldn't compile due to the previous errors"),
-            };
-            format!("{:#?}\n", ir).into_bytes()
-        }
+    let Some(output) = res.into_value() else {
+        bail!("couldn't compile due to the previous errors");
     };
 
     match args.output_path {

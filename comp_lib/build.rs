@@ -3,9 +3,9 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let grammar_in_dir = Path::new("./src/parser/grammar")
+    let grammar_in_dir = Path::new("./grammar")
         .canonicalize()
-        .expect("src/parser/grammar should exist");
+        .expect("./grammar should exist");
 
     let grammar_in_files = ["CLexer.g4", "CParser.g4"].map(|in_file| {
         let mut in_path = grammar_in_dir.clone();
@@ -20,9 +20,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         in_path
     });
 
-    let grammer_out_dir = Path::new("./src/parser/generated")
+    let grammer_out_dir = Path::new("./src/generated")
         .canonicalize()
-        .expect("src/parser/generated should exist");
+        .expect("./src/generated should exist");
 
     let antlr_bin = Path::new("./tools/antlr4-4.8-2-SNAPSHOT-complete-patched.jar")
         .canonicalize()

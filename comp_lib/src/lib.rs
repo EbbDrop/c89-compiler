@@ -1,7 +1,6 @@
-pub mod ast;
-mod ctype;
 pub mod diagnostic;
-pub mod generators;
-mod ir;
-pub mod parser;
+pub mod inspectors;
 pub mod passes;
+mod structures;
+pub use structures::{ast, cst, ctype, ir};
+mod generated;
