@@ -20,7 +20,7 @@ pub fn compile(source: &SimpleFile<String, String>, opts: CompileOpts) -> Aggreg
 
     match opts.output_format {
         cli::OutputFormat::AstDot => {
-            return ast.map(|ast| inspectors::dot::to_dot(&ast).into_bytes());
+            return ast.map(|ast| inspectors::dot::inspect_ast(&ast).into_bytes());
         }
         cli::OutputFormat::AstRustDbg => {
             return ast.map(|ast| format!("{ast:#?}\n").into_bytes());
