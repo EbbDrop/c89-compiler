@@ -1,3 +1,6 @@
+use crate::generated;
+use antlr_rust::{token_factory::TokenFactory as AntlrTF, token_stream::TokenStream as AntlrTS};
+
 #[rustfmt::skip]
 pub use crate::generated::cparser::{
     ArithExprContextAll                 as ArithExpr,
@@ -28,3 +31,14 @@ pub use crate::generated::cparser::{
     TypeSpecifierContextAll             as TypeSpecifier,
     UnaryExprContextAll                 as UnaryExpr,
 };
+
+pub type TokenStream<'a> = generated::TokenStream<'a, &'a str>;
+pub type TokenFactory<'a> = <TokenStream<'a> as AntlrTS<'a>>::TF;
+pub type TFTok<'a> = <TokenFactory<'a> as AntlrTF<'a>>::Tok;
+pub type TFInner<'a> = <TokenFactory<'a> as AntlrTF<'a>>::Inner;
+pub type TFData<'a> = <TokenFactory<'a> as AntlrTF<'a>>::Data;
+
+pub struct Cst<'a> {
+    pub(crate) translation_unit: TranslationUnit<'a>,
+    pub(crate) token_stream: TokenStream<'a>,
+}

@@ -13,6 +13,7 @@ pub struct BlockStatement(pub Vec<StatementNode>);
 pub struct StatementNode {
     pub span: Span,
     pub data: Statement,
+    pub comments: Option<String>,
 }
 
 #[derive(Debug, Clone)]

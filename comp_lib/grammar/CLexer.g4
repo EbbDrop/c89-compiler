@@ -1,5 +1,10 @@
 lexer grammar CLexer;
 
+channels { COMMENTS }
+
+SINGLELINE_COMMENT: '//' ( ~[\n\r] )* -> channel(COMMENTS);
+MULTILINE_COMMENT: '/*' ( . )*? '*/' -> channel(COMMENTS);
+
 DECIMAL_LITERAL: '0' | [1-9][0-9]*;
 OCTAL_LITERAL: '0' [0-7]+;
 HEXADECIMAL_LITERAL: ('0x' | '0X') [0-9a-fA-F]+;

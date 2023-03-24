@@ -9,7 +9,11 @@ use antlr_rust::{
     token::Token,
     TidAble,
 };
-use std::{ops::Deref, rc::Rc};
+use std::{ops::Deref, rc::Rc, sync::atomic::Ordering};
+
+pub fn lower(cst: &cst::Cst<'_>) -> AggregateResult<ast::Ast> {
+    AstBuilder::new(&cst.token_stream).build_from_translation_unit(&cst.translation_unit)
+}
 
 fn tree_error<'a, Ctx>(_ectx: &BaseParserRuleContext<'a, Ctx>) -> !
 where
@@ -33,216 +37,6 @@ fn extract_span_from_token(token: &impl Token) -> Span {
     Span::from(start..end)
 }
 
-pub fn build_from_translation_unit(ctx: &cst::TranslationUnit) -> AggregateResult<ast::Ast> {
-    let mut res = AggregateResult::new_ok(Vec::with_capacity(ctx.content.len()));
-
-    for statement in &ctx.content {
-        if let Some(statement) = build_from_statement(statement) {
-            statement.add_to(&mut res, |v, s| v.push(s));
-        }
-    }
-
-    res.map(|mut stmts| {
-        stmts.shrink_to_fit();
-        ast::Ast {
-            global: ast::BlockStatement(stmts),
-        }
-    })
-}
-
-fn build_from_statement(ctx: &cst::Statement) -> Option<AggregateResult<ast::StatementNode>> {
-    use cst::Statement;
-    let data = match ctx {
-        Statement::StatementExprContext(expr) => match expr.value.as_deref() {
-            Some(value) => build_from_expr(value).map(ast::Statement::Expression),
-            None => return None,
-        },
-        Statement::StatementDeclarationContext(decl) => {
-            build_from_declaration_statement(decl.value.as_deref().unwrap())
-        }
-        Statement::StatementAssignmentContext(assignment) => {
-            build_from_assignment_statement(assignment.value.as_deref().unwrap())
-        }
-        Statement::StatementBlockContext(block) => {
-            build_from_block_statement(block.value.as_deref().unwrap())
-        }
-        Statement::Error(ectx) => tree_error(ectx),
-    };
-
-    Some(data.map(|data| ast::StatementNode {
-        span: extract_span(ctx),
-        data,
-    }))
-}
-
-fn build_from_declaration_statement(
-    ctx: &cst::DeclarationStatement,
-) -> AggregateResult<ast::Statement> {
-    use cst::DeclarationStatement;
-    match ctx {
-        DeclarationStatement::DeclarationStatementWithoutInitializerContext(decl) => {
-            build_from_type_name(decl.type_name.as_deref().unwrap())
-                .zip(build_from_identifier(decl.ident.as_deref().unwrap()))
-                .map(|(type_name, ident)| ast::Statement::Declaration {
-                    type_name,
-                    ident,
-                    initializer: None,
-                })
-        }
-        DeclarationStatement::DeclarationStatementWithInitializerContext(decl) => {
-            build_from_type_name(decl.type_name.as_deref().unwrap())
-                .zip(build_from_identifier(decl.ident.as_deref().unwrap()))
-                .zip(build_from_expr(decl.rhs.as_deref().unwrap()))
-                .map(
-                    |((type_name, ident), initializer)| ast::Statement::Declaration {
-                        type_name,
-                        ident,
-                        initializer: Some(initializer),
-                    },
-                )
-        }
-        DeclarationStatement::Error(ectx) => tree_error(ectx),
-    }
-}
-
-fn build_from_assignment_statement(
-    ctx: &cst::AssignmentStatement,
-) -> AggregateResult<ast::Statement> {
-    build_from_identifier(ctx.ident.as_deref().unwrap())
-        .zip(build_from_expr(ctx.rhs.as_deref().unwrap()))
-        .map(|(ident, rhs)| ast::Statement::Assignment { ident, rhs })
-}
-
-fn build_from_block_statement(ctx: &cst::BlockStatement) -> AggregateResult<ast::Statement> {
-    let mut res = AggregateResult::new_ok(Vec::with_capacity(ctx.content.len()));
-
-    for statement in &ctx.content {
-        if let Some(statement) = build_from_statement(statement) {
-            statement.add_to(&mut res, |v, s| v.push(s));
-        }
-    }
-
-    res.map(|mut stmts| {
-        stmts.shrink_to_fit();
-        ast::Statement::BlockStatement(ast::BlockStatement(stmts))
-    })
-}
-
-fn build_from_type_name(ctx: &cst::TypeName) -> AggregateResult<ast::QualifiedTypeNode> {
-    use cst::TypeName as TN;
-    use cst::TypeSpecifier as TS;
-
-    let span = extract_span(ctx);
-
-    let data = match ctx {
-        TN::TypeNamePlainContext(plain) => {
-            if plain.specifiers.len() > 1 {
-                return AggregateResult::new_err(
-                    DiagnosticBuilder::new(span)
-                        .build_unimplemented("types with more than one specifier"),
-                );
-            }
-            let primitive = match plain.specifiers.get(0) {
-                Some(s) => match s.as_ref() {
-                    TS::TypeSpecifierPrimitiveContext(primitive_type) => {
-                        build_from_primitive_type(primitive_type.tp.as_deref().unwrap())
-                            .map(|p| (p, extract_span(primitive_type)))
-                    }
-                    TS::Error(ectx) => tree_error(ectx),
-                },
-                None => AggregateResult::new_rec(
-                    (ast::PrimitiveType::Int, extract_span(plain)),
-                    DiagnosticBuilder::new(span).build_unspecified_type(),
-                ),
-            };
-
-            primitive.and_then(|(primitive, span)| {
-                let unqualified_type_node = ast::UnqualifiedTypeNode {
-                    span,
-                    data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(primitive)),
-                };
-                with_qualifiers(unqualified_type_node, &plain.qualifiers)
-            })
-        }
-        TN::TypeNamePointerContext(ctx) => build_from_type_name(ctx.inner.as_deref().unwrap())
-            .and_then(|data| {
-                let unqualified_type_node = ast::UnqualifiedTypeNode {
-                    span: extract_span(ctx),
-                    data: ast::UnqualifiedType::PointerType(Box::new(data)),
-                };
-                with_qualifiers(unqualified_type_node, &ctx.ptr_qualifiers)
-            }),
-        TN::Error(ectx) => tree_error(ectx),
-    };
-
-    data.map(|data| ast::QualifiedTypeNode { span, data })
-}
-
-fn with_qualifiers(
-    unqualified_type_node: ast::UnqualifiedTypeNode,
-    qualifiers: &[Rc<cst::TypeQualifier>],
-) -> AggregateResult<ast::QualifiedType> {
-    use cst::TypeQualifier as TQ;
-    let mut qualified_type = ast::QualifiedType {
-        is_const: None,
-        inner: unqualified_type_node,
-    };
-
-    let mut res = AggregateResult::new_ok(());
-
-    for qualifier in qualifiers.iter() {
-        // TODO if is_const is some => warning
-        match qualifier.deref() {
-            TQ::TypeQualifierConstContext(ctx) => {
-                let span = extract_span(ctx);
-
-                if let Some(original_span) = &qualified_type.is_const {
-                    res.add_rec_diagnostic(
-                        DiagnosticBuilder::new(span)
-                            .build_duplicate_qualifier("const", *original_span),
-                    )
-                } else {
-                    qualified_type.is_const = Some(span);
-                }
-            }
-            TQ::Error(ectx) => tree_error(ectx),
-        }
-    }
-    res.map(|_| qualified_type)
-}
-
-fn build_from_primitive_type(ctx: &cst::PrimitiveType) -> AggregateResult<ast::PrimitiveType> {
-    use cst::PrimitiveType;
-    AggregateResult::new_ok(match ctx {
-        PrimitiveType::PrimitiveTypeIntContext(_) => ast::PrimitiveType::Int,
-        PrimitiveType::PrimitiveTypeCharContext(_) => ast::PrimitiveType::Char,
-        PrimitiveType::PrimitiveTypeFloatContext(_) => ast::PrimitiveType::Float,
-        PrimitiveType::Error(ectx) => tree_error(ectx),
-    })
-}
-
-pub fn build_from_expr(ctx: &cst::Expr) -> AggregateResult<ast::ExpressionNode> {
-    build_from_cond_expr(ctx.value.as_deref().unwrap())
-}
-
-pub fn build_from_cond_expr(ctx: &cst::CondExpr) -> AggregateResult<ast::ExpressionNode> {
-    use cst::CondExpr;
-    let data = match ctx {
-        CondExpr::CondExprSingularContext(singular) => {
-            return build_from_logical_or_expr(singular.value.as_deref().unwrap())
-        }
-        CondExpr::CondExprTernaryContext(_composed) => AggregateResult::new_err(
-            DiagnosticBuilder::new(extract_span(ctx)).build_unimplemented("ternary expressions"),
-        ),
-        CondExpr::Error(ectx) => tree_error(ectx),
-    };
-
-    data.map(|data| ast::ExpressionNode {
-        span: extract_span(ctx),
-        data,
-    })
-}
-
 macro_rules! build_from_generic_binary_op {
     (
         $vis:vis $from:ident($from_type:tt) {
@@ -250,12 +44,12 @@ macro_rules! build_from_generic_binary_op {
             $composed:tt => let $text:pat => $expr:expr
         }
     ) => {
-        $vis fn $from(ctx: &cst::$from_type) -> AggregateResult<ast::ExpressionNode> {
+        $vis fn $from(&self, ctx: &cst::$from_type) -> AggregateResult<ast::ExpressionNode> {
             let data = match ctx {
-                cst::$from_type::$singular(singular) => return $next(singular.value.as_deref().unwrap()),
+                cst::$from_type::$singular(singular) => return self.$next(singular.value.as_deref().unwrap()),
                 cst::$from_type::$composed(composed) => {
-                    $from(composed.lhs.as_deref().unwrap())
-                        .zip($next(composed.rhs.as_deref().unwrap()))
+                    self.$from(composed.lhs.as_deref().unwrap())
+                        .zip(self.$next(composed.rhs.as_deref().unwrap()))
                         .map(|(first, sec)| {
                             let op = {
                                 let $text = composed.op.as_deref().unwrap();
@@ -325,286 +119,561 @@ macro_rules! build_from_multi_binary_op {
     };
 }
 
-build_from_single_binary_op! {
-    build_from_logical_or_expr(LogicalOrExpr) {
-        LogicalOrExprSingularContext => build_from_logical_and_expr,
-        LogicalOrExprComposedContext => DoublePipe
-    }
+pub struct AstBuilder<'a, 'b> {
+    input: &'a cst::TokenStream<'b>,
 }
 
-build_from_single_binary_op! {
-    build_from_logical_and_expr(LogicalAndExpr) {
-        LogicalAndExprSingularContext => build_from_bitwise_or_expr,
-        LogicalAndExprComposedContext => DoubleAmpersand
+impl<'a, 'b> AstBuilder<'a, 'b> {
+    pub fn new(input: &'a cst::TokenStream<'b>) -> Self {
+        Self { input }
     }
-}
 
-build_from_single_binary_op! {
-    build_from_bitwise_or_expr(BitwiseOrExpr) {
-        BitwiseOrExprSingularContext => build_from_bitwise_xor_expr,
-        BitwiseOrExprComposedContext => Pipe
-    }
-}
+    pub fn build_from_translation_unit(
+        self,
+        ctx: &cst::TranslationUnit,
+    ) -> AggregateResult<ast::Ast> {
+        let mut res = AggregateResult::new_ok(Vec::with_capacity(ctx.content.len()));
 
-build_from_single_binary_op! {
-    build_from_bitwise_xor_expr(BitwiseXorExpr) {
-        BitwiseXorExprSingularContext => build_from_bitwise_and_expr,
-        BitwiseXorExprComposedContext => Caret
-    }
-}
-
-build_from_single_binary_op! {
-    build_from_bitwise_and_expr(BitwiseAndExpr) {
-        BitwiseAndExprSingularContext => build_from_equality_expr,
-        BitwiseAndExprComposedContext => Ampersand
-    }
-}
-
-build_from_multi_binary_op! {
-    build_from_equality_expr(EqualityExpr) {
-        EqualityExprSingularContext => build_from_inequality_expr,
-        EqualityExprComposedContext => match token {
-            DOUBLE_EQUALS => DoubleEquals,
-            BANG_EQUALS => BangEquals,
+        for statement in &ctx.content {
+            if let Some(statement) = self.build_from_statement(statement) {
+                statement.add_to(&mut res, |v, s| v.push(s));
+            }
         }
+
+        res.map(|mut stmts| {
+            stmts.shrink_to_fit();
+            ast::Ast {
+                global: ast::BlockStatement(stmts),
+            }
+        })
     }
-}
 
-build_from_multi_binary_op! {
-    build_from_inequality_expr(InequalityExpr) {
-        InequalityExprSingularContext => build_from_arith_expr,
-        InequalityExprComposedContext => match token {
-            ANGLE_LEFT => AngleLeft,
-            ANGLE_RIGHT => AngleRight,
-            ANGLE_LEFT_EQUALS => AngleLeftEquals,
-            ANGLE_RIGHT_EQUALS => AngleRightEquals,
-        }
+    fn build_from_statement(
+        &self,
+        ctx: &cst::Statement,
+    ) -> Option<AggregateResult<ast::StatementNode>> {
+        use cst::Statement;
+        let data = match ctx {
+            Statement::StatementExprContext(expr) => match expr.value.as_deref() {
+                Some(value) => self.build_from_expr(value).map(ast::Statement::Expression),
+                None => return None,
+            },
+            Statement::StatementDeclarationContext(decl) => {
+                self.build_from_declaration_statement(decl.value.as_deref().unwrap())
+            }
+            Statement::StatementAssignmentContext(assignment) => {
+                self.build_from_assignment_statement(assignment.value.as_deref().unwrap())
+            }
+            Statement::StatementBlockContext(block) => {
+                self.build_from_block_statement(block.value.as_deref().unwrap())
+            }
+            Statement::Error(ectx) => tree_error(ectx),
+        };
+
+        let comment_tokens = self.input.get_hidden_tokens_to_left(
+            ctx.start().token_index.load(Ordering::Relaxed),
+            generated::clexer::COMMENTS as isize,
+        );
+
+        let comments = if comment_tokens.is_empty() {
+            None
+        } else {
+            Some(join_comment_tokens(comment_tokens.into_iter()))
+        };
+
+        Some(data.map(|data| ast::StatementNode {
+            span: extract_span(ctx),
+            data,
+            comments,
+        }))
     }
-}
 
-build_from_multi_binary_op! {
-    build_from_arith_expr(ArithExpr) {
-        ArithExprSingularContext => build_from_term_expr,
-        ArithExprComposedContext => match token {
-            PLUS => Plus,
-            MINUS => Minus,
-        }
-    }
-}
-
-build_from_multi_binary_op! {
-    build_from_term_expr(TermExpr) {
-        TermExprSingularContext => build_from_cast_expr,
-        TermExprComposedContext => match token {
-            STAR => Star,
-            SLASH => Slash,
-            PERCENT => Percent,
-        }
-    }
-}
-
-pub fn build_from_cast_expr(ctx: &cst::CastExpr) -> AggregateResult<ast::ExpressionNode> {
-    use cst::CastExpr;
-    let data = match ctx {
-        CastExpr::CastExprSingularContext(singular) => {
-            return build_from_unary_expr(singular.value.as_deref().unwrap())
-        }
-        CastExpr::CastExprComposedContext(composed) => {
-            build_from_type_name(composed.type_name.as_deref().unwrap())
-                .zip(build_from_cast_expr(composed.value.as_deref().unwrap()))
-                .map(|(type_name, expr)| ast::Expression::Cast(type_name, Box::new(expr)))
-        }
-        CastExpr::Error(ectx) => tree_error(ectx),
-    };
-
-    data.map(|data| ast::ExpressionNode {
-        span: extract_span(ctx),
-        data,
-    })
-}
-
-pub fn build_from_unary_expr(ctx: &cst::UnaryExpr) -> AggregateResult<ast::ExpressionNode> {
-    use cst::UnaryExpr;
-    let data = match ctx {
-        UnaryExpr::UnaryExprPostfixContext(postfix) => {
-            return build_from_postfix_expr(postfix.value.as_deref().unwrap())
-        }
-        UnaryExpr::UnaryExprPrefixContext(prefix) => {
-            use generated::clexer as g;
-            let op_token = prefix.op.as_deref().unwrap();
-            let op = match op_token.token_type {
-                g::DOUBLE_PLUS => ast::UnaryOperator::DoublePlusPrefix,
-                g::DOUBLE_MINUS => ast::UnaryOperator::DoubleMinusPrefix,
-                g::BANG => ast::UnaryOperator::Bang,
-                g::PLUS => ast::UnaryOperator::Plus,
-                g::MINUS => ast::UnaryOperator::Minus,
-                g::TILDE => ast::UnaryOperator::Tilde,
-                g::AMPERSAND => ast::UnaryOperator::Ampersand,
-                g::STAR => ast::UnaryOperator::Star,
-                _ => unreachable!(),
-            };
-            build_from_cast_expr(prefix.value.as_deref().unwrap()).map(|expr| {
-                ast::Expression::Unary(
-                    ast::UnaryOperatorNode {
-                        span: extract_span_from_token(op_token),
-                        data: op,
+    fn build_from_declaration_statement(
+        &self,
+        ctx: &cst::DeclarationStatement,
+    ) -> AggregateResult<ast::Statement> {
+        use cst::DeclarationStatement;
+        match ctx {
+            DeclarationStatement::DeclarationStatementWithoutInitializerContext(decl) => self
+                .build_from_type_name(decl.type_name.as_deref().unwrap())
+                .zip(self.build_from_identifier(decl.ident.as_deref().unwrap()))
+                .map(|(type_name, ident)| ast::Statement::Declaration {
+                    type_name,
+                    ident,
+                    initializer: None,
+                }),
+            DeclarationStatement::DeclarationStatementWithInitializerContext(decl) => self
+                .build_from_type_name(decl.type_name.as_deref().unwrap())
+                .zip(self.build_from_identifier(decl.ident.as_deref().unwrap()))
+                .zip(self.build_from_expr(decl.rhs.as_deref().unwrap()))
+                .map(
+                    |((type_name, ident), initializer)| ast::Statement::Declaration {
+                        type_name,
+                        ident,
+                        initializer: Some(initializer),
                     },
-                    Box::new(expr),
-                )
-            })
+                ),
+            DeclarationStatement::Error(ectx) => tree_error(ectx),
         }
-        UnaryExpr::Error(ectx) => tree_error(ectx),
-    };
+    }
 
-    data.map(|data| ast::ExpressionNode {
-        span: extract_span(ctx),
-        data,
-    })
-}
+    fn build_from_assignment_statement(
+        &self,
+        ctx: &cst::AssignmentStatement,
+    ) -> AggregateResult<ast::Statement> {
+        self.build_from_identifier(ctx.ident.as_deref().unwrap())
+            .zip(self.build_from_expr(ctx.rhs.as_deref().unwrap()))
+            .map(|(ident, rhs)| ast::Statement::Assignment { ident, rhs })
+    }
 
-pub fn build_from_postfix_expr(ctx: &cst::PostfixExpr) -> AggregateResult<ast::ExpressionNode> {
-    use cst::PostfixExpr;
-    let data = match ctx {
-        PostfixExpr::PostfixExprPrimaryContext(primary) => {
-            return build_from_primary_expr(primary.value.as_deref().unwrap());
+    fn build_from_block_statement(
+        &self,
+        ctx: &cst::BlockStatement,
+    ) -> AggregateResult<ast::Statement> {
+        let mut res = AggregateResult::new_ok(Vec::with_capacity(ctx.content.len()));
+
+        for statement in &ctx.content {
+            if let Some(statement) = self.build_from_statement(statement) {
+                statement.add_to(&mut res, |v, s| v.push(s));
+            }
         }
-        PostfixExpr::PostfixExprPostfixContext(postfix) => {
-            use generated::clexer as g;
-            let op_token = postfix.op.as_deref().unwrap();
-            let op = match op_token.token_type {
-                g::DOUBLE_PLUS => ast::UnaryOperator::DoublePlusPostfix,
-                g::DOUBLE_MINUS => ast::UnaryOperator::DoubleMinusPostfix,
-                _ => unreachable!(),
-            };
-            build_from_postfix_expr(postfix.value.as_deref().unwrap()).map(|expr| {
-                ast::Expression::Unary(
-                    ast::UnaryOperatorNode {
-                        span: extract_span_from_token(op_token),
-                        data: op,
-                    },
-                    Box::new(expr),
-                )
-            })
-        }
-        PostfixExpr::Error(ectx) => tree_error(ectx),
-    };
 
-    data.map(|data| ast::ExpressionNode {
-        span: extract_span(ctx),
-        data,
-    })
-}
+        res.map(|mut stmts| {
+            stmts.shrink_to_fit();
+            ast::Statement::BlockStatement(ast::BlockStatement(stmts))
+        })
+    }
 
-pub fn build_from_primary_expr(ctx: &cst::PrimaryExpr) -> AggregateResult<ast::ExpressionNode> {
-    use cst::PrimaryExpr;
-    let data = match ctx {
-        PrimaryExpr::PrimaryExprWrappedContext(wrapped) => {
-            build_from_expr(wrapped.inner.as_deref().unwrap()).map(|en| en.data)
-        }
-        PrimaryExpr::PrimaryExprLiteralContext(literal) => {
-            build_from_literal(literal.value.as_deref().unwrap()).map(ast::Expression::Literal)
-        }
-        PrimaryExpr::PrimaryExprIdentifierContext(ident) => {
-            build_from_identifier(ident.ident.as_deref().unwrap()).map(ast::Expression::Ident)
-        }
-        PrimaryExpr::Error(ectx) => tree_error(ectx),
-    };
+    fn build_from_type_name(&self, ctx: &cst::TypeName) -> AggregateResult<ast::QualifiedTypeNode> {
+        use cst::TypeName as TN;
+        use cst::TypeSpecifier as TS;
 
-    data.map(|data| ast::ExpressionNode {
-        span: extract_span(ctx),
-        data,
-    })
-}
+        let span = extract_span(ctx);
 
-pub fn build_from_literal(ctx: &cst::Literal) -> AggregateResult<ast::LiteralNode> {
-    use cst::Literal;
-    let data = match ctx {
-        Literal::LiteralIntegerContext(literal) => {
-            // TODO set type based on size needed for value
-            build_from_integer_literal(literal.value.as_deref().unwrap()).map(|value| {
-                ast::Literal {
-                    value: ast::LiteralValue::Integer(value),
-                    // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                    //     ast::PrimitiveType::Int,
-                    // )),
+        let data = match ctx {
+            TN::TypeNamePlainContext(plain) => {
+                if plain.specifiers.len() > 1 {
+                    return AggregateResult::new_err(
+                        DiagnosticBuilder::new(span)
+                            .build_unimplemented("types with more than one specifier"),
+                    );
                 }
-            })
+                let primitive = match plain.specifiers.get(0) {
+                    Some(s) => match s.as_ref() {
+                        TS::TypeSpecifierPrimitiveContext(primitive_type) => self
+                            .build_from_primitive_type(primitive_type.tp.as_deref().unwrap())
+                            .map(|p| (p, extract_span(primitive_type))),
+                        TS::Error(ectx) => tree_error(ectx),
+                    },
+                    None => AggregateResult::new_rec(
+                        (ast::PrimitiveType::Int, extract_span(plain)),
+                        DiagnosticBuilder::new(span).build_unspecified_type(),
+                    ),
+                };
+
+                primitive.and_then(|(primitive, span)| {
+                    let unqualified_type_node = ast::UnqualifiedTypeNode {
+                        span,
+                        data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(primitive)),
+                    };
+                    with_qualifiers(unqualified_type_node, &plain.qualifiers)
+                })
+            }
+            TN::TypeNamePointerContext(ctx) => self
+                .build_from_type_name(ctx.inner.as_deref().unwrap())
+                .and_then(|data| {
+                    let unqualified_type_node = ast::UnqualifiedTypeNode {
+                        span: extract_span(ctx),
+                        data: ast::UnqualifiedType::PointerType(Box::new(data)),
+                    };
+                    with_qualifiers(unqualified_type_node, &ctx.ptr_qualifiers)
+                }),
+            TN::Error(ectx) => tree_error(ectx),
+        };
+
+        data.map(|data| ast::QualifiedTypeNode { span, data })
+    }
+
+    fn build_from_primitive_type(
+        &self,
+        ctx: &cst::PrimitiveType,
+    ) -> AggregateResult<ast::PrimitiveType> {
+        use cst::PrimitiveType;
+        AggregateResult::new_ok(match ctx {
+            PrimitiveType::PrimitiveTypeIntContext(_) => ast::PrimitiveType::Int,
+            PrimitiveType::PrimitiveTypeCharContext(_) => ast::PrimitiveType::Char,
+            PrimitiveType::PrimitiveTypeFloatContext(_) => ast::PrimitiveType::Float,
+            PrimitiveType::Error(ectx) => tree_error(ectx),
+        })
+    }
+
+    pub fn build_from_expr(&self, ctx: &cst::Expr) -> AggregateResult<ast::ExpressionNode> {
+        self.build_from_cond_expr(ctx.value.as_deref().unwrap())
+    }
+
+    pub fn build_from_cond_expr(
+        &self,
+        ctx: &cst::CondExpr,
+    ) -> AggregateResult<ast::ExpressionNode> {
+        use cst::CondExpr;
+        let data = match ctx {
+            CondExpr::CondExprSingularContext(singular) => {
+                return self.build_from_logical_or_expr(singular.value.as_deref().unwrap())
+            }
+            CondExpr::CondExprTernaryContext(_composed) => AggregateResult::new_err(
+                DiagnosticBuilder::new(extract_span(ctx))
+                    .build_unimplemented("ternary expressions"),
+            ),
+            CondExpr::Error(ectx) => tree_error(ectx),
+        };
+
+        data.map(|data| ast::ExpressionNode {
+            span: extract_span(ctx),
+            data,
+        })
+    }
+
+    build_from_single_binary_op! {
+        build_from_logical_or_expr(LogicalOrExpr) {
+            LogicalOrExprSingularContext => build_from_logical_and_expr,
+            LogicalOrExprComposedContext => DoublePipe
         }
-        Literal::LiteralFloatingPointContext(literal) => {
-            // The rust parse f64 function allows for strictly more strings as the C grammar
-            // so should always return Ok.
-            // https://doc.rust-lang.org/nightly/core/primitive.f64.html#impl-FromStr-for-f64
-            let value = literal
+    }
+
+    build_from_single_binary_op! {
+        build_from_logical_and_expr(LogicalAndExpr) {
+            LogicalAndExprSingularContext => build_from_bitwise_or_expr,
+            LogicalAndExprComposedContext => DoubleAmpersand
+        }
+    }
+
+    build_from_single_binary_op! {
+        build_from_bitwise_or_expr(BitwiseOrExpr) {
+            BitwiseOrExprSingularContext => build_from_bitwise_xor_expr,
+            BitwiseOrExprComposedContext => Pipe
+        }
+    }
+
+    build_from_single_binary_op! {
+        build_from_bitwise_xor_expr(BitwiseXorExpr) {
+            BitwiseXorExprSingularContext => build_from_bitwise_and_expr,
+            BitwiseXorExprComposedContext => Caret
+        }
+    }
+
+    build_from_single_binary_op! {
+        build_from_bitwise_and_expr(BitwiseAndExpr) {
+            BitwiseAndExprSingularContext => build_from_equality_expr,
+            BitwiseAndExprComposedContext => Ampersand
+        }
+    }
+
+    build_from_multi_binary_op! {
+        build_from_equality_expr(EqualityExpr) {
+            EqualityExprSingularContext => build_from_inequality_expr,
+            EqualityExprComposedContext => match token {
+                DOUBLE_EQUALS => DoubleEquals,
+                BANG_EQUALS => BangEquals,
+            }
+        }
+    }
+
+    build_from_multi_binary_op! {
+        build_from_inequality_expr(InequalityExpr) {
+            InequalityExprSingularContext => build_from_arith_expr,
+            InequalityExprComposedContext => match token {
+                ANGLE_LEFT => AngleLeft,
+                ANGLE_RIGHT => AngleRight,
+                ANGLE_LEFT_EQUALS => AngleLeftEquals,
+                ANGLE_RIGHT_EQUALS => AngleRightEquals,
+            }
+        }
+    }
+
+    build_from_multi_binary_op! {
+        build_from_arith_expr(ArithExpr) {
+            ArithExprSingularContext => build_from_term_expr,
+            ArithExprComposedContext => match token {
+                PLUS => Plus,
+                MINUS => Minus,
+            }
+        }
+    }
+
+    build_from_multi_binary_op! {
+        build_from_term_expr(TermExpr) {
+            TermExprSingularContext => build_from_cast_expr,
+            TermExprComposedContext => match token {
+                STAR => Star,
+                SLASH => Slash,
+                PERCENT => Percent,
+            }
+        }
+    }
+
+    pub fn build_from_cast_expr(
+        &self,
+        ctx: &cst::CastExpr,
+    ) -> AggregateResult<ast::ExpressionNode> {
+        use cst::CastExpr;
+        let data = match ctx {
+            CastExpr::CastExprSingularContext(singular) => {
+                return self.build_from_unary_expr(singular.value.as_deref().unwrap())
+            }
+            CastExpr::CastExprComposedContext(composed) => self
+                .build_from_type_name(composed.type_name.as_deref().unwrap())
+                .zip(self.build_from_cast_expr(composed.value.as_deref().unwrap()))
+                .map(|(type_name, expr)| ast::Expression::Cast(type_name, Box::new(expr))),
+            CastExpr::Error(ectx) => tree_error(ectx),
+        };
+
+        data.map(|data| ast::ExpressionNode {
+            span: extract_span(ctx),
+            data,
+        })
+    }
+
+    pub fn build_from_unary_expr(
+        &self,
+        ctx: &cst::UnaryExpr,
+    ) -> AggregateResult<ast::ExpressionNode> {
+        use cst::UnaryExpr;
+        let data = match ctx {
+            UnaryExpr::UnaryExprPostfixContext(postfix) => {
+                return self.build_from_postfix_expr(postfix.value.as_deref().unwrap())
+            }
+            UnaryExpr::UnaryExprPrefixContext(prefix) => {
+                use generated::clexer as g;
+                let op_token = prefix.op.as_deref().unwrap();
+                let op = match op_token.token_type {
+                    g::DOUBLE_PLUS => ast::UnaryOperator::DoublePlusPrefix,
+                    g::DOUBLE_MINUS => ast::UnaryOperator::DoubleMinusPrefix,
+                    g::BANG => ast::UnaryOperator::Bang,
+                    g::PLUS => ast::UnaryOperator::Plus,
+                    g::MINUS => ast::UnaryOperator::Minus,
+                    g::TILDE => ast::UnaryOperator::Tilde,
+                    g::AMPERSAND => ast::UnaryOperator::Ampersand,
+                    g::STAR => ast::UnaryOperator::Star,
+                    _ => unreachable!(),
+                };
+                self.build_from_cast_expr(prefix.value.as_deref().unwrap())
+                    .map(|expr| {
+                        ast::Expression::Unary(
+                            ast::UnaryOperatorNode {
+                                span: extract_span_from_token(op_token),
+                                data: op,
+                            },
+                            Box::new(expr),
+                        )
+                    })
+            }
+            UnaryExpr::Error(ectx) => tree_error(ectx),
+        };
+
+        data.map(|data| ast::ExpressionNode {
+            span: extract_span(ctx),
+            data,
+        })
+    }
+
+    pub fn build_from_postfix_expr(
+        &self,
+        ctx: &cst::PostfixExpr,
+    ) -> AggregateResult<ast::ExpressionNode> {
+        use cst::PostfixExpr;
+        let data = match ctx {
+            PostfixExpr::PostfixExprPrimaryContext(primary) => {
+                return self.build_from_primary_expr(primary.value.as_deref().unwrap());
+            }
+            PostfixExpr::PostfixExprPostfixContext(postfix) => {
+                use generated::clexer as g;
+                let op_token = postfix.op.as_deref().unwrap();
+                let op = match op_token.token_type {
+                    g::DOUBLE_PLUS => ast::UnaryOperator::DoublePlusPostfix,
+                    g::DOUBLE_MINUS => ast::UnaryOperator::DoubleMinusPostfix,
+                    _ => unreachable!(),
+                };
+                self.build_from_postfix_expr(postfix.value.as_deref().unwrap())
+                    .map(|expr| {
+                        ast::Expression::Unary(
+                            ast::UnaryOperatorNode {
+                                span: extract_span_from_token(op_token),
+                                data: op,
+                            },
+                            Box::new(expr),
+                        )
+                    })
+            }
+            PostfixExpr::Error(ectx) => tree_error(ectx),
+        };
+
+        data.map(|data| ast::ExpressionNode {
+            span: extract_span(ctx),
+            data,
+        })
+    }
+
+    pub fn build_from_primary_expr(
+        &self,
+        ctx: &cst::PrimaryExpr,
+    ) -> AggregateResult<ast::ExpressionNode> {
+        use cst::PrimaryExpr;
+        let data = match ctx {
+            PrimaryExpr::PrimaryExprWrappedContext(wrapped) => self
+                .build_from_expr(wrapped.inner.as_deref().unwrap())
+                .map(|en| en.data),
+            PrimaryExpr::PrimaryExprLiteralContext(literal) => self
+                .build_from_literal(literal.value.as_deref().unwrap())
+                .map(ast::Expression::Literal),
+            PrimaryExpr::PrimaryExprIdentifierContext(ident) => self
+                .build_from_identifier(ident.ident.as_deref().unwrap())
+                .map(ast::Expression::Ident),
+            PrimaryExpr::Error(ectx) => tree_error(ectx),
+        };
+
+        data.map(|data| ast::ExpressionNode {
+            span: extract_span(ctx),
+            data,
+        })
+    }
+
+    pub fn build_from_literal(&self, ctx: &cst::Literal) -> AggregateResult<ast::LiteralNode> {
+        use cst::Literal;
+        let data = match ctx {
+            Literal::LiteralIntegerContext(literal) => {
+                // TODO set type based on size needed for value
+                self.build_from_integer_literal(literal.value.as_deref().unwrap())
+                    .map(|value| {
+                        ast::Literal {
+                            value: ast::LiteralValue::Integer(value),
+                            // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                            //     ast::PrimitiveType::Int,
+                            // )),
+                        }
+                    })
+            }
+            Literal::LiteralFloatingPointContext(literal) => {
+                // The rust parse f64 function allows for strictly more strings as the C grammar
+                // so should always return Ok.
+                // https://doc.rust-lang.org/nightly/core/primitive.f64.html#impl-FromStr-for-f64
+                let value = literal
+                    .value
+                    .as_deref()
+                    .unwrap()
+                    .get_text()
+                    .parse()
+                    .unwrap();
+                AggregateResult::new_ok(ast::Literal {
+                    value: ast::LiteralValue::Float(value),
+                    // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                    //     ast::PrimitiveType::Float,
+                    // )),
+                })
+            }
+            Literal::LiteralCharContext(literal) => {
+                let value = literal.value.as_deref().unwrap().get_text();
+
+                // The grammar requires the first and last character to be a `'` so this will
+                // always be safe.
+                let value = &value[1..value.len() - 1];
+
+                let span = extract_span(ctx);
+
+                parse_char_literal(value, span.start() + 1).map(|byte| {
+                    ast::Literal {
+                        value: ast::LiteralValue::Integer(byte as i128),
+                        // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                        //     ast::PrimitiveType::Char,
+                        // )),
+                    }
+                })
+            }
+            Literal::Error(ectx) => tree_error(ectx),
+        };
+
+        data.map(|data| ast::LiteralNode {
+            span: extract_span(ctx),
+            data,
+        })
+    }
+
+    pub fn build_from_integer_literal(&self, ctx: &cst::IntegerLiteral) -> AggregateResult<i128> {
+        use cst::IntegerLiteral;
+        // All the unwraps here should be fine since the grammar ensures that the invariant are met
+        // for the various parse functions
+        AggregateResult::new_ok(match ctx {
+            IntegerLiteral::IntegerLiteralOctalContext(literal) => {
+                i128::from_str_radix(literal.value.as_deref().unwrap().get_text(), 8).unwrap()
+            }
+            IntegerLiteral::IntegerLiteralDecimalContext(literal) => literal
                 .value
                 .as_deref()
                 .unwrap()
                 .get_text()
                 .parse()
-                .unwrap();
-            AggregateResult::new_ok(ast::Literal {
-                value: ast::LiteralValue::Float(value),
-                // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                //     ast::PrimitiveType::Float,
-                // )),
-            })
-        }
-        Literal::LiteralCharContext(literal) => {
-            let value = literal.value.as_deref().unwrap().get_text();
+                .unwrap(),
+            IntegerLiteral::IntegerLiteralHexadecimalContext(literal) => {
+                let literal = literal.value.as_deref().unwrap().get_text();
+                // This is safe since the grammar ensures we start with `0x` or `0X`
+                let literal = &literal[2..];
+                i128::from_str_radix(literal, 16).unwrap()
+            }
+            IntegerLiteral::Error(ectx) => tree_error(ectx),
+        })
+    }
 
-            // The grammar requires the first and last character to be a `'` so this will
-            // always be safe.
-            let value = &value[1..value.len() - 1];
+    fn build_from_identifier(&self, ctx: &cst::Identifier) -> AggregateResult<ast::IdentNode> {
+        AggregateResult::new_ok(ast::IdentNode {
+            span: extract_span(ctx),
+            data: ctx.value.as_deref().unwrap().get_text().to_owned(),
+        })
+    }
+}
 
-            let span = extract_span(ctx);
+fn join_comment_tokens<'a>(tokens: impl Iterator<Item = &'a cst::TFTok<'a>>) -> String {
+    use generated::clexer as g;
+    tokens
+        .map(|token| match token.token_type {
+            // strip the `//`
+            g::SINGLELINE_COMMENT => token.text[2..].to_owned(),
+            // strip the `/*` and `*/`
+            g::MULTILINE_COMMENT => token.text[2..(token.text.len() - 2)].to_owned(),
+            _ => panic!("expected comment token"),
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
 
-            parse_char_literal(value, span.start() + 1).map(|byte| {
-                ast::Literal {
-                    value: ast::LiteralValue::Integer(byte as i128),
-                    // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                    //     ast::PrimitiveType::Char,
-                    // )),
-                }
-            })
-        }
-        Literal::Error(ectx) => tree_error(ectx),
+fn with_qualifiers(
+    unqualified_type_node: ast::UnqualifiedTypeNode,
+    qualifiers: &[Rc<cst::TypeQualifier>],
+) -> AggregateResult<ast::QualifiedType> {
+    use cst::TypeQualifier as TQ;
+    let mut qualified_type = ast::QualifiedType {
+        is_const: None,
+        inner: unqualified_type_node,
     };
 
-    data.map(|data| ast::LiteralNode {
-        span: extract_span(ctx),
-        data,
-    })
-}
+    let mut res = AggregateResult::new_ok(());
 
-pub fn build_from_integer_literal(ctx: &cst::IntegerLiteral) -> AggregateResult<i128> {
-    use cst::IntegerLiteral;
-    // All the unwraps here should be fine since the grammar ensures that the invariant are met
-    // for the various parse functions
-    AggregateResult::new_ok(match ctx {
-        IntegerLiteral::IntegerLiteralOctalContext(literal) => {
-            i128::from_str_radix(literal.value.as_deref().unwrap().get_text(), 8).unwrap()
-        }
-        IntegerLiteral::IntegerLiteralDecimalContext(literal) => literal
-            .value
-            .as_deref()
-            .unwrap()
-            .get_text()
-            .parse()
-            .unwrap(),
-        IntegerLiteral::IntegerLiteralHexadecimalContext(literal) => {
-            let literal = literal.value.as_deref().unwrap().get_text();
-            // This is safe since the grammar ensures we start with `0x` or `0X`
-            let literal = &literal[2..];
-            i128::from_str_radix(literal, 16).unwrap()
-        }
-        IntegerLiteral::Error(ectx) => tree_error(ectx),
-    })
-}
+    for qualifier in qualifiers.iter() {
+        match qualifier.deref() {
+            TQ::TypeQualifierConstContext(ctx) => {
+                let span = extract_span(ctx);
 
-fn build_from_identifier(ctx: &cst::Identifier) -> AggregateResult<ast::IdentNode> {
-    AggregateResult::new_ok(ast::IdentNode {
-        span: extract_span(ctx),
-        data: ctx.value.as_deref().unwrap().get_text().to_owned(),
-    })
+                if let Some(original_span) = &qualified_type.is_const {
+                    res.add_rec_diagnostic(
+                        DiagnosticBuilder::new(span)
+                            .build_duplicate_qualifier("const", *original_span),
+                    )
+                } else {
+                    qualified_type.is_const = Some(span);
+                }
+            }
+            TQ::Error(ectx) => tree_error(ectx),
+        }
+    }
+    res.map(|_| qualified_type)
 }
 
 /// Parses a char literal that may contain escaped characters.
@@ -649,8 +718,7 @@ fn parse_char_literal(value: &str, start_index: usize) -> AggregateResult<u8> {
 ///
 /// Note that `value` and `start_index` concern the inner literal, without surrounding quotes
 /// (`'` or `"`).
-#[allow(dead_code)]
-fn parse_string_literal(value: &str, start_index: usize) -> AggregateResult<Vec<u8>> {
+fn _parse_string_literal(value: &str, start_index: usize) -> AggregateResult<Vec<u8>> {
     let literal_end = start_index + value.len();
     let mut seq = value
         .char_indices()

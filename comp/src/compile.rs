@@ -10,7 +10,7 @@ pub struct CompileOpts {
 pub fn compile(source: &SimpleFile<String, String>, opts: CompileOpts) -> AggregateResult<Vec<u8>> {
     let cst = passes::parse::parse(source.source());
     // IDEA: antlr tree string
-    let mut ast = cst.and_then(|cst| passes::lower_cst::build_from_translation_unit(&cst));
+    let mut ast = cst.and_then(|cst| passes::lower_cst::lower(&cst));
 
     if opts.const_fold {
         if let Some(ast) = ast.value_mut() {

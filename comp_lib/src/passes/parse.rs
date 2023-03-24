@@ -18,27 +18,29 @@ type TokenStream<'a> = antlr_rust::common_token_stream::CommonTokenStream<'a, Le
 type ParserErrorStrategy<'a> = antlr_rust::DefaultErrorStrategy<'a, CParserContextType>;
 type Parser<'a> = CParser<'a, TokenStream<'a>, ParserErrorStrategy<'a>>;
 
-pub fn parse(input: &str) -> AggregateResult<cst::TranslationUnit> {
+pub fn parse(input: &str) -> AggregateResult<cst::Cst<'_>> {
     let error_listener = AggregatingErrorListener::new();
 
-    // A seperate scope is used here to make shure the refrences to the ErrorListener are droped.
-    let tu = {
-        let lexer = build_lexer(input);
-        let token_stream = TokenStream::new(lexer);
-        let mut parser = build_parser(token_stream, error_listener.clone());
+    let lexer = build_lexer(input);
+    let token_stream = TokenStream::new(lexer);
+    let mut parser = build_parser(token_stream, error_listener.clone());
 
-        match parser.translationUnit() {
-            Ok(tu) => tu,
-            Err(_) => panic!("ICE: Internal ANTLR error"),
-        }
+    let tu = match parser.translationUnit() {
+        Ok(tu) => tu,
+        Err(_) => panic!("ICE: Internal ANTLR error"),
     };
+
+    let token_stream = parser.into_base_parser().input;
 
     Rc::try_unwrap(error_listener.0)
         .expect("ICE: All references to the error_listener should be dropped by now")
         .into_inner()
-        .and(AggregateResult::new_ok(Rc::try_unwrap(tu).expect(
-            "ICE: All references to the translation unit (cst) should be dropped by now",
-        )))
+        .map(|_| cst::Cst {
+            translation_unit: Rc::try_unwrap(tu).expect(
+                "ICE: All references to the translation unit (cst) should be dropped by now",
+            ),
+            token_stream,
+        })
 }
 
 fn build_lexer(input: &str) -> Lexer {
