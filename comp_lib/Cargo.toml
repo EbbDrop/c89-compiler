@@ -5,4 +5,4 @@ edition = "2021"
 
 [dependencies.antlr-rust]
 git = "https://github.com/jonatcln/antlr4rust.git"
-rev = "be0b97d11285a5d7984cc768f3da2cb80599fd61"
+rev = "912350e6c8aa1e4446175ded4d87bbc0bc3f1e0c"

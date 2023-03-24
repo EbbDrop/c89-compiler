@@ -5,7 +5,7 @@ version = 3
 [[package]]
 name = "antlr-rust"
 version = "0.3.0-beta"
-source = "git+https://github.com/jonatcln/antlr4rust.git?rev=be0b97d11285a5d7984cc768f3da2cb80599fd61#be0b97d11285a5d7984cc768f3da2cb80599fd61"
+source = "git+https://github.com/jonatcln/antlr4rust.git?rev=912350e6c8aa1e4446175ded4d87bbc0bc3f1e0c#912350e6c8aa1e4446175ded4d87bbc0bc3f1e0c"
 dependencies = [
  "better_any",
  "bit-set",
@@ -338,9 +338,9 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "syn"
-version = "2.0.8"
+version = "2.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcc02725fd69ab9f26eab07fad303e2497fad6fb9eba4f96c4d1687bdf704ad9"
+checksum = "0da4a3c17e109f700685ec577c0f85efd9b19bcf15c913985f14dc1ac01775aa"
 dependencies = [
  "proc-macro2",
  "quote",
