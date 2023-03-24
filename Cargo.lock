@@ -5,7 +5,7 @@ version = 3
 [[package]]
 name = "antlr-rust"
 version = "0.3.0-beta"
-source = "git+https://github.com/jonatcln/antlr4rust.git?branch=comp-fixes#34ada3772989690e6154490251d4148bc561d6fb"
+source = "git+https://github.com/jonatcln/antlr4rust.git?rev=be0b97d11285a5d7984cc768f3da2cb80599fd61#be0b97d11285a5d7984cc768f3da2cb80599fd61"
 dependencies = [
  "better_any",
  "bit-set",
