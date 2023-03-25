@@ -83,6 +83,7 @@ pub enum Code {
     InvalidCast,
     LossyImplicitConversion,
     IncompatibleAssign,
+    TooBigConstant,
 }
 
 impl Code {

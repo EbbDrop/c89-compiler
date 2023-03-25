@@ -1,12 +1,12 @@
 use crate::{
     ast,
-    ctype::{self, CType},
     diagnostic::{
         builder::{InvalidCastReason, TypeCat},
         AggregateResult, DiagnosticBuilder, Span,
     },
     ir::{
         self,
+        ctype::{self, CType},
         expr::{
             BinaryOp, BitwiseOp, Expr, ExprNode, LvalueExpr, LvalueExprNode, RelationOp, UnaryOp,
         },
@@ -14,7 +14,8 @@ use crate::{
 };
 
 use super::util::{
-    self, cast_to_pointer_size, cast_to_promoted, maybe_cast, try_usual_arithmetic_conversions,
+    self, cast_to_pointer_size, cast_to_promoted, find_first_fit, maybe_cast,
+    try_usual_arithmetic_conversions,
 };
 
 pub fn build_ir_expr(e: &ast::ExpressionNode) -> AggregateResult<ExprNode> {
@@ -135,18 +136,38 @@ fn lvalue_derefrence(inner: LvalueExprNode) -> AggregateResult<ExprNode> {
 }
 
 fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
-    // This should be based on the rules in 3.1.3 not watever this is. but needs changes in ast
-    match &lit.data.value {
-        ast::LiteralValue::Integer(value) => AggregateResult::new_ok(ExprNode {
+    use ctype::Arithmetic::*;
+    // TODO these need to change if we ever support sufixes
+    let (value, pos_types) = match &lit.data {
+        ast::Literal::Dec(i) => (*i, &[SignedInt, SignedLongInt, UnsignedLongInt]),
+        ast::Literal::Hex(i) | ast::Literal::Octal(i) => {
+            (*i, &[SignedInt, UnsignedInt, SignedLongInt])
+        }
+        ast::Literal::Char(i) => {
+            return AggregateResult::new_ok(ExprNode {
+                span: lit.span,
+                ty: CType::Scalar(ctype::Scalar::Arithmetic(Char)),
+                expr: Expr::Constant(ir::expr::Constant::Integer(*i)),
+            })
+        }
+        ast::Literal::Float(value) => {
+            return AggregateResult::new_ok(ExprNode {
+                span: lit.span,
+                ty: CType::Scalar(ctype::Scalar::Arithmetic(Double)),
+                expr: Expr::Constant(ir::expr::Constant::Float(*value)),
+            })
+        }
+    };
+
+    match find_first_fit(value, pos_types) {
+        Some(ty) => AggregateResult::new_ok(ExprNode {
             span: lit.span,
-            ty: CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::SignedInt)),
-            expr: Expr::Constant(ir::expr::Constant::Integer(*value)),
+            ty: CType::Scalar(ctype::Scalar::Arithmetic(ty)),
+            expr: Expr::Constant(ir::expr::Constant::Integer(value)),
         }),
-        ast::LiteralValue::Float(value) => AggregateResult::new_ok(ExprNode {
-            span: lit.span,
-            ty: CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::Double)),
-            expr: Expr::Constant(ir::expr::Constant::Float(*value)),
-        }),
+        None => {
+            AggregateResult::new_err(DiagnosticBuilder::new(lit.span).build_too_big_constant(value))
+        }
     }
 }
 

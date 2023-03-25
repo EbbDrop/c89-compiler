@@ -102,22 +102,22 @@ impl ToDot for ast::Expression {
 
 impl ToDot for ast::Literal {
     fn to_dot(&self) -> DotTree {
+        let (name, value) = match self {
+            ast::Literal::Dec(i) => ("dec", i),
+            ast::Literal::Hex(i) => ("hex", i),
+            ast::Literal::Octal(i) => ("octal", i),
+            ast::Literal::Char(i) => ("char", i),
+            ast::Literal::Float(f) => {
+                return DotTree::new(
+                    "float".to_owned(),
+                    vec![("value", DotTree::new_leaf(f.to_string()))],
+                )
+            }
+        };
         DotTree::new(
-            "literal".to_owned(),
-            vec![
-                // ("type", to_dot_unqualified_type(&l.t)),
-                ("value", self.value.to_dot()),
-            ],
+            name.to_owned(),
+            vec![("value", DotTree::new_leaf(value.to_string()))],
         )
-    }
-}
-
-impl ToDot for ast::LiteralValue {
-    fn to_dot(&self) -> DotTree {
-        match self {
-            Self::Integer(i) => DotTree::new_leaf(i.to_string()),
-            Self::Float(f) => DotTree::new_leaf(f.to_string()),
-        }
     }
 }
 

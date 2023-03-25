@@ -222,9 +222,7 @@ impl Arithmetic {
 
         if either_eq(UnsignedLongInt) {
             UnsignedLongInt
-        } else if (left == SignedLongInt && right == UnsignedLongInt)
-            || (left == UnsignedLongInt && right == SignedLongInt)
-        {
+        } else if either_eq(SignedLongInt) && either_eq(UnsignedLongInt) {
             if SignedLongInt.size_in_bits() > UnsignedLongInt.size_in_bits() {
                 SignedLongInt
             } else {
@@ -249,7 +247,7 @@ impl Arithmetic {
         }
     }
 
-    pub fn size_in_bits(&self) -> u8 {
+    pub fn size_in_bits(&self) -> u32 {
         // TODO this should be platform specific
         match self {
             Arithmetic::Float => 32,

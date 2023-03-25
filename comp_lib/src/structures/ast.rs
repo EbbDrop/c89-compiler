@@ -94,10 +94,13 @@ pub struct LiteralNode {
     pub data: Literal,
 }
 
-#[derive(Debug, Clone)]
-pub struct Literal {
-    pub value: LiteralValue,
-    // pub t: Type,
+#[derive(Debug, Clone, Copy)]
+pub enum Literal {
+    Dec(i128),
+    Hex(i128),
+    Octal(i128),
+    Char(i128),
+    Float(f64),
 }
 
 #[derive(Debug, Clone)]

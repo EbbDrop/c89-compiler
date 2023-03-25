@@ -1,8 +1,8 @@
 use crate::{
     ast,
-    ctype::CType,
     diagnostic::{AggregateResult, DiagnosticBuilder},
     ir::{
+        ctype::CType,
         expr::{LvalueExpr, LvalueExprNode},
         stmt::{Block, Root, Stmt, StmtNode},
     },

@@ -218,6 +218,13 @@ impl DiagnosticBuilder {
             "assign loses const qualifier".to_owned(),
         )
     }
+
+    pub fn build_too_big_constant(self, value: i128) -> Diagnostic {
+        self.build_custom(
+            Code::TooBigConstant,
+            format!("constant {value} cannot be correctly represented in any c type"),
+        )
+    }
 }
 
 pub struct DiagnosticBuilder {

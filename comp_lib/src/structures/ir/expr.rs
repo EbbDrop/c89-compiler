@@ -1,4 +1,5 @@
-use crate::{ctype::CType, diagnostic::Span};
+use super::ctype::CType;
+use crate::diagnostic::Span;
 
 #[derive(Debug, Clone)]
 pub struct ExprNode {

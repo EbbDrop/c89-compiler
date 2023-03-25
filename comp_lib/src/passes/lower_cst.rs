@@ -541,16 +541,7 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         use cst::Literal;
         let data = match ctx {
             Literal::LiteralIntegerContext(literal) => {
-                // TODO set type based on size needed for value
                 self.build_from_integer_literal(literal.value.as_deref().unwrap())
-                    .map(|value| {
-                        ast::Literal {
-                            value: ast::LiteralValue::Integer(value),
-                            // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                            //     ast::PrimitiveType::Int,
-                            // )),
-                        }
-                    })
             }
             Literal::LiteralFloatingPointContext(literal) => {
                 // The rust parse f64 function allows for strictly more strings as the C grammar
@@ -563,12 +554,7 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                     .get_text()
                     .parse()
                     .unwrap();
-                AggregateResult::new_ok(ast::Literal {
-                    value: ast::LiteralValue::Float(value),
-                    // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                    //     ast::PrimitiveType::Float,
-                    // )),
-                })
+                AggregateResult::new_ok(ast::Literal::Float(value))
             }
             Literal::LiteralCharContext(literal) => {
                 let value = literal.value.as_deref().unwrap().get_text();
@@ -579,14 +565,8 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
 
                 let span = extract_span(ctx);
 
-                parse_char_literal(value, span.start() + 1).map(|byte| {
-                    ast::Literal {
-                        value: ast::LiteralValue::Integer(byte as i128),
-                        // t: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                        //     ast::PrimitiveType::Char,
-                        // )),
-                    }
-                })
+                parse_char_literal(value, span.start() + 1)
+                    .map(|byte| ast::Literal::Char(byte as i128))
             }
             Literal::Error(ectx) => tree_error(ectx),
         };
@@ -597,26 +577,34 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         })
     }
 
-    pub fn build_from_integer_literal(&self, ctx: &cst::IntegerLiteral) -> AggregateResult<i128> {
+    pub fn build_from_integer_literal(
+        &self,
+        ctx: &cst::IntegerLiteral,
+    ) -> AggregateResult<ast::Literal> {
         use cst::IntegerLiteral;
         // All the unwraps here should be fine since the grammar ensures that the invariant are met
         // for the various parse functions
         AggregateResult::new_ok(match ctx {
             IntegerLiteral::IntegerLiteralOctalContext(literal) => {
-                i128::from_str_radix(literal.value.as_deref().unwrap().get_text(), 8).unwrap()
+                let value = i128::from_str_radix(literal.value.as_deref().unwrap().get_text(), 8)
+                    .expect("ICE: grammar should have made sure this is a valid octal literal");
+
+                ast::Literal::Octal(value)
             }
-            IntegerLiteral::IntegerLiteralDecimalContext(literal) => literal
-                .value
-                .as_deref()
-                .unwrap()
-                .get_text()
-                .parse()
-                .unwrap(),
+            IntegerLiteral::IntegerLiteralDecimalContext(literal) => {
+                let value =
+                    literal.value.as_deref().unwrap().get_text().parse().expect(
+                        "ICE: grammar should have made sure this is a valid decimal literal",
+                    );
+                ast::Literal::Dec(value)
+            }
             IntegerLiteral::IntegerLiteralHexadecimalContext(literal) => {
                 let literal = literal.value.as_deref().unwrap().get_text();
                 // This is safe since the grammar ensures we start with `0x` or `0X`
                 let literal = &literal[2..];
-                i128::from_str_radix(literal, 16).unwrap()
+                let value = i128::from_str_radix(literal, 16)
+                    .expect("ICE: grammar should have made sure this is a valid hex literal");
+                ast::Literal::Hex(value)
             }
             IntegerLiteral::Error(ectx) => tree_error(ectx),
         })

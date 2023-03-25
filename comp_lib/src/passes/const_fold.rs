@@ -1,10 +1,27 @@
 use crate::ast::{
     Ast, BinaryOperator, BinaryOperatorNode, BlockStatement, Expression, ExpressionNode, Literal,
-    LiteralNode, LiteralValue, Statement, UnaryOperator, UnaryOperatorNode,
+    LiteralNode, Statement, UnaryOperator, UnaryOperatorNode,
 };
 
 pub fn const_fold(ast: &mut Ast) {
     Folder::new().fold(ast)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Value {
+    Int(i128),
+    Float(f64),
+}
+
+impl From<Literal> for Value {
+    fn from(value: Literal) -> Self {
+        match value {
+            Literal::Dec(i) | Literal::Hex(i) | Literal::Octal(i) | Literal::Char(i) => {
+                Value::Int(i)
+            }
+            Literal::Float(f) => Value::Float(f),
+        }
+    }
 }
 
 struct Folder {}
@@ -28,8 +45,8 @@ impl Folder {
     fn fold_statement<'a>(
         &self,
         statement: &'a mut Statement,
-        last_assign: Option<(&'a str, LiteralValue)>,
-    ) -> Option<(&'a str, LiteralValue)> {
+        last_assign: Option<(&'a str, Value)>,
+    ) -> Option<(&'a str, Value)> {
         match statement {
             Statement::Declaration {
                 ident, initializer, ..
@@ -54,23 +71,23 @@ impl Folder {
     fn fold_expr_node(
         &self,
         expr_node: &mut ExpressionNode,
-        last_assign: &Option<(&str, LiteralValue)>,
-    ) -> Option<LiteralValue> {
+        last_assign: &Option<(&str, Value)>,
+    ) -> Option<Value> {
         if let Expression::Literal(ref value) = expr_node.data {
             // Literals don't need to be folded since they are already as folded as possible
-            return Some(value.data.value.clone());
+            return Some(value.data.into());
         }
 
         let folded = self.fold_expr(&mut expr_node.data, last_assign)?;
-        replace_with_literal(expr_node, folded.clone());
+        replace_with_literal(expr_node, folded);
         Some(folded)
     }
 
     fn fold_expr(
         &self,
         expr: &mut Expression,
-        last_assign: &Option<(&str, LiteralValue)>,
-    ) -> Option<LiteralValue> {
+        last_assign: &Option<(&str, Value)>,
+    ) -> Option<Value> {
         match expr {
             Expression::Binary(lhs, op, rhs) => self.fold_binary_op(op, lhs, rhs, last_assign),
             Expression::Unary(op, expr) => self.fold_unary_op(op, expr, last_assign),
@@ -79,10 +96,10 @@ impl Folder {
                 replace_with_literal(expr_node, inner_folded);
                 None // Cast expression itself is not const-folded
             }
-            Expression::Literal(lit) => Some(lit.data.value.clone()),
+            Expression::Literal(lit) => Some(lit.data.into()),
             Expression::Ident(ident) => last_assign
                 .as_ref()
-                .and_then(|(name, value)| (*name == ident.data).then(|| value.clone())),
+                .and_then(|(name, value)| (*name == ident.data).then_some(*value)),
         }
     }
 
@@ -91,20 +108,20 @@ impl Folder {
         op_node: &mut BinaryOperatorNode,
         lhs_node: &mut ExpressionNode,
         rhs_node: &mut ExpressionNode,
-        last_assign: &Option<(&str, LiteralValue)>,
-    ) -> Option<LiteralValue> {
+        last_assign: &Option<(&str, Value)>,
+    ) -> Option<Value> {
         let folded1 = self.fold_expr(&mut lhs_node.data, last_assign)?;
         let folded2 = self.fold_expr(&mut rhs_node.data, last_assign)?;
 
         macro_rules! do_op_custom {
             (|$a:ident, $b:ident| $op_i:expr $(; $op_f:expr)?) => {{
-                use LiteralValue::*;
+                use Value::*;
                 #[allow(unreachable_patterns)]
                 match (&folded1, &folded2) {
-                    (&Integer($a), &Integer($b)) => $op_i,
+                    (&Int($a), &Int($b)) => $op_i,
                 $(
-                    (&Integer($a), &Float($b)) => { let $a = $a as f64; $op_f }
-                    (&Float($a), &Integer($b)) => { let $b = $b as f64; $op_f }
+                    (&Int($a), &Float($b)) => { let $a = $a as f64; $op_f }
+                    (&Float($a), &Int($b)) => { let $b = $b as f64; $op_f }
                     (&Float($a), &Float($b)) => $op_f,
                 )?
                     _ => None
@@ -114,15 +131,15 @@ impl Folder {
 
         macro_rules! do_op {
             (|$a:ident, $b:ident| $op:expr) => {
-                do_op_custom!(|$a, $b| Some(Integer(($op) as i128)); Some(Float($op)))
+                do_op_custom!(|$a, $b| Some(Int(($op) as i128)); Some(Float($op)))
             };
             (int; |$a:ident, $b:ident| $op:expr) => {
-                do_op_custom!(|$a, $b| Some(Integer(($op) as i128)))
+                do_op_custom!(|$a, $b| Some(Int(($op) as i128)))
             };
             (bool; |$a:ident, $b:ident| $op_i:expr $(; $op_f:expr)?) => {
                 do_op_custom!(
-                    |$a, $b| Some(Integer(($op_i) as i128))
-                    $(; Some(Integer(($op_f) as i128)))?
+                    |$a, $b| Some(Int(($op_i) as i128))
+                    $(; Some(Int(($op_f) as i128)))?
                 )
             };
         }
@@ -161,20 +178,20 @@ impl Folder {
         &self,
         op_node: &mut UnaryOperatorNode,
         expr_node: &mut ExpressionNode,
-        last_assign: &Option<(&str, LiteralValue)>,
-    ) -> Option<LiteralValue> {
+        last_assign: &Option<(&str, Value)>,
+    ) -> Option<Value> {
         let inner_folded = self.fold_expr(&mut expr_node.data, last_assign)?;
 
-        use LiteralValue::*;
+        use Value::*;
 
         let folded = match op_node.data {
             UnaryOperator::Bang => Some(match inner_folded {
-                Integer(i) => Integer((i == 0) as i128),
-                Float(f) => Integer((f == 0.0) as i128),
+                Int(i) => Int((i == 0) as i128),
+                Float(f) => Int((f == 0.0) as i128),
             }),
-            UnaryOperator::Plus => Some(inner_folded.clone()),
+            UnaryOperator::Plus => Some(inner_folded),
             UnaryOperator::Minus => Some(match inner_folded {
-                Integer(i) => Integer(-i),
+                Int(i) => Int(-i),
                 Float(f) => Float(-f),
             }),
             UnaryOperator::DoublePlusPrefix => None,
@@ -182,7 +199,7 @@ impl Folder {
             UnaryOperator::DoublePlusPostfix => None,
             UnaryOperator::DoubleMinusPostfix => None,
             UnaryOperator::Tilde => match inner_folded {
-                Integer(i) => Some(Integer(!i)),
+                Int(i) => Some(Int(!i)),
                 Float(_) => None,
             },
             UnaryOperator::Ampersand => None,
@@ -196,9 +213,13 @@ impl Folder {
     }
 }
 
-fn replace_with_literal(expr_node: &mut ExpressionNode, value: LiteralValue) {
+fn replace_with_literal(expr_node: &mut ExpressionNode, value: Value) {
+    let lit = match value {
+        Value::Int(i) => Literal::Dec(i),
+        Value::Float(f) => Literal::Float(f),
+    };
     expr_node.data = Expression::Literal(LiteralNode {
         span: expr_node.span,
-        data: Literal { value },
+        data: lit,
     })
 }
