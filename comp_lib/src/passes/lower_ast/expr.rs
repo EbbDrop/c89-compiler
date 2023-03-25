@@ -21,6 +21,9 @@ use super::util::{
 pub fn build_ir_expr(e: &ast::ExpressionNode) -> AggregateResult<ExprNode> {
     let span = e.span;
     match &e.data {
+        ast::Expression::Assignment(lhs, op, rhs) => build_ir_lvalue(lhs, "assignment", op.span)
+            .zip(build_ir_expr(rhs))
+            .and_then(|(lhs, rhs)| assign(lhs, rhs, span, op.span)),
         ast::Expression::Binary(left, op, right) => build_binary_op_ir_expr(op, left, right, span),
         ast::Expression::Unary(op, inner) => build_unary_op_ir_expr(op, inner, span),
         ast::Expression::Cast(type_name, inner) => build_ir_expr(inner).and_then(|inner| {

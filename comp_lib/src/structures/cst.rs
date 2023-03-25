@@ -4,7 +4,7 @@ use antlr_rust::{token_factory::TokenFactory as AntlrTF, token_stream::TokenStre
 #[rustfmt::skip]
 pub use crate::generated::cparser::{
     ArithExprContextAll                 as ArithExpr,
-    AssignmentStatementContextAll       as AssignmentStatement,
+    AssignExprContextAll                as AssignExpr,
     BitwiseAndExprContextAll            as BitwiseAndExpr,
     BitwiseOrExprContextAll             as BitwiseOrExpr,
     BitwiseXorExprContextAll            as BitwiseXorExpr,

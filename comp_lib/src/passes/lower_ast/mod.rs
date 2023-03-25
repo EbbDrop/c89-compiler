@@ -38,9 +38,6 @@ fn build_ir_from_statement(statement: &ast::StatementNode) -> AggregateResult<St
             let expr = expr::build_ir_expr(initializer.as_ref().unwrap());
             expr.and_then(|expr| expr::assign(lexpr, expr, statement.span, statement.span))
         }
-        ast::Statement::Assignment { ident: _, rhs: _ } => {
-            todo!("cant build Assignment (no symbol table yet)")
-        }
         ast::Statement::Expression(e) => expr::build_ir_expr(e),
         ast::Statement::BlockStatement(_) => AggregateResult::new_err(
             DiagnosticBuilder::new(statement.span).build_unimplemented("blocks"),

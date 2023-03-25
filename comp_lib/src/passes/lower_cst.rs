@@ -161,9 +161,6 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
             Statement::StatementDeclarationContext(decl) => {
                 self.build_from_declaration_statement(decl.value.as_deref().unwrap())
             }
-            Statement::StatementAssignmentContext(assignment) => {
-                self.build_from_assignment_statement(assignment.value.as_deref().unwrap())
-            }
             Statement::StatementBlockContext(block) => {
                 self.build_from_block_statement(block.value.as_deref().unwrap())
             }
@@ -215,15 +212,6 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                 ),
             DeclarationStatement::Error(ectx) => tree_error(ectx),
         }
-    }
-
-    fn build_from_assignment_statement(
-        &self,
-        ctx: &cst::AssignmentStatement,
-    ) -> AggregateResult<ast::Statement> {
-        self.build_from_identifier(ctx.ident.as_deref().unwrap())
-            .zip(self.build_from_expr(ctx.rhs.as_deref().unwrap()))
-            .map(|(ident, rhs)| ast::Statement::Assignment { ident, rhs })
     }
 
     fn build_from_block_statement(
@@ -308,7 +296,35 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
     }
 
     pub fn build_from_expr(&self, ctx: &cst::Expr) -> AggregateResult<ast::ExpressionNode> {
-        self.build_from_cond_expr(ctx.value.as_deref().unwrap())
+        self.build_from_assign_expr(ctx.value.as_deref().unwrap())
+    }
+
+    pub fn build_from_assign_expr(
+        &self,
+        ctx: &cst::AssignExpr,
+    ) -> AggregateResult<ast::ExpressionNode> {
+        use cst::AssignExpr;
+        let data = match ctx {
+            AssignExpr::AssignExprSingularContext(singular) => {
+                return self.build_from_cond_expr(singular.value.as_deref().unwrap())
+            }
+            AssignExpr::AssignExprComposedContext(composed) => self
+                .build_from_unary_expr(composed.lhs.as_deref().unwrap())
+                .zip(self.build_from_assign_expr(composed.rhs.as_deref().unwrap()))
+                .map(|(lhs, rhs)| {
+                    let op = composed.op.as_deref().unwrap();
+                    let op = ast::AssignmentOperatorNode {
+                        span: extract_span_from_token(op),
+                    };
+                    ast::Expression::Assignment(Box::new(lhs), op, Box::new(rhs))
+                }),
+            AssignExpr::Error(ectx) => tree_error(ectx),
+        };
+
+        data.map(|data| ast::ExpressionNode {
+            span: extract_span(ctx),
+            data,
+        })
     }
 
     pub fn build_from_cond_expr(

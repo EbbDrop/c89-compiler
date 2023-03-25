@@ -34,13 +34,6 @@ impl ToDot for ast::Statement {
 
                 DotTree::new("declaration".to_owned(), children)
             }
-            ast::Statement::Assignment { ident, rhs } => DotTree::new(
-                "assignement".to_owned(),
-                vec![
-                    ("ident", to_dot_ident(&ident.data)),
-                    ("rhs", rhs.data.to_dot()),
-                ],
-            ),
 
             ast::Statement::Expression(e) => e.data.to_dot(),
             ast::Statement::BlockStatement(bs) => bs.to_dot(),
@@ -52,6 +45,10 @@ impl ToDot for ast::Expression {
     fn to_dot(&self) -> DotTree {
         use ast::{BinaryOperator, UnaryOperator};
         match self {
+            Self::Assignment(e1, _, e2) => DotTree::new(
+                "=".to_owned(),
+                vec![("lhs", e1.data.to_dot()), ("rhs", e2.data.to_dot())],
+            ),
             Self::Binary(e1, bo, e2) => DotTree::new(
                 match bo.data {
                     BinaryOperator::Plus => "+",

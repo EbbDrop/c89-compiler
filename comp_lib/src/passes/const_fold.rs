@@ -54,12 +54,9 @@ impl Folder {
                 self.fold_expr_node(initializer, &last_assign)
                     .map(|v| (ident.data.as_str(), v))
             }),
-            Statement::Assignment { ident, rhs } => self
-                .fold_expr_node(rhs, &last_assign)
-                .map(|v| (ident.data.as_str(), v)),
             Statement::Expression(expr_node) => {
                 self.fold_expr_node(expr_node, &last_assign);
-                last_assign
+                None
             }
             Statement::BlockStatement(bs) => {
                 self.fold_block_statement(bs);
@@ -89,6 +86,11 @@ impl Folder {
         last_assign: &Option<(&str, Value)>,
     ) -> Option<Value> {
         match expr {
+            Expression::Assignment(_, _, rhs) => {
+                let folded = self.fold_expr(&mut rhs.data, last_assign)?;
+                replace_with_literal(rhs, folded);
+                None // Assignment expression itself is not const-folded
+            }
             Expression::Binary(lhs, op, rhs) => self.fold_binary_op(op, lhs, rhs, last_assign),
             Expression::Unary(op, expr) => self.fold_unary_op(op, expr, last_assign),
             Expression::Cast(_, expr_node) => {

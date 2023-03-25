@@ -2,7 +2,12 @@ parser grammar Expr;
 import Type;
 
 expr
-    : value=condExpr
+    : value=assignExpr
+    ;
+
+assignExpr
+    : value=condExpr                                            # AssignExprSingular
+    | lhs=unaryExpr op=EQUALS rhs=assignExpr                    # AssignExprComposed
     ;
 
 condExpr

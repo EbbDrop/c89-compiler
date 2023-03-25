@@ -23,10 +23,6 @@ pub enum Statement {
         ident: IdentNode,
         initializer: Option<ExpressionNode>,
     },
-    Assignment {
-        ident: IdentNode,
-        rhs: ExpressionNode,
-    },
     Expression(ExpressionNode),
     BlockStatement(BlockStatement),
 }
@@ -81,6 +77,11 @@ pub struct ExpressionNode {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
+    Assignment(
+        Box<ExpressionNode>,
+        AssignmentOperatorNode,
+        Box<ExpressionNode>,
+    ),
     Binary(Box<ExpressionNode>, BinaryOperatorNode, Box<ExpressionNode>),
     Unary(UnaryOperatorNode, Box<ExpressionNode>),
     Cast(QualifiedTypeNode, Box<ExpressionNode>),
@@ -108,6 +109,11 @@ pub enum LiteralValue {
     Integer(i128), //TODO change this to big int?
     Float(f64),
     // Void,
+}
+#[derive(Debug, Clone)]
+pub struct AssignmentOperatorNode {
+    pub span: Span,
+    // pub data: AssignmentOperator, TODO Allow for assignments like +=, -=, ...
 }
 
 #[derive(Debug, Clone)]
