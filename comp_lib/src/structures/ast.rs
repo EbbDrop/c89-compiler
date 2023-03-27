@@ -21,7 +21,7 @@ pub enum Statement {
     Declaration {
         type_name: QualifiedTypeNode,
         ident: IdentNode,
-        initializer: Option<ExpressionNode>,
+        initializer: Option<(Span, ExpressionNode)>,
     },
     Expression(ExpressionNode),
     BlockStatement(BlockStatement),

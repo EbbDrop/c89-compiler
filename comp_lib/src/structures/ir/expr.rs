@@ -1,4 +1,4 @@
-use super::ctype::CType;
+use super::{ctype::CType, table::ItemId};
 use crate::diagnostic::Span;
 
 #[derive(Debug, Clone)]
@@ -197,7 +197,7 @@ pub struct LvalueExprNode {
 #[derive(Debug, Clone)]
 pub enum LvalueExpr {
     /// 3.3.1
-    Ident(String), //TODO should be index into symbol table
+    Ident(ItemId),
 
     /// 3.3.3.2
     /// Inner expr will be pointer type, the out type will be the type that was pointed to

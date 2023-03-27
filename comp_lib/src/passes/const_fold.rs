@@ -51,7 +51,7 @@ impl Folder {
             Statement::Declaration {
                 ident, initializer, ..
             } => initializer.as_mut().and_then(|initializer| {
-                self.fold_expr_node(initializer, &last_assign)
+                self.fold_expr_node(&mut initializer.1, &last_assign)
                     .map(|v| (ident.data.as_str(), v))
             }),
             Statement::Expression(expr_node) => {
@@ -196,16 +196,19 @@ impl Folder {
                 Int(i) => Int(-i),
                 Float(f) => Float(-f),
             }),
-            UnaryOperator::DoublePlusPrefix => None,
-            UnaryOperator::DoubleMinusPrefix => None,
-            UnaryOperator::DoublePlusPostfix => None,
-            UnaryOperator::DoubleMinusPostfix => None,
+            UnaryOperator::Star => None,
             UnaryOperator::Tilde => match inner_folded {
                 Int(i) => Some(Int(!i)),
                 Float(_) => None,
             },
-            UnaryOperator::Ampersand => None,
-            UnaryOperator::Star => None,
+            UnaryOperator::DoublePlusPrefix
+            | UnaryOperator::DoubleMinusPrefix
+            | UnaryOperator::DoublePlusPostfix
+            | UnaryOperator::DoubleMinusPostfix
+            | UnaryOperator::Ampersand => {
+                // Early return to avoid folding a lvalue
+                return None;
+            }
         };
 
         folded.or_else(|| {

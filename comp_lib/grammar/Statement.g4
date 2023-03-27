@@ -10,7 +10,7 @@ statement
 declarationStatement
     : type_name=typeName ident=identifier SEMICOLON             # DeclarationStatementWithoutInitializer
     | type_name=typeName ident=identifier
-      EQUALS rhs=expr SEMICOLON                                 # DeclarationStatementWithInitializer
+      op=EQUALS rhs=expr SEMICOLON                              # DeclarationStatementWithInitializer
     ;
 
 blockStatement

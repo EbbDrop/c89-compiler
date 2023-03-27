@@ -1,10 +1,11 @@
 use crate::diagnostic::Span;
 
-use super::expr::ExprNode;
+use super::{expr::ExprNode, table::Table};
 
 #[derive(Debug, Clone)]
 pub struct Root {
     pub global: Block,
+    pub table: Table,
 }
 
 #[derive(Debug, Clone)]

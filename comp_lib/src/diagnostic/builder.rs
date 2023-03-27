@@ -225,6 +225,23 @@ impl DiagnosticBuilder {
             format!("constant {value} cannot be correctly represented in any c type"),
         )
     }
+
+    pub fn build_undeclared_ident(self, name: &str) -> Diagnostic {
+        // TODO give possible alternative names that are close
+        self.build_custom(
+            Code::UndeclaredIdent,
+            format!("identifier `{name}` isn't declared in this scope"),
+        )
+    }
+
+    pub fn build_already_defined(mut self, name: &str, original_span: Span) -> Diagnostic {
+        // TODO give span of definition
+        self.add_additional_span(original_span, Some("originally defined here".to_owned()));
+        self.build_custom(
+            Code::AlreadyDefined,
+            format!("identifier `{name}` is already defined"),
+        )
+    }
 }
 
 pub struct DiagnosticBuilder {

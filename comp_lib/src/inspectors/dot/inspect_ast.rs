@@ -29,7 +29,7 @@ impl ToDot for ast::Statement {
                     ("ident", to_dot_ident(&ident.data)),
                 ];
                 if let Some(initializer) = initializer {
-                    children.push(("rhs", initializer.data.to_dot()))
+                    children.push(("rhs", initializer.1.data.to_dot()))
                 }
 
                 DotTree::new("declaration".to_owned(), children)

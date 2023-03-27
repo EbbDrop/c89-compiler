@@ -203,13 +203,14 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                 .build_from_type_name(decl.type_name.as_deref().unwrap())
                 .zip(self.build_from_identifier(decl.ident.as_deref().unwrap()))
                 .zip(self.build_from_expr(decl.rhs.as_deref().unwrap()))
-                .map(
-                    |((type_name, ident), initializer)| ast::Statement::Declaration {
+                .map(|((type_name, ident), initializer)| {
+                    let op_span = extract_span_from_token(decl.op.as_deref().unwrap());
+                    ast::Statement::Declaration {
                         type_name,
                         ident,
-                        initializer: Some(initializer),
-                    },
-                ),
+                        initializer: Some((op_span, initializer)),
+                    }
+                }),
             DeclarationStatement::Error(ectx) => tree_error(ectx),
         }
     }

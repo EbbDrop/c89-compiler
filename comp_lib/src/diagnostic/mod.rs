@@ -84,6 +84,8 @@ pub enum Code {
     LossyImplicitConversion,
     IncompatibleAssign,
     TooBigConstant,
+    UndeclaredIdent,
+    AlreadyDefined,
 }
 
 impl Code {
