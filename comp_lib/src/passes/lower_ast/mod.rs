@@ -79,6 +79,7 @@ fn build_ir_from_statement(
         expr.map(|expr| StmtNode {
             span: statement.span,
             stmt: Stmt::Expr(expr),
+            comments: statement.comments.clone(),
         })
     })
 }

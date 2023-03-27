@@ -13,6 +13,7 @@ pub struct Block(pub Vec<StmtNode>);
 
 #[derive(Debug, Clone)]
 pub struct StmtNode {
+    pub comments: Option<String>,
     pub span: Span,
     pub stmt: Stmt,
 }
