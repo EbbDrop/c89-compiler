@@ -67,6 +67,8 @@ impl ToDot for ast::Expression {
                     BinaryOperator::Percent => "%",
                     BinaryOperator::AngleLeftEquals => "<=",
                     BinaryOperator::AngleRightEquals => ">=",
+                    BinaryOperator::DoubleAngleLeft => "<<",
+                    BinaryOperator::DoubleAngleRight => ">>",
                 }
                 .to_owned(),
                 vec![("lhs", e1.data.to_dot()), ("rhs", e2.data.to_dot())],

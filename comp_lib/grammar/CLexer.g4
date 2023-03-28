@@ -21,6 +21,8 @@ ANGLE_LEFT_EQUALS: '<=';
 ANGLE_RIGHT_EQUALS: '>=';
 DOUBLE_PLUS: '++';
 DOUBLE_MINUS: '--';
+DOUBLE_ANGLE_LEFT: '<<';
+DOUBLE_ANGLE_RIGHT: '>>';
 
 // 1-char symbols
 SEMICOLON: ';';

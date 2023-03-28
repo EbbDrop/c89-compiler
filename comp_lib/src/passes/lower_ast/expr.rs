@@ -80,6 +80,8 @@ fn build_binary_op_ir_expr(
             AngleRightEquals => builder.relation(RelationOp::Ge),
             DoubleAmpersand => builder.logical_and(),
             DoublePipe => builder.logical_or(),
+            DoubleAngleLeft => builder.shift_left(),
+            DoubleAngleRight => builder.shift_right(),
         }
     })
 }
@@ -762,11 +764,11 @@ impl BinaryBuilder {
             })
     }
 
-    fn _shift_left(self) -> AggregateResult<ExprNode> {
+    fn shift_left(self) -> AggregateResult<ExprNode> {
         self.generic_integral_promoted_bin(BinaryOp::ShiftLeft, "shift left")
     }
 
-    fn _shift_right(self) -> AggregateResult<ExprNode> {
+    fn shift_right(self) -> AggregateResult<ExprNode> {
         self.generic_integral_promoted_bin(BinaryOp::ShiftLeft, "shift right")
     }
 

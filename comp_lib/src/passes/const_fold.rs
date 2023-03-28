@@ -167,6 +167,8 @@ impl Folder {
             BinaryOperator::Percent => do_op!(int; |a, b| a % b),
             BinaryOperator::AngleLeftEquals => do_op!(bool; |a, b| a <= b),
             BinaryOperator::AngleRightEquals => do_op!(bool; |a, b| a >= b),
+            BinaryOperator::DoubleAngleLeft => do_op!(int; |a, b| a << b),
+            BinaryOperator::DoubleAngleRight => None,
         };
 
         folded.or_else(|| {

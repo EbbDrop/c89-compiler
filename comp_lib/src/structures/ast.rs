@@ -140,6 +140,8 @@ pub enum BinaryOperator {
     Percent,
     AngleLeftEquals,
     AngleRightEquals,
+    DoubleAngleLeft,
+    DoubleAngleRight,
 }
 
 #[derive(Debug, Clone)]

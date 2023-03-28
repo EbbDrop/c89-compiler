@@ -397,12 +397,22 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
 
     build_from_multi_binary_op! {
         build_from_inequality_expr(InequalityExpr) {
-            InequalityExprSingularContext => build_from_arith_expr,
+            InequalityExprSingularContext => build_from_shift_expr,
             InequalityExprComposedContext => match token {
                 ANGLE_LEFT => AngleLeft,
                 ANGLE_RIGHT => AngleRight,
                 ANGLE_LEFT_EQUALS => AngleLeftEquals,
                 ANGLE_RIGHT_EQUALS => AngleRightEquals,
+            }
+        }
+    }
+
+    build_from_multi_binary_op! {
+        build_from_shift_expr(ShiftExpr) {
+            ShiftExprSingularContext => build_from_arith_expr,
+            ShiftExprComposedContext => match token {
+                DOUBLE_ANGLE_LEFT => DoubleAngleLeft,
+                DOUBLE_ANGLE_RIGHT => DoubleAngleRight,
             }
         }
     }

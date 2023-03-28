@@ -23,6 +23,7 @@ pub use crate::generated::cparser::{
     PostfixExprContextAll               as PostfixExpr,
     PrimaryExprContextAll               as PrimaryExpr,
     PrimitiveTypeContextAll             as PrimitiveType,
+    ShiftExprContextAll                 as ShiftExpr,
     StatementContextAll                 as Statement,
     TermExprContextAll                  as TermExpr,
     TranslationUnitContextAll           as TranslationUnit,

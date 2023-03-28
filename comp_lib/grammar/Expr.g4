@@ -51,10 +51,16 @@ equalityExpr
     ;
 
 inequalityExpr
-    : value=arithExpr                                           # InequalityExprSingular
+    : value=shiftExpr                                           # InequalityExprSingular
     | lhs=inequalityExpr
       op=(ANGLE_LEFT_EQUALS | ANGLE_RIGHT_EQUALS | ANGLE_LEFT | ANGLE_RIGHT)
-      rhs=arithExpr                                             # InequalityExprComposed
+      rhs=shiftExpr                                             # InequalityExprComposed
+    ;
+
+shiftExpr
+    : value=arithExpr                                           # ShiftExprSingular
+    | lhs=shiftExpr op=(DOUBLE_ANGLE_LEFT | DOUBLE_ANGLE_RIGHT)
+      rhs=arithExpr                                             # ShiftExprComposed
     ;
 
 arithExpr
