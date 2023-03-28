@@ -340,7 +340,7 @@ impl<'a> UnaryBuilder<'a> {
     /// Inner can't be const
     /// See [`Expr::PrefixDec`]
     fn prefix_dec(self) -> AggregateResult<ExprNode> {
-        self.build_inc_dec("decrement", Expr::PostfixDec)
+        self.build_inc_dec("decrement", Expr::PrefixDec)
     }
 
     /// See [`Expr::Reference`]
@@ -452,7 +452,7 @@ impl<'a> UnaryBuilder<'a> {
         });
         res.map(|inner| ExprNode {
             span: self.full_span,
-            ty: CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::SignedInt)),
+            ty: inner.ty.clone(),
             expr: Expr::UnaryArith(UnaryOp::Not, Box::new(inner)),
         })
     }
@@ -473,7 +473,7 @@ impl<'a> UnaryBuilder<'a> {
 
         res.map(|inner| ExprNode {
             span: self.full_span,
-            ty: inner.ty.clone(),
+            ty: CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::SignedInt)),
             expr: Expr::UnaryArith(UnaryOp::Not, Box::new(inner)),
         })
     }
@@ -610,7 +610,7 @@ impl BinaryBuilder {
                 }
             }
             (CType::Scalar(Scalar::Arithmetic(_)), CType::Scalar(Scalar::Pointer(_, _))) => {
-                let ty = left.ty.clone();
+                let ty = right.ty.clone();
                 match cast_to_pointer_size(left) {
                     Ok(left) => Ok((left, right, ty)),
                     Err(left) => Err((left, right)),
@@ -659,7 +659,7 @@ impl BinaryBuilder {
                 }
             }
             (CType::Scalar(Scalar::Arithmetic(_)), CType::Scalar(Scalar::Pointer(_, _))) => {
-                let ty = left.ty.clone();
+                let ty = right.ty.clone();
                 match cast_to_pointer_size(left) {
                     Ok(left) => Ok((left, right, ty)),
                     Err(left) => Err((left, right)),
@@ -672,9 +672,9 @@ impl BinaryBuilder {
                 // The standard explicitly says to ignore the is_const's above
 
                 if left_ty.compatible_with(right_ty).is_ok() {
-                    // TODO UnsignedLongInt chosen since that is what g++ uses but should probably be
+                    // TODO SignedLongInt chosen since that is what g++ uses but should probably be
                     // platform dependent, this represents the maximum length between two pointers
-                    let ty = CType::Scalar(Scalar::Arithmetic(ctype::Arithmetic::UnsignedLongInt));
+                    let ty = CType::Scalar(Scalar::Arithmetic(ctype::Arithmetic::SignedLongInt));
 
                     // Can't cast left and right yet since further code will not know what type of Sub
                     // it is
