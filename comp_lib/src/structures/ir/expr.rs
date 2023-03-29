@@ -26,10 +26,6 @@ pub enum Expr {
     // first expr should have type functionPointer
     // FunctionCall(ExprNode, Vec<ExprNode>)
 
-    // TODO remove this
-    /// lol any type for now, out type void or something
-    Fprint(Box<Expr>),
-
     // 3.3.2.3
     // . and ->
 
