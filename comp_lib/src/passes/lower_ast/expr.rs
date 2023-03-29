@@ -42,7 +42,7 @@ pub fn build_ir_expr(e: &ast::ExpressionNode, scope: &ScopedHandle) -> Aggregate
             )
         }),
         ast::Expression::Literal(lit) => literal(lit),
-        ast::Expression::Ident(idt) => ident(idt, scope).and_then(lvalue_derefrence),
+        ast::Expression::Ident(idt) => ident(idt, scope).and_then(lvalue_dereference),
     }
 }
 
@@ -109,7 +109,7 @@ fn build_unary_op_ir_expr(
         DoublePlusPostfix => builder.postfix_inc(),
         DoubleMinusPostfix => builder.postfix_dec(),
         Ampersand => builder.reference(),
-        Star => builder.dereference().and_then(lvalue_derefrence),
+        Star => builder.dereference().and_then(lvalue_dereference),
     }
 }
 
@@ -144,7 +144,7 @@ fn build_ir_lvalue(
     })
 }
 
-fn lvalue_derefrence(inner: LvalueExprNode) -> AggregateResult<ExprNode> {
+fn lvalue_dereference(inner: LvalueExprNode) -> AggregateResult<ExprNode> {
     AggregateResult::new_ok(ExprNode {
         span: inner.span,
         ty: inner.ty.clone(),
@@ -376,7 +376,7 @@ impl<'a> UnaryBuilder<'a> {
                 }
                 ctype::Scalar::Arithmetic(_) => AggregateResult::new_err(
                     DiagnosticBuilder::new(self.op_span).build_unexpected_type(
-                        "derefrence",
+                        "dereference",
                         TypeCat::Pointer,
                         &inner,
                     ),
