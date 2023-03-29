@@ -225,6 +225,12 @@ fn cast(inner: ExprNode, to_ty: CType, span: Span, op_span: Span) -> AggregateRe
                 .build_invalid_cast(InvalidCastReason::PointerFromFloat(&inner)),
         );
     }
+    if inner.ty.is_pointer() && to_ty.is_floating() {
+        res.add_err(
+            DiagnosticBuilder::new(op_span)
+                .build_invalid_cast(InvalidCastReason::FloatFromPointer(&inner)),
+        );
+    }
 
     res.map(|()| ExprNode {
         span,
@@ -274,11 +280,8 @@ pub fn assign(
                 )
             }
         }
-        (CType::Scalar(Scalar::Arithmetic(_)), CType::Scalar(Scalar::Pointer(_, _))) => res
-            .add_rec_diagnostic(
-                DiagnosticBuilder::new(op_span).build_incompatible_assign(&from, &to),
-            ),
-        (CType::Scalar(Scalar::Pointer(_, _)), CType::Scalar(Scalar::Arithmetic(a))) => {
+        (CType::Scalar(Scalar::Arithmetic(a)), CType::Scalar(Scalar::Pointer(_, _)))
+        | (CType::Scalar(Scalar::Pointer(_, _)), CType::Scalar(Scalar::Arithmetic(a))) => {
             let diagnostic = DiagnosticBuilder::new(op_span).build_incompatible_assign(&from, &to);
             if a.is_floating() {
                 res.add_err(diagnostic);

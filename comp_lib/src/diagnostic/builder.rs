@@ -157,6 +157,10 @@ impl DiagnosticBuilder {
                 self.add_ir_expr_type(expr);
                 "floating types can't be cast to pointers"
             }
+            InvalidCastReason::FloatFromPointer(expr) => {
+                self.add_ir_expr_type(expr);
+                "pointers can't be cast to floating types"
+            }
             InvalidCastReason::FromNonScaler(expr) => {
                 self.add_ir_expr_type(expr);
                 "can only cast from a scalar type"
@@ -260,6 +264,7 @@ pub enum TypeCat {
 #[derive(Debug, Clone)]
 pub enum InvalidCastReason<'a> {
     PointerFromFloat(&'a ir::expr::ExprNode),
+    FloatFromPointer(&'a ir::expr::ExprNode),
     FromNonScaler(&'a ir::expr::ExprNode),
     IntoNonScalar,
 }
