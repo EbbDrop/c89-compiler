@@ -21,13 +21,17 @@ use super::{
     },
 };
 
-pub fn build_ir_expr(e: &ast::ExpressionNode, scope: &ScopedHandle) -> AggregateResult<ExprNode> {
+pub fn build_ir_expr(
+    e: &ast::ExpressionNode,
+    scope: &mut ScopedHandle,
+) -> AggregateResult<ExprNode> {
     let span = e.span;
     match &e.data {
         ast::Expression::Assignment(lhs, op, rhs) => {
-            build_ir_lvalue(lhs, "assignment", op.span, scope)
-                .zip(build_ir_expr(rhs, scope))
-                .and_then(|(lhs, rhs)| assign(lhs, rhs, span, op.span))
+            // Building rhs first to make shure the lvalue is not assignent yet
+            build_ir_expr(rhs, scope)
+                .zip(build_ir_lvalue(lhs, "assignment", true, op.span, scope))
+                .and_then(|(rhs, lhs)| assign(lhs, rhs, span, op.span))
         }
         ast::Expression::Binary(left, op, right) => {
             build_binary_op_ir_expr(op, left, right, span, scope)
@@ -42,7 +46,7 @@ pub fn build_ir_expr(e: &ast::ExpressionNode, scope: &ScopedHandle) -> Aggregate
             )
         }),
         ast::Expression::Literal(lit) => literal(lit),
-        ast::Expression::Ident(idt) => ident(idt, scope).and_then(lvalue_dereference),
+        ast::Expression::Ident(idt) => ident(idt, false, scope).and_then(lvalue_dereference),
     }
 }
 
@@ -51,7 +55,7 @@ fn build_binary_op_ir_expr(
     left: &ast::ExpressionNode,
     right: &ast::ExpressionNode,
     span: Span,
-    scope: &ScopedHandle,
+    scope: &mut ScopedHandle,
 ) -> AggregateResult<ExprNode> {
     use ast::BinaryOperator::*;
     let res = build_ir_expr(left, scope);
@@ -90,7 +94,7 @@ fn build_unary_op_ir_expr(
     op: &ast::UnaryOperatorNode,
     inner: &ast::ExpressionNode,
     span: Span,
-    scope: &ScopedHandle,
+    scope: &mut ScopedHandle,
 ) -> AggregateResult<ExprNode> {
     use ast::UnaryOperator::*;
     let builder = UnaryBuilder {
@@ -118,8 +122,9 @@ fn build_unary_op_ir_expr(
 pub fn build_ir_lvalue(
     e: &ast::ExpressionNode,
     needed_for: &str,
+    will_init: bool,
     op_span: Span,
-    scope: &ScopedHandle,
+    scope: &mut ScopedHandle,
 ) -> AggregateResult<LvalueExprNode> {
     let lvalue = match &e.data {
         ast::Expression::Unary(op, inner) => {
@@ -134,7 +139,7 @@ pub fn build_ir_lvalue(
                 _ => None,
             }
         }
-        ast::Expression::Ident(idt) => Some(ident(idt, scope)),
+        ast::Expression::Ident(idt) => Some(ident(idt, will_init, scope)),
         _ => None,
     };
     lvalue.unwrap_or_else(|| {
@@ -152,11 +157,22 @@ fn lvalue_dereference(inner: LvalueExprNode) -> AggregateResult<ExprNode> {
     })
 }
 
-fn ident(idt: &ast::IdentNode, scope: &ScopedHandle) -> AggregateResult<LvalueExprNode> {
-    let Some((id, ty)) = scope.reference(&idt.data) else {
+fn ident(
+    idt: &ast::IdentNode,
+    will_init: bool,
+    scope: &mut ScopedHandle,
+) -> AggregateResult<LvalueExprNode> {
+    let Some((id, ty)) = scope.reference_mut(&idt.data) else {
         return AggregateResult::new_err(DiagnosticBuilder::new(idt.span).build_undeclared_ident(&idt.data));
     };
-    AggregateResult::new_ok(LvalueExprNode {
+
+    let mut res = AggregateResult::new_ok(());
+    if !will_init && !ty.initialized {
+        res.add_rec_diagnostic(DiagnosticBuilder::new(idt.span).build_usign_uninit(&idt.data));
+    } else if will_init {
+        ty.initialized = true;
+    }
+    res.map(|()| LvalueExprNode {
         span: idt.span,
         is_const: ty.is_const,
         ty: ty.ty.clone(),
@@ -299,19 +315,19 @@ pub fn assign(
     })
 }
 
-struct UnaryBuilder<'a> {
+struct UnaryBuilder<'a, 'b> {
     full_span: Span,
     op_span: Span,
     inner: &'a ast::ExpressionNode,
-    scope: &'a ScopedHandle<'a>,
+    scope: &'a mut ScopedHandle<'b>,
 }
 
-impl<'a> UnaryBuilder<'a> {
+impl<'a, 'b> UnaryBuilder<'a, 'b> {
     fn build_inc_dec<F>(self, name: &str, wrap_expr: F) -> AggregateResult<ExprNode>
     where
         F: FnOnce(Box<LvalueExprNode>) -> Expr,
     {
-        let mut res = build_ir_lvalue(self.inner, name, self.op_span, self.scope);
+        let mut res = build_ir_lvalue(self.inner, name, false, self.op_span, self.scope);
         if res.has_value_and(|inner| inner.is_const) {
             res.add_err(
                 DiagnosticBuilder::new(self.op_span).build_cant_be_const(name, self.inner.span),
@@ -350,7 +366,7 @@ impl<'a> UnaryBuilder<'a> {
 
     /// See [`Expr::Reference`]
     fn reference(self) -> AggregateResult<ExprNode> {
-        let res = build_ir_lvalue(self.inner, "refrence", self.op_span, self.scope);
+        let res = build_ir_lvalue(self.inner, "refrence", false, self.op_span, self.scope);
         res.map(|inner| {
             let ty = CType::Scalar(ctype::Scalar::Pointer(
                 Box::new(inner.ty.clone()),

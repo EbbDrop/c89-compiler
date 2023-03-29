@@ -86,6 +86,7 @@ pub enum Code {
     TooBigConstant,
     UndeclaredIdent,
     AlreadyDefined,
+    UsingUninit,
 }
 
 impl Code {

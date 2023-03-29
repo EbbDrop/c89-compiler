@@ -13,6 +13,7 @@ pub struct Item {
     pub is_const: bool,
     /// The span where this item was defined
     pub original_span: Span,
+    pub initialized: bool,
 }
 
 /// A reference into a [`Table`]
@@ -56,6 +57,13 @@ impl<I> Table<I> {
     #[inline]
     pub fn get(&self, id: ItemId) -> &I {
         self.0.get(id.0).expect("Invalid id")
+    }
+
+    /// Same rules as [`get`] but gives a `&mut I`
+    #[track_caller]
+    #[inline]
+    pub fn get_mut(&mut self, id: ItemId) -> &mut I {
+        self.0.get_mut(id.0).expect("Invalid id")
     }
 
     /// An iterator visiting elements of type `(ItemId, &I)` where the second element is the item

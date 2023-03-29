@@ -92,7 +92,7 @@ impl<'a, I> ScopedHandle<'a, I> {
     /// Searches for a name in this scope or any outer scopes. A [`Some`] will be returned with the
     /// [`ItemId`] in the root scope of the item, for convenience a reference to the item is also
     /// directly returned. If the name is not found in any scope a [`None`] is returned.
-    pub fn reference(&self, name: &str) -> Option<(ItemId, &I)> {
+    pub fn _reference(&self, name: &str) -> Option<(ItemId, &I)> {
         self.root_table
             .vars
             .iter()
@@ -100,6 +100,19 @@ impl<'a, I> ScopedHandle<'a, I> {
             .find(|(n, _)| n == name)
             .map(|(_, id)| {
                 let item = self.root_table.table.get(*id);
+                (*id, item)
+            })
+    }
+
+    /// Same rules as [`reference`] but gived a `&mut I`
+    pub fn reference_mut(&mut self, name: &str) -> Option<(ItemId, &mut I)> {
+        self.root_table
+            .vars
+            .iter()
+            .rev()
+            .find(|(n, _)| n == name)
+            .map(|(_, id)| {
+                let item = self.root_table.table.get_mut(*id);
                 (*id, item)
             })
     }
@@ -150,12 +163,12 @@ mod tests {
                 let mut inner_scope = root_scope._new_scope();
 
                 id_b = inner_scope.declare("B".to_owned(), 'b').unwrap();
-                assert_eq!(inner_scope.reference("B"), Some((id_b, &'b')));
-                assert_eq!(inner_scope.reference("A"), Some((id_a, &'a')));
+                assert_eq!(inner_scope._reference("B"), Some((id_b, &'b')));
+                assert_eq!(inner_scope._reference("A"), Some((id_a, &'a')));
             }
 
-            assert!(root_scope.reference("B").is_none());
-            assert_eq!(root_scope.reference("A"), Some((id_a, &'a')));
+            assert!(root_scope._reference("B").is_none());
+            assert_eq!(root_scope._reference("A"), Some((id_a, &'a')));
         }
 
         assert_eq!(table.table.len(), 2);
@@ -188,7 +201,7 @@ mod tests {
             };
             assert_ne!(id_b1, id_b2);
 
-            assert!(root_scope.reference("B").is_none());
+            assert!(root_scope._reference("B").is_none());
         }
 
         assert_eq!(table.table.len(), 3);
@@ -214,10 +227,10 @@ mod tests {
                 let mut inner_scope = root_scope._new_scope();
 
                 id_inner = inner_scope.declare("A".to_owned(), 'i').unwrap();
-                assert_eq!(inner_scope.reference("A"), Some((id_inner, &'i')));
+                assert_eq!(inner_scope._reference("A"), Some((id_inner, &'i')));
             }
 
-            assert_eq!(root_scope.reference("A"), Some((id_outer, &'o')));
+            assert_eq!(root_scope._reference("A"), Some((id_outer, &'o')));
         }
 
         assert_eq!(table.table.len(), 2);

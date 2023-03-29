@@ -99,6 +99,7 @@ where
                     ty: t.0,
                     is_const: false,
                     original_span: (4..4).into(),
+                    initialized: true,
                 },
             )
             .unwrap();
@@ -111,7 +112,7 @@ where
             }),
         );
 
-        let out_expr = build_ir_expr(&ast, &scope);
+        let out_expr = build_ir_expr(&ast, &mut scope);
 
         match t.1 {
             Some(out_ty) => {
@@ -158,6 +159,7 @@ where
                     ty: t.0,
                     is_const: false,
                     original_span: (0..0).into(),
+                    initialized: true,
                 },
             )
             .unwrap();
@@ -168,6 +170,7 @@ where
                     ty: t.1,
                     is_const: false,
                     original_span: (0..0).into(),
+                    initialized: true,
                 },
             )
             .unwrap();
@@ -200,7 +203,7 @@ where
             }
         };
 
-        let out_expr = build_ir_expr(&ast, &scope);
+        let out_expr = build_ir_expr(&ast, &mut scope);
 
         match t.2 {
             Some(out_ty) => {
@@ -240,6 +243,7 @@ fn cast() {
                     ty: from_ty.clone(),
                     is_const: false,
                     original_span: (1..1).into(),
+                    initialized: true,
                 },
             )
             .unwrap();
@@ -262,7 +266,7 @@ fn cast() {
                 ),
             }
         };
-        let ir = build_ir_expr(&ast_lit, &scope);
+        let ir = build_ir_expr(&ast_lit, &mut scope);
         let expect_from_expr = LvalueExprNode {
             span: (3..3).into(),
             is_const: false,
@@ -333,7 +337,7 @@ where
             data: Literal::Dec(10),
         }),
     );
-    let ir = build_ir_expr(&ast_lit, &scope);
+    let ir = build_ir_expr(&ast_lit, &mut scope);
     assert_eq!(ir.value(), None);
     has_error(ir, Code::NeedLvalue);
 
@@ -346,6 +350,7 @@ where
                 ty: ty.clone(),
                 is_const: false,
                 original_span: (4..4).into(),
+                initialized: true,
             },
         )
         .unwrap();
@@ -356,7 +361,7 @@ where
             data: "A".to_owned(),
         }),
     );
-    let ir = build_ir_expr(&ast_ident, &scope);
+    let ir = build_ir_expr(&ast_ident, &mut scope);
     aggr_res_eq(
         ir,
         ExprNode {
@@ -377,6 +382,7 @@ where
                 ty,
                 is_const: true,
                 original_span: (4..4).into(),
+                initialized: true,
             },
         )
         .unwrap();
@@ -387,7 +393,7 @@ where
             data: "B".to_owned(),
         }),
     );
-    let ir = build_ir_expr(&ast_ident, &scope);
+    let ir = build_ir_expr(&ast_ident, &mut scope);
     assert_eq!(ir.value(), None);
     has_error(ir, Code::NeedConst)
 }
@@ -424,7 +430,7 @@ fn refrence() {
             data: Literal::Dec(10),
         }),
     );
-    let ir = build_ir_expr(&ast_lit, &scope);
+    let ir = build_ir_expr(&ast_lit, &mut scope);
     assert_eq!(ir.value(), None);
     has_error(ir, Code::NeedLvalue);
 
@@ -439,6 +445,7 @@ fn refrence() {
                     ty: ty.clone(),
                     is_const,
                     original_span: (4..4).into(),
+                    initialized: true,
                 },
             )
             .unwrap();
@@ -449,7 +456,7 @@ fn refrence() {
                 data: "A".to_owned(),
             }),
         );
-        let ir = build_ir_expr(&ast_ident, &scope);
+        let ir = build_ir_expr(&ast_ident, &mut scope);
         aggr_res_eq(
             ir,
             ExprNode {
@@ -478,7 +485,7 @@ fn derefrence() {
             data: Literal::Dec(10),
         }),
     );
-    let ir = build_ir_expr(&ast_lit, &scope);
+    let ir = build_ir_expr(&ast_lit, &mut scope);
     assert_eq!(ir.value(), None);
     has_error(ir, Code::UnexpectedType);
 
@@ -496,6 +503,7 @@ fn derefrence() {
                     ty: ty_with_ptr.clone(),
                     is_const,
                     original_span: (4..4).into(),
+                    initialized: true,
                 },
             )
             .unwrap();
@@ -523,10 +531,10 @@ fn derefrence() {
             })),
         };
 
-        let ir = build_ir_lvalue(&ast_ident, "", (5..5).into(), &scope);
+        let ir = build_ir_lvalue(&ast_ident, "", false, (5..5).into(), &mut scope);
         aggr_res_eq(ir, lvalue_epxr.clone());
 
-        let ir = build_ir_expr(&ast_ident, &scope);
+        let ir = build_ir_expr(&ast_ident, &mut scope);
         aggr_res_eq(
             ir,
             ExprNode {
@@ -911,7 +919,7 @@ fn assign() {
     fn build_ir(
         to: Expression,
         from: Expression,
-        scope: &ScopedHandle,
+        scope: &mut ScopedHandle,
     ) -> AggregateResult<ExprNode> {
         let ast_lit = {
             ExpressionNode {
@@ -931,7 +939,7 @@ fn assign() {
                 ),
             }
         };
-        build_ir_expr(&ast_lit, &scope)
+        build_ir_expr(&ast_lit, scope)
     }
     fn build_ir_ty(
         to_ty: ctype::CType,
@@ -947,6 +955,7 @@ fn assign() {
                     ty: to_ty.clone(),
                     is_const: to_const,
                     original_span: (1..1).into(),
+                    initialized: true,
                 },
             )
             .unwrap();
@@ -957,6 +966,7 @@ fn assign() {
                     ty: from_ty.clone(),
                     is_const: false,
                     original_span: (1..1).into(),
+                    initialized: true,
                 },
             )
             .unwrap();
@@ -985,7 +995,7 @@ fn assign() {
                 ),
             }
         };
-        let ir = build_ir_expr(&ast_lit, &scope);
+        let ir = build_ir_expr(&ast_lit, &mut scope);
         let expect_to_expr = LvalueExprNode {
             span: (2..2).into(),
             is_const: to_const,
@@ -1013,7 +1023,7 @@ fn assign() {
             span: (5..5).into(),
             data: Literal::Dec(10),
         }),
-        &scope,
+        &mut scope,
     );
     assert_eq!(ir.value(), None);
     has_error(ir, Code::NeedLvalue);

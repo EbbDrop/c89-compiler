@@ -246,6 +246,13 @@ impl DiagnosticBuilder {
             format!("identifier `{name}` is already defined"),
         )
     }
+
+    pub fn build_usign_uninit(self, name: &str) -> Diagnostic {
+        self.build_custom(
+            Code::UsingUninit,
+            format!("`{name}` is possibly uninitialized"),
+        )
+    }
 }
 
 pub struct DiagnosticBuilder {

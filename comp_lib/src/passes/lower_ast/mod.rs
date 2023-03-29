@@ -54,7 +54,7 @@ fn build_ir_from_statement(
 
             // Most of the complecity here comes from needing to make shure all diagnostic are
             // alloways reported
-            declaration(type_name, ident, scope)
+            declaration(type_name, ident, initializer.is_some(), scope)
                 .zip(init_expr)
                 .and_then(|(mut to, init_expr)| {
                     // This is the initializing assignment whitch is allowed to const values
@@ -107,6 +107,7 @@ fn build_ir_from_statement(
 fn declaration(
     type_name: &ast::QualifiedTypeNode,
     ident: &ast::IdentNode,
+    will_init: bool,
     scope: &mut ScopedHandle,
 ) -> AggregateResult<LvalueExprNode> {
     let ty = CType::from_ast_type(&type_name.data.inner.data);
@@ -116,6 +117,7 @@ fn declaration(
         ty: ty.clone(),
         is_const,
         original_span: ident.span,
+        initialized: will_init,
     };
 
     match scope.declare(ident.data.clone(), item) {
