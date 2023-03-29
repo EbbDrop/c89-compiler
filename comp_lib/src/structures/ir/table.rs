@@ -19,7 +19,7 @@ pub struct Item {
 ///
 /// `ItemId`s will always be valid as long as you use a `ItemId` only in the table it was made
 /// from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ItemId(usize);
 
 /// A table from id to item, without names or scopes
@@ -56,5 +56,23 @@ impl<I> Table<I> {
     #[inline]
     pub fn get(&self, id: ItemId) -> &I {
         self.0.get(id.0).expect("Invalid id")
+    }
+
+    /// An iterator visiting elements of type `(ItemId, &I)` where the second element is the item
+    /// with the first element as id. The order is unspecified.
+    pub fn iter(&self) -> impl Iterator<Item = (ItemId, &I)> {
+        self.0.iter().enumerate().map(|(i, item)| (ItemId(i), item))
+    }
+
+    /// An iterator visiting all item id's in an unspecified order.
+    pub fn item_ids(&self) -> impl Iterator<Item = ItemId> {
+        (0..self.0.len()).map(ItemId)
+    }
+
+    /// An iterator visiting all item's in an unspecified order.
+    ///
+    /// Equivalent to `self.deref().iter()`.
+    pub fn items(&self) -> impl Iterator<Item = &I> {
+        self.0.iter()
     }
 }
