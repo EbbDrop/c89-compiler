@@ -115,7 +115,7 @@ fn build_unary_op_ir_expr(
 
 /// Tries to build a lvalue, a err [`AggregateResult`] is retuned if the `e` can't be made into a
 /// lvalue.
-fn build_ir_lvalue(
+pub fn build_ir_lvalue(
     e: &ast::ExpressionNode,
     needed_for: &str,
     op_span: Span,

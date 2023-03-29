@@ -1,7 +1,7 @@
 use super::{ctype::CType, table::ItemId};
 use crate::diagnostic::Span;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExprNode {
     pub span: Span,
     // The type the expr returns
@@ -9,7 +9,7 @@ pub struct ExprNode {
     pub expr: Expr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// Not from the standart but will just be pointer derefrence on almost all platforms
     LvalueDeref(Box<LvalueExprNode>),
@@ -98,7 +98,7 @@ pub enum Expr {
     Cast(Box<ExprNode>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOp {
     /// Iner expr should have a promoted arithmetic type, the output is the same promoted type
     Neg,
@@ -108,7 +108,7 @@ pub enum UnaryOp {
     Not,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOp {
     /// 3.3.5
     /// Each operand and the out type will be the same arithmetic type
@@ -145,7 +145,7 @@ pub enum BinaryOp {
     Bitwise(BitwiseOp),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RelationOp {
     Eq,
     Ne,
@@ -168,7 +168,7 @@ impl RelationOp {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BitwiseOp {
     And,
     Or,
@@ -185,7 +185,7 @@ impl BitwiseOp {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LvalueExprNode {
     pub span: Span,
     pub is_const: bool,
@@ -194,7 +194,7 @@ pub struct LvalueExprNode {
     pub expr: LvalueExpr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LvalueExpr {
     /// 3.3.1
     Ident(ItemId),
@@ -204,7 +204,7 @@ pub enum LvalueExpr {
     Dereference(Box<ExprNode>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     Integer(i128),
     Float(f64),

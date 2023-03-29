@@ -114,3 +114,6 @@ fn declaration(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
