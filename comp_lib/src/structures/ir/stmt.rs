@@ -21,4 +21,5 @@ pub struct StmtNode {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Expr(ExprNode),
+    Printf(ExprNode),
 }

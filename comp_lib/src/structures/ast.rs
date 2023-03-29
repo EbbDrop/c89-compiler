@@ -24,6 +24,7 @@ pub enum Statement {
         initializer: Option<(Span, ExpressionNode)>,
     },
     Expression(ExpressionNode),
+    Printf(ExpressionNode),
     BlockStatement(BlockStatement),
 }
 

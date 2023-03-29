@@ -2,7 +2,7 @@ use crate::{
     ast,
     diagnostic::{AggregateResult, DiagnosticBuilder},
     ir::{
-        ctype::CType,
+        ctype::{self, CType},
         expr::{LvalueExpr, LvalueExprNode},
         stmt::{Block, Root, Stmt, StmtNode},
         table::Item,
@@ -63,12 +63,32 @@ fn build_ir_from_statement(
                         expr::assign(to, init_expr, statement.span, *op_span)
                     });
                     match init_expr {
-                        Some(expr) => expr.map(Some),
+                        Some(expr) => expr.map(|expr| Some(Stmt::Expr(expr))),
                         None => AggregateResult::new_ok(None),
                     }
                 })
         }
-        ast::Statement::Expression(e) => expr::build_ir_expr(e, scope).map(Some),
+        ast::Statement::Expression(e) => {
+            expr::build_ir_expr(e, scope).map(|expr| Some(Stmt::Expr(expr)))
+        }
+        ast::Statement::Printf(e) => {
+            let e = expr::build_ir_expr(e, scope);
+            e.map(|expr| match &expr.ty {
+                CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
+                    if a.is_integral() {
+                        let p = a.promote().0;
+                        util::maybe_cast(expr, CType::Scalar(ctype::Scalar::Arithmetic(p)))
+                    } else {
+                        util::maybe_cast(
+                            expr,
+                            CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::Double)),
+                        )
+                    }
+                }
+                _ => expr,
+            })
+            .map(|expr| Some(Stmt::Printf(expr)))
+        }
         ast::Statement::BlockStatement(_) => AggregateResult::new_err(
             // let inner_scope = scope.new_scope();
             DiagnosticBuilder::new(statement.span).build_unimplemented("blocks"),
@@ -76,9 +96,9 @@ fn build_ir_from_statement(
     };
 
     expr.map(|expr| {
-        expr.map(|expr| StmtNode {
+        expr.map(|stmt| StmtNode {
             span: statement.span,
-            stmt: Stmt::Expr(expr),
+            stmt,
             comments: statement.comments.clone(),
         })
     })

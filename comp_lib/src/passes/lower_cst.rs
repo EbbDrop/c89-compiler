@@ -161,6 +161,9 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
             Statement::StatementDeclarationContext(decl) => {
                 self.build_from_declaration_statement(decl.value.as_deref().unwrap())
             }
+            Statement::StatementPrintfContext(printf) => self
+                .build_from_expr(printf.value.as_deref().unwrap())
+                .map(ast::Statement::Printf),
             Statement::StatementBlockContext(block) => {
                 self.build_from_block_statement(block.value.as_deref().unwrap())
             }

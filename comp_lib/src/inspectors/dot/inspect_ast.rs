@@ -36,6 +36,9 @@ impl ToDot for ast::Statement {
             }
 
             ast::Statement::Expression(e) => e.data.to_dot(),
+            ast::Statement::Printf(e) => {
+                DotTree::new("printf".to_owned(), vec![("expr", e.data.to_dot())])
+            }
             ast::Statement::BlockStatement(bs) => bs.to_dot(),
         }
     }

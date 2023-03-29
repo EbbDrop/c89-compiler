@@ -4,6 +4,7 @@ import Expr;
 statement
     : value=expr? SEMICOLON                                     # StatementExpr
     | value=declarationStatement                                # StatementDeclaration
+    | KW_PRINTF PAREN_LEFT value=expr PAREN_RIGHT SEMICOLON     # StatementPrintf
     | value=blockStatement                                      # StatementBlock
     ;
 

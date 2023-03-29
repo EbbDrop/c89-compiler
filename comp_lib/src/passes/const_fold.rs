@@ -58,6 +58,10 @@ impl Folder {
                 self.fold_expr_node(expr_node, &last_assign);
                 None
             }
+            Statement::Printf(expr_node) => {
+                self.fold_expr_node(expr_node, &last_assign);
+                None
+            }
             Statement::BlockStatement(bs) => {
                 self.fold_block_statement(bs);
                 None
