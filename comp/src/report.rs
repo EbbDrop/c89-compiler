@@ -11,12 +11,12 @@ where
     let mut writer = term::termcolor::StandardStream::stderr(term::termcolor::ColorChoice::Auto);
     let config = term::Config {
         chars: term::Chars {
-            single_primary_caret: '─',
-            single_secondary_caret: '─',
-            multi_primary_caret_start: '╯',
-            multi_secondary_caret_start: '╯',
-            multi_primary_caret_end: '╯',
-            multi_secondary_caret_end: '╯',
+            single_primary_caret: '━',
+            single_secondary_caret: '╌',
+            multi_primary_caret_start: '┚',
+            multi_secondary_caret_start: '┘',
+            multi_primary_caret_end: '┨',
+            multi_secondary_caret_end: '┤',
             ..term::Chars::box_drawing()
         },
 
