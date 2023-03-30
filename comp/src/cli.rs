@@ -85,6 +85,7 @@ pub fn open_output(args: &Args) -> anyhow::Result<Box<dyn std::io::Write>> {
     match &args.output_path {
         PathOrStd::Path(path) => std::fs::OpenOptions::new()
             .write(true)
+            .truncate(true)
             .create(true)
             .open(path)
             .map(|f| Box::new(f) as Box<dyn std::io::Write>)
