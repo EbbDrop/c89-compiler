@@ -129,6 +129,7 @@ dependencies = [
  "clap",
  "codespan-reporting",
  "comp_lib",
+ "is-terminal",
 ]
 
 [[package]]

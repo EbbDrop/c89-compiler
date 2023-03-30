@@ -1,0 +1,9 @@
+error[#0012]: identifier `a` is already defined
+  --> redef_var.c:2:5
+  |
+1 | int a = 3;
+  |     - originally defined here
+2 | int a = 4;
+  |     ^
+
+Error: couldn't compile due to the previous errors

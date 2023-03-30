@@ -1,0 +1,37 @@
+error[#000b]: multiplication operator needs two arithmetic types
+  --> incompat_types.c:3:3
+  |
+3 | i * ptr;
+  |   ^ --- this expression has type: `int *`
+
+error[#000b]: remainder operator needs two integral types
+  --> incompat_types.c:4:5
+  |
+4 | 4.3 % 3.2;
+  | --- ^ --- this expression has type: `double`
+  | |      
+  | this expression has type: `double`
+
+warning[#000f]: assign from `int *` to the incompatible type `int`
+  --> incompat_types.c:5:7
+  |
+5 | int b = ptr;
+  |     - ^ --- this expression has type: `int *`
+  |     |    
+  |     while this has type: `int`
+
+error[#000b]: incompatible types for addition
+  --> incompat_types.c:6:5
+  |
+6 | ptr + ptr;
+  | --- ^ --- this expression has type: `int *`
+  | |      
+  | this expression has type: `int *`
+
+error[#000d]: floating types can't be cast to pointers
+  --> incompat_types.c:7:2
+  |
+7 | (int*)4.3;
+  |  ^^^^ --- this expression has type: `double`
+
+Error: couldn't compile due to the previous errors

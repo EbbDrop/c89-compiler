@@ -1,26 +1,38 @@
 use codespan_reporting::{
     diagnostic::{Label, Severity},
-    term,
+    term::{self, termcolor::WriteColor},
 };
 use comp_lib::diagnostic::{AggregateResult, Code, DiagnosticKind};
+use is_terminal::IsTerminal;
 
 pub fn eprint_aggregate<'files, T, F>(aggregate: &AggregateResult<T>, files: &'files F)
 where
     F: codespan_reporting::files::Files<'files, FileId = ()>,
 {
-    let mut writer = term::termcolor::StandardStream::stderr(term::termcolor::ColorChoice::Auto);
-    let config = term::Config {
-        chars: term::Chars {
-            single_primary_caret: '━',
-            single_secondary_caret: '╌',
-            multi_primary_caret_start: '┚',
-            multi_secondary_caret_start: '┘',
-            multi_primary_caret_end: '┨',
-            multi_secondary_caret_end: '┤',
-            ..term::Chars::box_drawing()
-        },
+    let mut writer = if std::io::stderr().is_terminal() {
+        term::termcolor::StandardStream::stderr(term::termcolor::ColorChoice::Always)
+    } else {
+        term::termcolor::StandardStream::stderr(term::termcolor::ColorChoice::Never)
+    };
 
-        ..Default::default()
+    let config = if writer.supports_color() {
+        term::Config {
+            chars: term::Chars {
+                single_primary_caret: '━',
+                single_secondary_caret: '╌',
+                multi_primary_caret_start: '┚',
+                multi_secondary_caret_start: '┘',
+                multi_primary_caret_end: '┨',
+                multi_secondary_caret_end: '┤',
+                ..term::Chars::box_drawing()
+            },
+            ..Default::default()
+        }
+    } else {
+        term::Config {
+            chars: term::Chars::ascii(),
+            ..Default::default()
+        }
     };
 
     for (t, d) in aggregate.diagnostics() {

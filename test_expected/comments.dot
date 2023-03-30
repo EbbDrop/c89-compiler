@@ -1,0 +1,36 @@
+digraph AST {
+ ordering="out"
+ "0" [label="block"];
+ "0" -> "1" [label="stmt"];
+ "1" [label="declaration"];
+ "1" -> "2" [label="type"];
+ "2" [label="q_type"];
+ "2" -> "3" [label="iner"];
+ "3" [label="plain"];
+ "3" -> "4" [label="type"];
+ "4" [label="primitive"];
+ "4" -> "5" [label=""];
+ "5" [label="int"];
+ "1" -> "6" [label="ident"];
+ "6" [label="a"];
+ "1" -> "7" [label="rhs"];
+ "7" [label="dec"];
+ "7" -> "8" [label="value"];
+ "8" [label="4"];
+ "0" -> "9" [label="stmt"];
+ "9" [label="declaration"];
+ "9" -> "10" [label="type"];
+ "10" [label="q_type"];
+ "10" -> "11" [label="iner"];
+ "11" [label="plain"];
+ "11" -> "12" [label="type"];
+ "12" [label="primitive"];
+ "12" -> "13" [label=""];
+ "13" [label="int"];
+ "9" -> "14" [label="ident"];
+ "14" [label="b"];
+ "9" -> "15" [label="rhs"];
+ "15" [label="dec"];
+ "15" -> "16" [label="value"];
+ "16" [label="5"];
+}
