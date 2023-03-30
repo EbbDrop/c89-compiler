@@ -1,6 +1,6 @@
 use crate::cli;
 use codespan_reporting::files::SimpleFile;
-use comp_lib::{diagnostic::AggregateResult, inspectors, passes};
+use comp_lib::{codegen, diagnostic::AggregateResult, inspectors, passes};
 
 pub struct CompileOpts {
     pub output_format: cli::OutputFormat,
@@ -30,6 +30,13 @@ pub fn compile(source: &SimpleFile<String, String>, opts: CompileOpts) -> Aggreg
 
     let ir = ast.and_then(|ast| passes::lower_ast::build_ir_from_ast(&ast));
 
-    assert!(opts.output_format == cli::OutputFormat::IrRustDbg);
-    ir.map(|ir| format!("{ir:#?}\n").into_bytes())
+    if opts.output_format == cli::OutputFormat::IrRustDbg {
+        return ir.map(|ir| format!("{ir:#?}\n").into_bytes());
+    }
+
+    let llvm_ir =
+        ir.and_then(|ir| codegen::llvm::build_from_ir(&ir, source.name(), source.source()));
+
+    assert_eq!(opts.output_format, cli::OutputFormat::LlvmIr);
+    llvm_ir.map(|s| format!("{s}\n").into_bytes())
 }

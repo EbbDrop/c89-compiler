@@ -3,6 +3,9 @@ name = "comp_lib"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+llvm_ir = { path = "../llvm_ir" }
+
 [dependencies.antlr-rust]
 git = "https://github.com/jonatcln/antlr4rust.git"
 rev = "912350e6c8aa1e4446175ded4d87bbc0bc3f1e0c"

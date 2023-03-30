@@ -8,8 +8,9 @@ use std::{fs::File, io::Read};
 pub enum OutputFormat {
     AstDot,
     AstRustDbg,
-    #[default]
     IrRustDbg,
+    #[default]
+    LlvmIr,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

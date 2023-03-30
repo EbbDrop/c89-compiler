@@ -1,2 +1,2 @@
 [workspace]
-members = ["comp", "comp_lib"]
+members = ["comp", "comp_lib", "llvm_ir"]
