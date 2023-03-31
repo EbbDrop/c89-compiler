@@ -86,13 +86,83 @@ The expected output for all of these files can be found in `test_expected`.
 generate any interesting output. This happens because statements that are just a
 single constant don't get turned into llvm.)
 
-## Optional features supported
+## Supported features
 
-- The `<=`, `>=`, and `!=` comparison operators (`test_inputs/relation_ops.c`)
-- The `%` operator (`test_inputs/operators.c`)
-- Warning on lossy conversions (`test_inputs/diagnostics/lossy_assign.c`)
-- Casts (`test_inputs/casts.c`)
-- Comments in LLVM (`test_inputs/comments.c`)
+### Mandatory features
+
+All features required by assignments 1 - 3 are supported.
+
+#### Project assignment 1
+
+- Binary operations `+`, `-`, `*`, and `/`. ([test_inputs/operators.c][])
+- Binary operations `<`, `<`, and `==`. ([test_inputs/relation_ops.c][])
+- Unary operators `+` and `-`. ([test_inputs/operators.c][])
+- Brackets to overwrite the order of operations. ([test_inputs/expressions.c][])
+- Logical operators `&&`, `||`, and `!`. ([test_inputs/operators.c][],
+  [test_inputs/shortcircuiting.c][])
+- Const folding. ([test_expected/expressions.dot][])
+
+#### Project assignment 2
+
+- Types: `char`, `float`, `int`, and pointers. ([test_inputs/declarations.c][],
+  [test_inputs/pointers.c][])
+- Literals of any type. ([test_inputs/declarations.c][])
+- Reserved words: `const`, `char`, `float`, `int`. ([test_inputs/declarations.c][])
+- Variables: declarations, definitions, and assignments.
+  `const` variables are supported as well.
+  ([test_inputs/declarations.c][], [test_inputs/assignments.c][])
+- Pointer operations: unary `*` and `&`. ([test_inputs/pointers.c][])
+- Const propagation. ([test_inputs/const_propagation.c][])
+- Syntax errors. ([test_inputs/diagnostics/syntax.c][])
+- Semantic errors.
+  - Error on undefined variable. ([test_inputs/diagnostics/undef_var.c][])
+  - Warn on uninitialized variable. ([test_inputs/diagnostics/warn_on_uninit.c][])
+  - Error on redefinition of an existing variable. ([test_inputs/diagnostics/redef_var.c][])
+  - Error on incompatible types in operation and assignments.
+    ([test_inputs/diagnostics/incompat_types.c][])
+  - Error on assignment to a rvalue. ([test_inputs/diagnostics/assign_to_rvalue.c][])
+  - Error on assignment to a const variable. ([test_inputs/diagnostics/assign_to_const.c][])
+
+#### Project assignment 3
+
+- Single- and multi-line comments. ([test_inputs/comments.c][])
+- Hardcoded `printf` function to output to stdout. ([test_inputs/assignments.c][])
+- LLVM IR code generation. (all the examples)
+
+### Optional features
+
+All optional features suggested by assignments 1 - 3 are also supported.
+
+#### Project assignment 1
+
+- Comparison operators `<=`, `>=`, and `!=`. ([test_inputs/relation_ops.c][])
+- Binary operator `%`. ([test_inputs/operators.c][])
+
+#### Project assignment 2
+
+- Increment/decrement operations: unary `++` and `--`.
+  Both prefix and postfix variants are supported. ([test_inputs/inc_dec.c][])
+- Conversions: both implicit, with appriorate warnings on lossy conversions
+  ([test_inputs/diagnostics/lossy_assign.c][]), and explicit, using casts
+  (cast operator). ([test_inputs/casts.c][])
+
+
+#### Project assignment 3
+
+- Comments before statements in the original source code are added to the
+  generated LLVM as well. ([test_inputs/comments.c][])
+- Comments containing the original source code of each statement are also added
+  to the generated LLVM. (all examples)
+
+### Extra features not in the assignment
+
+Some things the compiler supports as well, that were not explicitly mentioned
+in the assignments.
+
+- Logical `&&` and `||` have short circuiting. ([test_inputs/shortcircuiting.c][])
+- Assignments can be used in expressions (as specified by the c standard).
+  ([test_inputs/assignments.c][])
+- Pointer arithmetic. ([test_inputs/pointer_arith.c][])
 
 ## Dependencies
 
@@ -103,3 +173,25 @@ This project uses the following dependencies:
 - `codespan-reporting`: to nicely format the diagnostics
 - `is-terminal`: to detect whether stdout is written to a terminal
 - `antlr-rust`: fork of ANTLR4 with added support for Rust
+
+[test_expected/expressions.dot]: test_expected/expressions.dot
+[test_inputs/assignments.c]: test_inputs/assignments.c
+[test_inputs/casts.c]: test_inputs/casts.c
+[test_inputs/comments.c]: test_inputs/comments.c
+[test_inputs/const_propagation.c]: test_inputs/const_propagation.c
+[test_inputs/declarations.c]: test_inputs/declarations.c
+[test_inputs/diagnostics/assign_to_const.c]: test_inputs/diagnostics/assign_to_const.c
+[test_inputs/diagnostics/assign_to_rvalue.c]: test_inputs/diagnostics/assign_to_rvalue.c
+[test_inputs/diagnostics/incompat_types.c]: test_inputs/diagnostics/incompat_types.c
+[test_inputs/diagnostics/lossy_assign.c]: test_inputs/diagnostics/lossy_assign.c
+[test_inputs/diagnostics/redef_var.c]: test_inputs/diagnostics/redef_var.c
+[test_inputs/diagnostics/syntax.c]: test_inputs/diagnostics/syntax.c
+[test_inputs/diagnostics/undef_var.c]: test_inputs/diagnostics/undef_var.c
+[test_inputs/diagnostics/warn_on_uninit.c]: test_inputs/diagnostics/warn_on_uninit.c
+[test_inputs/expressions.c]: test_inputs/expressions.c
+[test_inputs/inc_dec.c]: test_inputs/inc_dec.c
+[test_inputs/operators.c]: test_inputs/operators.c
+[test_inputs/pointer_arith.c]: test_inputs/pointer_arith.c
+[test_inputs/pointers.c]: test_inputs/pointers.c
+[test_inputs/relation_ops.c]: test_inputs/relation_ops.c
+[test_inputs/shortcircuiting.c]: test_inputs/shortcircuiting.c
