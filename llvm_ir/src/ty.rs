@@ -66,7 +66,7 @@ impl Type {
             Type::Int(Int(n)) => BitSize::Exact(n),
             Type::Float(_) => BitSize::Exact(32),
             Type::Double(_) => BitSize::Exact(64),
-            Type::Ptr(_) => todo!(),
+            Type::Ptr(_) => BitSize::Ptr,
         }
     }
 }
@@ -98,15 +98,6 @@ impl BitSize {
         }
     }
 }
-
-// pub trait AType: Into<Type> + std::fmt::Display + std::fmt::Debug + Clone {}
-
-// pub trait Integer: AType {}
-// pub trait FloatingPoint: AType {}
-
-// impl Integer for Int {}
-// impl FloatingPoint for Float {}
-// impl FloatingPoint for Double {}
 
 pub const I1: Int = Int(1);
 pub const I8: Int = Int(8);
