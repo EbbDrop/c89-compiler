@@ -137,11 +137,12 @@ impl<'a, T: Recognizer<'a> + antlr_rust::Parser<'a>> ErrorListener<'a, T>
                     e => panic!("ICE: Unexpected ANTLRError: {}", e),
                 };
 
-                let expected_tokens = expected_tokens.to_token_string(vocabulary);
+                let expected_tokens: Vec<_> = expected_tokens
+                    .iter()
+                    .map(|i| vocabulary.get_display_name(i).into_owned())
+                    .collect();
 
-                // TODO: Find a way to iterator through the expected tokens instead of using the
-                // ANTLR-provided string (and splitting it on ',').
-                db.build_syntax_error(&offending_symbol_name, expected_tokens.split(',').collect())
+                db.build_syntax_error(&offending_symbol_name, expected_tokens)
             }
             None => db.build_syntax_error(&offending_symbol_name, vec![]),
         };

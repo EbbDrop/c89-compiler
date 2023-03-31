@@ -39,7 +39,7 @@ impl DiagnosticBuilder {
         }
     }
 
-    pub fn build_syntax_error(self, unexpected: &str, expected: Vec<&str>) -> Diagnostic {
+    pub fn build_syntax_error(self, unexpected: &str, expected: Vec<String>) -> Diagnostic {
         let message = if expected.is_empty() {
             format!("unexpected token: {unexpected}")
         } else {

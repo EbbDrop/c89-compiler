@@ -8,4 +8,4 @@ llvm_ir = { path = "../llvm_ir" }
 
 [dependencies.antlr-rust]
 git = "https://github.com/jonatcln/antlr4rust.git"
-rev = "912350e6c8aa1e4446175ded4d87bbc0bc3f1e0c"
+rev = "0836c81f747b990bcfb97bb61970be0d2d6b5170"

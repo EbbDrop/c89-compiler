@@ -353,7 +353,7 @@ fn parses_cast_expr() {
 
 fn assert_expr_integer_lit(raw_int_lit: &str, expected: ast::Literal) {
     assert_expr_eq(
-        format!("{}", raw_int_lit),
+        raw_int_lit.to_string(),
         ast::Expression::Literal(ast::LiteralNode {
             span: (0..raw_int_lit.len()).into(),
             data: expected,
@@ -363,7 +363,7 @@ fn assert_expr_integer_lit(raw_int_lit: &str, expected: ast::Literal) {
 
 fn assert_expr_float_lit(raw_float_lit: &str, expected_value: f64) {
     assert_expr_eq(
-        format!("{}", raw_float_lit),
+        raw_float_lit.to_string(),
         ast::Expression::Literal(ast::LiteralNode {
             span: (0..raw_float_lit.len()).into(),
             data: ast::Literal::Float(expected_value),
@@ -383,7 +383,7 @@ fn assert_expr_char_lit(raw_inner_char_lit: &str, expected_value: i128) {
 
 fn assert_expr_ident(raw_ident: &str, expected_ident: &str) {
     assert_expr_eq(
-        format!("{}", raw_ident),
+        raw_ident.to_string(),
         ast::Expression::Ident(ast::IdentNode {
             span: (0..raw_ident.len()).into(),
             data: expected_ident.to_owned(),

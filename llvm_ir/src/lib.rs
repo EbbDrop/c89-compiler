@@ -47,8 +47,8 @@ mod tests {
                 .add_yielding_instruction(
                     RawYieldingInstruction::BinaryOp {
                         op: BinaryOp::Add,
-                        op1: param_a.into(),
-                        op2: param_b.into(),
+                        op1: param_a,
+                        op2: param_b,
                     }
                     .try_into()
                     .unwrap(),

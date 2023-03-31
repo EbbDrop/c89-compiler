@@ -294,7 +294,7 @@ fn cast() {
         is_const: None,
         inner: UnqualifiedTypeNode {
             span: (1..1).into(),
-            data: UnqualifiedType::PointerType(Box::new(ast_int.clone())),
+            data: UnqualifiedType::PointerType(Box::new(ast_int)),
         },
     };
 
@@ -303,11 +303,7 @@ fn cast() {
     assert_eq!(ir.value(), None);
     has_error(ir, Code::InvalidCast);
 
-    let (ir, expect_from_expr) = build_ir(
-        ast_ptr_int.clone(),
-        Scalar(Arithmetic(SignedInt)),
-        &mut scope,
-    );
+    let (ir, expect_from_expr) = build_ir(ast_ptr_int, Scalar(Arithmetic(SignedInt)), &mut scope);
     aggr_res_eq(
         ir,
         ExprNode {
@@ -684,7 +680,7 @@ fn times_mod() {
         ),
         (Scalar(Arithmetic(Double)), Scalar(Arithmetic(Float)), None),
     ];
-    check_type_bin(tests.clone(), BinaryOperator::Percent);
+    check_type_bin(tests, BinaryOperator::Percent);
 }
 
 #[test]
@@ -727,7 +723,7 @@ fn add() {
             Some(Scalar(Arithmetic(Double))),
         ),
     ];
-    check_type_bin(tests.clone(), BinaryOperator::Plus);
+    check_type_bin(tests, BinaryOperator::Plus);
 }
 
 #[test]
@@ -770,7 +766,7 @@ fn sub() {
             Some(Scalar(Arithmetic(Double))),
         ),
     ];
-    check_type_bin(tests.clone(), BinaryOperator::Minus);
+    check_type_bin(tests, BinaryOperator::Minus);
 }
 
 #[test]
