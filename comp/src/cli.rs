@@ -6,6 +6,7 @@ use std::{fs::File, io::Read};
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, ValueEnum)]
 pub enum OutputFormat {
+    AntlrTree,
     AstDot,
     AstRustDbg,
     IrRustDbg,

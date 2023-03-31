@@ -18,18 +18,22 @@ type TokenStream<'a> = antlr_rust::common_token_stream::CommonTokenStream<'a, Le
 type ParserErrorStrategy<'a> = antlr_rust::DefaultErrorStrategy<'a, CParserContextType>;
 type Parser<'a> = CParser<'a, TokenStream<'a>, ParserErrorStrategy<'a>>;
 
-pub fn parse(input: &str) -> AggregateResult<cst::Cst<'_>> {
-    let error_listener = AggregatingErrorListener::new();
+pub fn parse_to_antlr_tree(input: &str) -> AggregateResult<String> {
+    let (tu, parser, error_listener) = parse(input);
 
-    let lexer = build_lexer(input);
-    let token_stream = TokenStream::new(lexer);
-    let mut parser = build_parser(token_stream, error_listener.clone());
+    use antlr_rust::tree::ParseTree;
+    let antlr_tree = tu.to_string_tree(&*parser);
 
-    let tu = match parser.translationUnit() {
-        Ok(tu) => tu,
-        Err(_) => panic!("ICE: Internal ANTLR error"),
-    };
+    std::mem::drop(parser);
 
+    Rc::try_unwrap(error_listener.0)
+        .expect("ICE: All references to the error_listener should be dropped by now")
+        .into_inner()
+        .map(|_| antlr_tree)
+}
+
+pub fn parse_to_cst(input: &str) -> AggregateResult<cst::Cst<'_>> {
+    let (tu, parser, error_listener) = parse(input);
     let token_stream = parser.into_base_parser().input;
 
     Rc::try_unwrap(error_listener.0)
@@ -60,6 +64,21 @@ fn build_parser(token_stream: TokenStream, error_listener: AggregatingErrorListe
     parser.remove_error_listeners();
     parser.add_error_listener(Box::new(error_listener));
     parser
+}
+
+fn parse(input: &str) -> (Rc<cst::TranslationUnit>, Parser, AggregatingErrorListener) {
+    let lexer = build_lexer(input);
+    let error_listener = AggregatingErrorListener::new();
+
+    let token_stream = TokenStream::new(lexer);
+    let mut parser = build_parser(token_stream, error_listener.clone());
+
+    let tu = match parser.translationUnit() {
+        Ok(tu) => tu,
+        Err(_) => panic!("ICE: Internal ANTLR error"),
+    };
+
+    (tu, parser, error_listener)
 }
 
 struct PanicErrorListener(&'static str);

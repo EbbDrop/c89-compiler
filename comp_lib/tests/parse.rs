@@ -1,7 +1,7 @@
 use comp_lib::{ast, diagnostic, passes};
 
 fn parse(input: &str) -> diagnostic::AggregateResult<ast::Ast> {
-    let cst = passes::parse::parse(input);
+    let cst = passes::parse::parse_to_cst(input);
     cst.and_then(|cst| passes::lower_cst::lower(&cst))
 }
 

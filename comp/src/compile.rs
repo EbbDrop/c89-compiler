@@ -8,8 +8,13 @@ pub struct CompileOpts {
 }
 
 pub fn compile(source: &SimpleFile<String, String>, opts: CompileOpts) -> AggregateResult<Vec<u8>> {
-    let cst = passes::parse::parse(source.source());
-    // IDEA: antlr tree string
+    if opts.output_format == cli::OutputFormat::AntlrTree {
+        let antlr_tree = passes::parse::parse_to_antlr_tree(source.source());
+        return antlr_tree.map(String::into_bytes);
+    }
+
+    let cst = passes::parse::parse_to_cst(source.source());
+
     let mut ast = cst.and_then(|cst| passes::lower_cst::lower(&cst));
 
     if opts.const_fold {
