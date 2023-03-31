@@ -843,7 +843,7 @@ mod llvm_ir_builder {
                     op2: value,
                 },
                 TypeCat::Ptr => lir::RawYieldingInstruction::GetElementPtr {
-                    ty: self.ctype_to_llvm_type(&lvalue_node.ty),
+                    ty: self.ctype_ptr_inner_to_llvm_type(&lvalue_node.ty)?,
                     ptrval: value,
                     index: lir::Constant::Integer(1).try_into_typed(lir::ty::I32.into())?,
                 },
@@ -887,7 +887,7 @@ mod llvm_ir_builder {
                     op2: lir::Constant::FloatingPoint(1.).try_into_typed(value_ty)?,
                 },
                 TypeCat::Ptr => lir::RawYieldingInstruction::GetElementPtr {
-                    ty: self.ctype_to_llvm_type(&lvalue_node.ty),
+                    ty: self.ctype_ptr_inner_to_llvm_type(&lvalue_node.ty)?,
                     ptrval: value,
                     index: lir::Constant::Integer(-1).try_into_typed(lir::ty::I32.into())?,
                 },
@@ -931,7 +931,7 @@ mod llvm_ir_builder {
                     op2: value.clone(),
                 },
                 TypeCat::Ptr => lir::RawYieldingInstruction::GetElementPtr {
-                    ty: self.ctype_to_llvm_type(&lvalue_node.ty),
+                    ty: self.ctype_ptr_inner_to_llvm_type(&lvalue_node.ty)?,
                     ptrval: value.clone(),
                     index: lir::Constant::Integer(1).try_into_typed(lir::ty::I32.into())?,
                 },
@@ -975,7 +975,7 @@ mod llvm_ir_builder {
                     op2: lir::Constant::FloatingPoint(1.).try_into_typed(value_ty)?,
                 },
                 TypeCat::Ptr => lir::RawYieldingInstruction::GetElementPtr {
-                    ty: self.ctype_to_llvm_type(&lvalue_node.ty),
+                    ty: self.ctype_ptr_inner_to_llvm_type(&lvalue_node.ty)?,
                     ptrval: value.clone(),
                     index: lir::Constant::Integer(-1).try_into_typed(lir::ty::I32.into())?,
                 },
