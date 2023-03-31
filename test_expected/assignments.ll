@@ -32,6 +32,22 @@ define void @main() {
     %11 = sitofp i32 %10 to float
     %12 = fsub float %9, %11
     store float %12, ptr %2
+    ;;; printf(b);
+    %13 = load float, ptr %2
+    %14 = fpext float %13 to double
+    %15 = call i32 (ptr, ...) @printf(ptr @.printf_float, double %14)
+    ;;; a = (int)(c = 8);
+    %16 = sitofp i32 8 to float
+    store float %16, ptr %3
+    %17 = fptosi float %16 to i32
+    store i32 %17, ptr %1
+    ;;; printf(a);
+    %18 = load i32, ptr %1
+    %19 = call i32 (ptr, ...) @printf(ptr @.printf_int, i32 %18)
+    ;;; printf(c);
+    %20 = load float, ptr %3
+    %21 = fpext float %20 to double
+    %22 = call i32 (ptr, ...) @printf(ptr @.printf_float, double %21)
     ret void
 }
 

@@ -1,5 +1,6 @@
-5*(3/10 + 9/10);
-6*2/( 2+1 * 2/3 +6) +8 * (8/4);
-(1
-+
-1);
+float foo = 3.4;
+int bar = 3;
+char UPPER = 'b';
+const float c_foo = 5.;
+const int c_bar = 0xff;
+const char C_UPPER = '\x20';

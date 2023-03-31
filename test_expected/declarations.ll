@@ -9,25 +9,32 @@ declare i32 @printf(ptr noalias nocapture, ...)
 
 define void @main() {
 0:
-    ;;; 5*(3/10 + 9/10);
-    %1 = sdiv i32 3, 10
-    %2 = sdiv i32 9, 10
-    %3 = add i32 %1, %2
-    %4 = mul i32 5, %3
-    ;;; 6*2/( 2+1 * 2/3 +6) +8 * (8/4);
-    %5 = mul i32 6, 2
-    %6 = mul i32 1, 2
-    %7 = sdiv i32 %6, 3
-    %8 = add i32 2, %7
-    %9 = add i32 %8, 6
-    %10 = sdiv i32 %5, %9
-    %11 = sdiv i32 8, 4
-    %12 = mul i32 8, %11
-    %13 = add i32 %10, %12
-    ;;; (1
-    ;;; +
-    ;;; 1);
-    %14 = add i32 1, 1
+    ; allocation of: float foo
+    %1 = alloca float
+    ; allocation of: int bar
+    %2 = alloca i32
+    ; allocation of: char UPPER
+    %3 = alloca i8
+    ; allocation of: float c_foo
+    %4 = alloca float
+    ; allocation of: int c_bar
+    %5 = alloca i32
+    ; allocation of: char C_UPPER
+    %6 = alloca i8
+    ;;; float foo = 3.4;
+    %7 = fptrunc double 3.4 to float
+    store float %7, ptr %1
+    ;;; int bar = 3;
+    store i32 3, ptr %2
+    ;;; char UPPER = 'b';
+    store i8 98, ptr %3
+    ;;; const float c_foo = 5.;
+    %8 = fptrunc double 5 to float
+    store float %8, ptr %4
+    ;;; const int c_bar = 0xff;
+    store i32 255, ptr %5
+    ;;; const char C_UPPER = '\x20';
+    store i8 32, ptr %6
     ret void
 }
 

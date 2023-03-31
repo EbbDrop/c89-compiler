@@ -73,4 +73,8 @@ digraph AST {
  "35" [label="dec"];
  "35" -> "36" [label="value"];
  "36" [label="8"];
+ "0" -> "37" [label="stmt"];
+ "37" [label="printf"];
+ "37" -> "38" [label="expr"];
+ "38" [label="a"];
 }

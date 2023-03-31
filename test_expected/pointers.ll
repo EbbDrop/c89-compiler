@@ -17,14 +17,17 @@ define void @main() {
     %3 = alloca ptr
     ;;; int a = 4;
     store i32 4, ptr %1
-    ;;; int* ptr = &a;
+    ;;; int *ptr = &a;
     store ptr %1, ptr %2
-    ;;; int** ptrptr = &ptr;
+    ;;; int **ptrptr = &ptr;
     store ptr %2, ptr %3
     ;;; **ptrptr = 8;
     %4 = load ptr, ptr %3
     %5 = load ptr, ptr %4
     store i32 8, ptr %5
+    ;;; printf(a);
+    %6 = load i32, ptr %1
+    %7 = call i32 (ptr, ...) @printf(ptr @.printf_int, i32 %6)
     ret void
 }
 

@@ -1,0 +1,16 @@
+digraph AST {
+ ordering="out"
+ "0" [label="block"];
+ "0" -> "1" [label="stmt"];
+ "1" [label="dec"];
+ "1" -> "2" [label="value"];
+ "2" [label="0"];
+ "0" -> "3" [label="stmt"];
+ "3" [label="dec"];
+ "3" -> "4" [label="value"];
+ "4" [label="17"];
+ "0" -> "5" [label="stmt"];
+ "5" [label="dec"];
+ "5" -> "6" [label="value"];
+ "6" [label="2"];
+}

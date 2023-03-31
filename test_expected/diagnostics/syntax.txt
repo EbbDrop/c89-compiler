@@ -1,0 +1,19 @@
+error[#0001]: unexpected token: ';', expected one of: 'const', 'char', 'int', 'float'
+  --> syntax.c:1:5
+  |
+1 | int ;
+  |     ^
+
+error[#0001]: unexpected token: '%'
+  --> syntax.c:2:1
+  |
+2 | % 3;
+  | ^
+
+error[#0001]: unexpected token: '('
+  --> syntax.c:3:6
+  |
+3 | prinf(4;
+  |      ^
+
+Error: couldn't compile due to the previous errors
