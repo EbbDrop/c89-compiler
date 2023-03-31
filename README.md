@@ -45,7 +45,8 @@ an output file path.
 ```
 
 By default llvm ir will be emitted, use `-e/--emit` to change this. The possible
-output formats are: `ast-dot`, `ast-rust-dbg`, `ir-rust-dbg`, `llvm`.
+output formats are: `antlr-tree`, `ast-dot`, `ast-rust-dbg`, `ir-rust-dbg`, and
+`llvm-ir`.
 
 ```bash
 ./comp INPUT.c -o OUTPUT.dot -e ast-dot
@@ -92,3 +93,13 @@ single constant don't get turned into llvm.)
 - Warning on lossy conversions (`test_inputs/diagnostics/lossy_assign.c`)
 - Casts (`test_inputs/casts.c`)
 - Comments in LLVM (`test_inputs/comments.c`)
+
+## Dependencies
+
+This project uses the following dependencies:
+
+- `anyhow`: for easier error propagation
+- `clap`: a crate to facilitate creating command line interfaces
+- `codespan-reporting`: to nicely format the diagnostics
+- `is-terminal`: to detect whether stdout is written to a terminal
+- `antlr-rust`: fork of ANTLR4 with added support for Rust
