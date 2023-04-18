@@ -1,6 +1,0 @@
-warning[#0013]: `b` is possibly uninitialized
-  --> warn_on_uninit.c:6:8
-  |
-6 | printf(b);
-  |        ^
-

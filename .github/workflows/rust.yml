@@ -17,6 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Cache
+      id: cache
       uses: actions/cache@v3
       with:
         path: |
@@ -25,12 +26,18 @@ jobs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          ./llvm
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-llvm-15
     - name: Format check
-      run: cargo fmt --check
+      run: cargo fmt --check --all
     - name: Clippy
-      run: cargo clippy --no-deps -- -Dwarnings
+      run: cargo clippy --no-deps --all -- -Dwarnings
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --all --verbose
+    - name: Install LLVM
+      uses: KyleMayes/install-llvm-action@v1
+      with:
+        version: "15"
+        cached: ${{ steps.cache.outputs.cache-hit }}
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --all --verbose

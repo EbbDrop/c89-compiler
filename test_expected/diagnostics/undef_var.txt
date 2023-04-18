@@ -1,7 +1,0 @@
-error[#0011]: identifier `c` isn't declared in this scope
-  --> undef_var.c:2:13
-  |
-2 | int b = a + c;
-  |             ^
-
-Error: couldn't compile due to the previous errors

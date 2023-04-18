@@ -21,7 +21,7 @@ mod llvm_ir_builder {
             .unwrap();
 
         let main_builder =
-            lir::FunctionDefinitionBuilder::new(main_id, lir::ty::Void.into()).start_body();
+            lir::FunctionDefinitionBuilder::new(main_id, lir::ty::I32.into()).start_body();
 
         match FunctionBuilder::new(&mut module, main_builder, source).build_from_ir(ir) {
             Ok(()) => AggregateResult::new_ok(format!("{}", module)),
@@ -81,13 +81,20 @@ mod llvm_ir_builder {
 
             self.add_block(&root.global)?;
 
-            // TEMP: for now always finish with a `ret void`
-            // The below will panic if the function's return type isn't void.
+            // TEMP: for now always finish with a `ret 0`
+            // The below will panic if the function's return type isn't u32.
             let function_definition = self
                 .function
                 .take()
                 .unwrap()
-                .terminate_block(lir::RawTerminatorInstruction::ReturnVoid.try_into()?)?
+                .terminate_block(
+                    lir::RawTerminatorInstruction::Return(
+                        lir::Constant::Integer(0)
+                            .try_into_typed(lir::ty::I32.into())
+                            .unwrap(),
+                    )
+                    .try_into()?,
+                )?
                 .build()?;
 
             self.module.define_function(function_definition);
