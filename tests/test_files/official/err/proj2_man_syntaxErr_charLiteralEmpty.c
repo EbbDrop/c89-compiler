@@ -1,0 +1,3 @@
+//fail-any:
+
+char invalid = '';

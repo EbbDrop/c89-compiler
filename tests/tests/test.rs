@@ -89,7 +89,7 @@ fn diagnostics_test(file: &str, expected_codes: Vec<Code>, needs_err: bool) {
         panic!("Expected compile to fail, but it didn't!");
     }
     if !needs_err && res.is_err() {
-        println!("Expected compile to succeed with warnigs, but it didn't! Here are the error diagnostics:");
+        println!("Expected compile to succeed with only warnigs, but it didn't! Here are the error diagnostics:");
         for (t, d) in res.diagnostics() {
             match t {
                 DiagnosticKind::Err => println!("Err: {d:?}"),
@@ -110,5 +110,29 @@ fn diagnostics_test(file: &str, expected_codes: Vec<Code>, needs_err: bool) {
             expected_codes, found_code
         );
         panic!("Not the same diagnostics");
+    }
+}
+
+fn diagnostics_any_test(file: &str, needs_err: bool) {
+    let source = fs::read(file).unwrap();
+    let source = String::from_utf8(source).unwrap();
+    let res = compile(file, &source);
+    if needs_err {
+        if !res.is_err() {
+            panic!("Expected compile to fail, but it didn't!");
+        }
+    } else {
+        if res.is_err() {
+            println!("Expected compile to succeed with only warnigs, but it didn't! Here are the error diagnostics:");
+            for (t, d) in res.diagnostics() {
+                match t {
+                    DiagnosticKind::Err => println!("Err: {d:?}"),
+                    _ => {}
+                }
+            }
+            panic!("");
+        } else if !res.is_rec() {
+            println!("Expected to compile with warnigs, but it didn't!");
+        }
     }
 }

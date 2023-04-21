@@ -11,6 +11,7 @@ use walkdir::WalkDir;
 enum Test {
     Output(String),
     Diagnostics(Vec<String>, bool),
+    DiagnosticsAny(bool),
 }
 
 fn parse_file<P>(filename: P) -> Option<(Test, bool)>
@@ -52,6 +53,8 @@ where
             }
             Some(Test::Diagnostics(expected_codes, first_line == "//fail:"))
         }
+        "//fail-any:" => Some(Test::DiagnosticsAny(true)),
+        "//warn-any:" => Some(Test::DiagnosticsAny(false)),
         _ => {
             println!(
                 "cargo:warning=Failed to read test file `{}` starting with {}",
@@ -70,8 +73,11 @@ fn make_save(name: &OsStr) -> String {
 
     let mut out = String::new();
     for c in name.chars() {
-        if c.is_ascii_alphabetic() {
-            out.push(c);
+        if c.is_ascii_alphanumeric() {
+            if c.is_ascii_uppercase() {
+                out.push('_');
+            }
+            out.push(c.to_ascii_lowercase());
         } else {
             out.push('_');
         }
@@ -108,6 +114,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .map(|c| "Code::".to_owned() + c)
                             .collect::<Vec<_>>()
                             .join(", "),
+                        need_err
+                    )
+                }
+                Test::DiagnosticsAny(need_err) => {
+                    format!(
+                        r#"diagnostics_any_test("{}", {})"#,
+                        path.display(),
                         need_err
                     )
                 }
