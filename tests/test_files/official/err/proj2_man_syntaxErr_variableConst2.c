@@ -1,2 +1,2 @@
-//warn-any:
+//output:
 int const y = 6532;

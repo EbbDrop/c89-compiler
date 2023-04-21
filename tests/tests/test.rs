@@ -132,7 +132,7 @@ fn diagnostics_any_test(file: &str, needs_err: bool) {
             }
             panic!("");
         } else if !res.is_rec() {
-            println!("Expected to compile with warnigs, but it didn't!");
+            panic!("Expected to compile with warnigs, but it didn't!");
         }
     }
 }
