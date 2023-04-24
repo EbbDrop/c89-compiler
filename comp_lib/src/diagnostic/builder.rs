@@ -30,6 +30,13 @@ impl DiagnosticBuilder {
         );
     }
 
+    pub fn add_ir_expr_type_lvalue(&mut self, expr: &ir::expr::LvalueExprNode) {
+        self.add_additional_span(
+            expr.span,
+            Some(format!("this expression has type: `{}`", expr.ty)),
+        );
+    }
+
     fn build_custom(self, code: Code, message: String) -> Diagnostic {
         Diagnostic {
             code,
@@ -107,6 +114,17 @@ impl DiagnosticBuilder {
     ) -> Diagnostic {
         let message = format!("{operator} operator needs {}", needed_type_cat.long_name());
         self.add_ir_expr_type(expr);
+        self.build_custom(Code::UnexpectedType, message)
+    }
+
+    pub fn build_unexpected_type_lvalue(
+        mut self,
+        operator: &str,
+        needed_type_cat: TypeCat,
+        expr: &ir::expr::LvalueExprNode,
+    ) -> Diagnostic {
+        let message = format!("{operator} operator needs {}", needed_type_cat.long_name());
+        self.add_ir_expr_type_lvalue(expr);
         self.build_custom(Code::UnexpectedType, message)
     }
 

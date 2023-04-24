@@ -13,6 +13,7 @@ use self::symbol_table::{ScopedHandle, ScopedTable};
 
 mod expr;
 mod symbol_table;
+mod type_checking;
 mod util;
 
 pub fn build_ir_from_ast(ast: &ast::Ast) -> AggregateResult<Root> {

@@ -141,6 +141,21 @@ pub enum BinaryOp {
     Bitwise(BitwiseOp),
 }
 
+impl BinaryOp {
+    pub fn long_name(&self) -> &'static str {
+        match self {
+            BinaryOp::Mul => "multiplication",
+            BinaryOp::Div => "division",
+            BinaryOp::Rem => "modulus",
+            BinaryOp::Add => "addition",
+            BinaryOp::Sub => "subtraction",
+            BinaryOp::ShiftLeft => "left shift",
+            BinaryOp::ShiftRight => "right shift",
+            BinaryOp::Bitwise(b) => b.long_name(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RelationOp {
     Eq,
@@ -154,12 +169,10 @@ pub enum RelationOp {
 impl RelationOp {
     pub fn long_name(&self) -> &'static str {
         match self {
-            RelationOp::Eq => "equals",
-            RelationOp::Ne => "not equals",
-            RelationOp::Lt => "less than",
-            RelationOp::Gt => "greater than",
-            RelationOp::Ge => "less than or equals",
-            RelationOp::Le => "greater than or equals",
+            RelationOp::Eq => "equality",
+            RelationOp::Ne | RelationOp::Lt | RelationOp::Gt | RelationOp::Ge | RelationOp::Le => {
+                "comparison"
+            }
         }
     }
 }

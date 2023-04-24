@@ -39,41 +39,11 @@ impl CType {
 
     /// 3.1.2.6
     ///
-    /// If there is a different constness and different type, [`DifferentType`] will always be
+    /// If there is a different constness and different type, [`IncompatibilityReason::DifferentType`] will always be
     /// emitted
     pub fn compatible_with(&self, ty: &CType) -> Result<(), IncompatibilityReason> {
         match (self, ty) {
             (CType::Scalar(s1), CType::Scalar(s2)) => s1.compatible_with(s2),
-        }
-    }
-
-    pub fn is_scalar(&self) -> bool {
-        match self {
-            CType::Scalar(_) => true,
-        }
-    }
-
-    pub fn is_integral(&self) -> bool {
-        match self {
-            CType::Scalar(s) => s.is_integral(),
-        }
-    }
-
-    pub fn is_arithmetic(&self) -> bool {
-        match self {
-            CType::Scalar(s) => s.is_arithmetic(),
-        }
-    }
-
-    pub fn is_pointer(&self) -> bool {
-        match self {
-            CType::Scalar(s) => s.is_pointer(),
-        }
-    }
-
-    pub fn is_floating(&self) -> bool {
-        match self {
-            CType::Scalar(s) => s.is_floating(),
         }
     }
 }
@@ -87,7 +57,8 @@ impl Display for CType {
                     write!(f, "{p} *")
                 }
                 Scalar::Pointer(ref p, true) => {
-                    if p.is_pointer() {
+                    let inner_is_pointer = matches!(**p, CType::Scalar(Scalar::Pointer(_, _)));
+                    if inner_is_pointer {
                         write!(f, "{p}const *")
                     } else {
                         write!(f, "const {p} *")
@@ -106,27 +77,6 @@ pub enum Scalar {
 }
 
 impl Scalar {
-    pub fn is_integral(&self) -> bool {
-        match self {
-            Scalar::Arithmetic(a) => a.is_integral(),
-            Scalar::Pointer(_, _) => false,
-        }
-    }
-
-    pub fn is_arithmetic(&self) -> bool {
-        match self {
-            Scalar::Arithmetic(_) => true,
-            Scalar::Pointer(_, _) => false,
-        }
-    }
-
-    fn is_pointer(&self) -> bool {
-        match self {
-            Scalar::Arithmetic(_) => false,
-            Scalar::Pointer(_, _) => true,
-        }
-    }
-
     pub fn compatible_with(&self, other: &Scalar) -> Result<(), IncompatibilityReason> {
         match (self, other) {
             (Scalar::Arithmetic(a1), Scalar::Arithmetic(a2)) => a1.compatible_with(a2),
@@ -139,13 +89,6 @@ impl Scalar {
                 }
             }
             _ => Err(IncompatibilityReason::DifferentType),
-        }
-    }
-
-    pub fn is_floating(&self) -> bool {
-        match self {
-            Scalar::Arithmetic(a) => a.is_floating(),
-            Scalar::Pointer(_, _) => false,
         }
     }
 }
@@ -189,9 +132,22 @@ impl Arithmetic {
         !self.is_integral()
     }
 
-    /// Returns [`Ok`] with the promoted type if the type had to change. And [`Err`] with the same value
-    /// as self otherwise. Since promotions are only defined for integers types, this function will
-    /// always returns [`Err`] for Floats
+    /// Returns true if the type can represnt negative numbers.
+    /// Always returns true for floating types
+    pub fn is_signed(&self) -> bool {
+        // TODO this should be platform specific becous of Char
+        use Arithmetic::*;
+        match self {
+            Float | Double | LongDouble => true,
+            Char => false,
+            SignedChar | SignedShortInt | SignedInt | SignedLongInt => true,
+            UnsignedChar | UnsignedShortInt | UnsignedInt | UnsignedLongInt => false,
+        }
+    }
+
+    /// Returns the promoted type and sets the bool to true if the type had to change. Since
+    /// promotions are only defined for integers types, this function will always returns false
+    /// as second value for floating types.
     ///
     /// 3.2.1.1
     pub fn promote(&self) -> (Self, bool) {
@@ -262,19 +218,6 @@ impl Arithmetic {
             Arithmetic::UnsignedShortInt => 16,
             Arithmetic::UnsignedInt => 32,
             Arithmetic::UnsignedLongInt => 64,
-        }
-    }
-
-    /// Returns true if the type can represnt negative numbers.
-    /// Always returns true for floating types
-    pub fn is_signed(&self) -> bool {
-        // TODO this should be platform specific becous of Char
-        use Arithmetic::*;
-        match self {
-            Float | Double | LongDouble => true,
-            Char => false,
-            SignedChar | SignedShortInt | SignedInt | SignedLongInt => true,
-            UnsignedChar | UnsignedShortInt | UnsignedInt | UnsignedLongInt => false,
         }
     }
 
