@@ -123,8 +123,8 @@ mod llvm_ir_builder {
             self.symbol_table.get(item_id).cloned()
         }
 
-        fn add_block(&mut self, block: &ir::Block) -> Result<()> {
-            for stmt_node in &block.0 {
+        fn add_block(&mut self, block: &ir::BlockNode) -> Result<()> {
+            for stmt_node in &block.stmts {
                 self.add_stmt_node(stmt_node)?;
             }
             Ok(())
@@ -144,6 +144,12 @@ mod llvm_ir_builder {
                 ir::Stmt::Printf(expr_node) => {
                     self.add_printf(expr_node)?;
                 }
+                ir::Stmt::IfStmt(_) => todo!(),
+                ir::Stmt::SwitchStmt(_) => todo!(),
+                ir::Stmt::LoopStmt(_) => todo!(),
+                ir::Stmt::Break => todo!(),
+                ir::Stmt::Continue => todo!(),
+                ir::Stmt::Return(_) => todo!(),
             };
             Ok(())
         }

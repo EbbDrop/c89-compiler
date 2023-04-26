@@ -4,7 +4,7 @@ use crate::{
     ir::{
         ctype::{self, CType},
         expr::{LvalueExpr, LvalueExprNode},
-        stmt::{Block, Root, Stmt, StmtNode},
+        stmt::{BlockNode, Root, Stmt, StmtNode},
         table::Item,
     },
 };
@@ -81,7 +81,10 @@ fn build_ir_from_block(block: &ast::BlockStatementNode) -> AggregateResult<Root>
     }
     std::mem::drop(root_scope);
     res.map(|stmts| Root {
-        global: Block(stmts),
+        global: BlockNode {
+            span: block.span,
+            stmts,
+        },
         table: root_table.into_table(),
     })
 }
