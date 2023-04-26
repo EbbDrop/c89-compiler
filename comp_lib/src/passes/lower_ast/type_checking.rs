@@ -21,7 +21,7 @@ pub enum CheckBinErr {
     Left(TypeCat),
     Right(TypeCat),
     Both(TypeCat),
-    Unknow,
+    Unknown,
 }
 
 pub trait TypeRuleBin
@@ -57,7 +57,7 @@ where
     fn check(self, left: &CType, right: &CType) -> Result<CheckBinOk, CheckBinErr> {
         match self.0.check(left, right) {
             Ok(res) => Ok(res),
-            Err(_) => self.1.check(left, right).map_err(|_| CheckBinErr::Unknow),
+            Err(_) => self.1.check(left, right).map_err(|_| CheckBinErr::Unknown),
         }
     }
 }
@@ -188,16 +188,32 @@ impl TypeRuleBin for CompatPointer {
                 right_ty: None,
                 out_ty: *left.clone(),
             }),
-            Err(_) => Err(CheckBinErr::Unknow),
+            Err(_) => Err(CheckBinErr::Unknown),
         }
     }
 }
 
 /// Checks for one pointer and another integer, the pointer is left unchanged and the integer is
 /// cast to a integer of the same size as a pointer. The out type will be the same as the pointer.
-pub struct PointerIntger;
+pub struct PointerInteger {
+    only_ptr_first: bool,
+}
 
-impl TypeRuleBin for PointerIntger {
+impl PointerInteger {
+    pub fn new() -> Self {
+        Self {
+            only_ptr_first: false,
+        }
+    }
+
+    pub fn only_ptr_first() -> Self {
+        Self {
+            only_ptr_first: true,
+        }
+    }
+}
+
+impl TypeRuleBin for PointerInteger {
     fn check(self, left: &CType, right: &CType) -> Result<CheckBinOk, CheckBinErr> {
         // TODO this dependent on the environment
         let pointer_size = CType::Scalar(Scalar::Arithmetic(Arithmetic::UnsignedLongInt));
@@ -215,6 +231,9 @@ impl TypeRuleBin for PointerIntger {
                 }
             }
             (CType::Scalar(Scalar::Arithmetic(other)), CType::Scalar(Scalar::Pointer(_, _))) => {
+                if self.only_ptr_first {
+                    return Err(CheckBinErr::Unknown);
+                }
                 if other.is_integral() {
                     Ok(CheckBinOk {
                         left_ty: Some(pointer_size),
@@ -225,7 +244,7 @@ impl TypeRuleBin for PointerIntger {
                     Err(CheckBinErr::Right(TypeCat::Integral))
                 }
             }
-            _ => Err(CheckBinErr::Unknow),
+            _ => Err(CheckBinErr::Unknown),
         }
     }
 }

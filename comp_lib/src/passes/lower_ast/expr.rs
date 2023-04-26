@@ -11,7 +11,7 @@ use crate::{
             BinaryOp, BitwiseOp, Expr, ExprNode, LvalueExpr, LvalueExprNode, RelationOp, UnaryOp,
         },
     },
-    passes::lower_ast::type_checking::{CompatPointer, PointerIntger, UsualArithConversions},
+    passes::lower_ast::type_checking::{CompatPointer, PointerInteger, UsualArithConversions},
 };
 
 use super::{
@@ -564,7 +564,7 @@ impl BinaryBuilder {
                         &self.left,
                         Some(&self.right),
                     ),
-                    CheckBinErr::Unknow => {
+                    CheckBinErr::Unknown => {
                         builder.build_incompatible_types(name, &self.left, &self.right)
                     }
                 };
@@ -582,7 +582,7 @@ impl BinaryBuilder {
 
     /// See [`BinaryOp::Add`]
     fn add(self) -> AggregateResult<ExprNode> {
-        let rule = UsualArithConversions::new().or(PointerIntger);
+        let rule = UsualArithConversions::new().or(PointerInteger::new());
         self.bin_op(rule, BinaryOp::Add)
     }
 
@@ -594,7 +594,7 @@ impl BinaryBuilder {
             CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::SignedLongInt));
 
         let rule = UsualArithConversions::new()
-            .or(PointerIntger)
+            .or(PointerInteger::only_ptr_first())
             .or(CompatPointer.map_out_ty_bin(pointer_pointer_distance_ty));
         self.bin_op(rule, BinaryOp::Sub)
     }

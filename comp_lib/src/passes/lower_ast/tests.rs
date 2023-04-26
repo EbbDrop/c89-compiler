@@ -745,10 +745,7 @@ fn sub() {
         (
             Scalar(Arithmetic(Char)),
             Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
-            Some(Scalar(Pointer(
-                Box::new(Scalar(Arithmetic(SignedInt))),
-                false,
-            ))),
+            None,
         ),
         (
             Scalar(Arithmetic(UnsignedLongInt)),
