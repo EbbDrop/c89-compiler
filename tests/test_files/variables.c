@@ -1,4 +1,3 @@
-//ignore
 //output:
 
 float foo = 3.4;

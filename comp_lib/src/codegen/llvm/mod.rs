@@ -9,58 +9,80 @@ mod llvm_ir_builder {
         diagnostic::AggregateResult,
         ir::{self, ctype},
     };
-    use llvm_ir::{self as lir, IntoTyped, TryIntoTyped};
+    use lir::{ty::BitSize, AddressSignificance, Linkage};
+    use llvm_ir::{
+        self as lir,
+        convert::{Into_, TryInto_},
+        ty::Type,
+        value::Value,
+    };
     use std::collections::HashMap;
 
+    type Result<T> = std::result::Result<T, String>;
+
     pub fn build(ir: &ir::Root, filename: &str, source: &str) -> AggregateResult<String> {
-        let mut module =
-            lir::Module::new("main".to_owned().try_into().unwrap(), filename.to_owned());
+        let mut module = lir::Module::new("main".to_owned());
+        module.set_source_filename(filename.to_owned());
 
-        let main_id = module
-            .add_global_identifier("main".to_owned().try_into().unwrap())
-            .unwrap();
-
-        let main_builder =
-            lir::FunctionDefinitionBuilder::new(main_id, lir::ty::I32.into()).start_body();
-
-        match FunctionBuilder::new(&mut module, main_builder, source).build_from_ir(ir) {
-            Ok(()) => AggregateResult::new_ok(format!("{}", module)),
-            Err(()) => panic!("ICE"),
+        match MainBuilder::new(&mut module, source).build_from_ir(ir) {
+            Ok(function) => {
+                module
+                    .define_function_named("main".into(), function)
+                    .unwrap();
+                // TODO: let compiler front-end determine the fmt opts
+                AggregateResult::new_ok(format!("{}", module.display(lir::FmtOpts::default())))
+            }
+            Err(msg) => panic!("ICE: {msg}"),
         }
     }
 
-    type LlvmResult = lir::Result<lir::TypedValue>;
-
-    struct FunctionBuilder<'m, 's> {
+    struct MainBuilder<'m, 's> {
         module: &'m mut lir::Module,
-        function: Option<lir::BasicBlockBuilder>,
-        // Maps ir ItemId to the ptr (as TypedValue) we got from Alloca
-        symbol_table: HashMap<ir::table::ItemId, lir::TypedValue>,
-        printf_int: lir::id::GlobalName,
-        printf_float: lir::id::GlobalName,
-        printf_ptr: lir::id::GlobalName,
+        function: lir::FunctionDefinitionBuilder,
+        // Maps ir ItemId to the ptr we got from Alloca
+        symbol_table: HashMap<ir::table::ItemId, lir::value::Register<lir::ty::Pointer>>,
+        printf: (lir::FunctionDeclarationHandle, lir::constant::Pointer),
+        printf_int: lir::constant::Pointer,
+        printf_float: lir::constant::Pointer,
+        printf_ptr: lir::constant::Pointer,
         source: &'s str,
     }
 
-    impl<'m, 's> FunctionBuilder<'m, 's> {
-        fn new(
-            module: &'m mut lir::Module,
-            handle: lir::FunctionBodyBuilder,
-            source: &'s str,
-        ) -> Self {
-            let printf_int = module
-                .add_global_identifier(lir::id::name(".printf_int"))
-                .unwrap();
-            let printf_float = module
-                .add_global_identifier(lir::id::name(".printf_float"))
-                .unwrap();
-            let printf_ptr = module
-                .add_global_identifier(lir::id::name(".printf_ptr"))
-                .unwrap();
+    impl<'m, 's> MainBuilder<'m, 's> {
+        fn new(module: &'m mut lir::Module, source: &'s str) -> Self {
+            let function =
+                lir::FunctionDeclaration::new(lir::ty::I16.into()).to_definition_builder();
+
+            let printf = {
+                let mut printf = lir::FunctionDeclaration::new(lir::ty::I32.into());
+                printf.add_param(lir::ty::Pointer::new_literal().build());
+                printf.is_vararg = true;
+                printf.linkage = Linkage::External;
+                printf.address_significance = Some(AddressSignificance::Unnamed);
+                module
+                    .declare_function_named("printf".into(), printf)
+                    .unwrap()
+            };
+
+            let mut declare_printf_template = |name: &str, template: &str| {
+                let constant = lir::constant::Array::new_char_array_from_str(template);
+                let global_var = lir::GlobalVarDefinition::new_constant(constant)
+                    .with_linkage(Linkage::Private)
+                    .with_address_significance(AddressSignificance::Unnamed);
+                module
+                    .define_global_var_named(name.into(), global_var)
+                    .unwrap()
+            };
+
+            let (_, printf_int) = declare_printf_template(".printf_int", "%i\n\0");
+            let (_, printf_float) = declare_printf_template(".printf_float", "%f\n\0");
+            let (_, printf_ptr) = declare_printf_template(".printf_ptr", "%p\n\0");
+
             Self {
                 module,
-                function: Some(handle.start_block()),
+                function,
                 symbol_table: HashMap::new(),
+                printf,
                 printf_int,
                 printf_float,
                 printf_ptr,
@@ -68,127 +90,109 @@ mod llvm_ir_builder {
             }
         }
 
-        fn function_ref(&self) -> &lir::BasicBlockBuilder {
-            self.function.as_ref().unwrap()
-        }
-
-        fn function_mut(&mut self) -> &mut lir::BasicBlockBuilder {
-            self.function.as_mut().unwrap()
-        }
-
-        fn build_from_ir(mut self, root: &ir::Root) -> Result<(), ()> {
+        fn build_from_ir(mut self, root: &ir::Root) -> Result<lir::FunctionDefinition> {
             self.allocate_items(&root.table)?;
-
             self.add_block(&root.global)?;
-
-            // TEMP: for now always finish with a `ret 0`
-            // The below will panic if the function's return type isn't u32.
-            let function_definition = self
-                .function
-                .take()
-                .unwrap()
-                .terminate_block(
-                    lir::RawTerminatorInstruction::Return(
-                        lir::Constant::Integer(0)
-                            .try_into_typed(lir::ty::I32.into())
-                            .unwrap(),
-                    )
-                    .try_into()?,
-                )?
-                .build()?;
-
-            self.module.define_function(function_definition);
-
-            Ok(())
+            Ok(self.function.build())
         }
 
-        fn allocate_items(&mut self, table: &ir::table::Table) -> Result<(), ()> {
+        fn allocate_items(&mut self, table: &ir::table::Table) -> Result<()> {
             for (item_id, item) in table.iter() {
                 let comment = format!(
                     " allocation of: {} {}",
                     item.ty,
                     &self.source[std::ops::Range::from(item.original_span)]
                 );
-                self.function_mut().add_comment(comment);
+                self.function.add_comment(comment);
+
                 let ty = self.ctype_to_llvm_type(&item.ty);
-                let alloc_instr = lir::RawYieldingInstruction::Alloca { ty, amount: None };
+
                 let ptr = self
-                    .function_mut()
-                    .add_yielding_instruction(alloc_instr.try_into()?)?;
-                self.symbol_table.insert(item_id, ptr);
+                    .function
+                    .add_instruction(lir::instruction::Alloca { ty, amount: None })?;
+
+                self.symbol_table.insert(item_id, ptr.into_());
             }
             Ok(())
         }
 
-        fn get_symbol(&mut self, item_id: &ir::table::ItemId) -> LlvmResult {
-            self.symbol_table.get(item_id).cloned().ok_or(lir::Error)
+        fn get_symbol(
+            &mut self,
+            item_id: &ir::table::ItemId,
+        ) -> Option<lir::value::Register<lir::ty::Pointer>> {
+            self.symbol_table.get(item_id).cloned()
         }
 
-        fn add_block(&mut self, block: &ir::Block) -> Result<(), ()> {
+        fn add_block(&mut self, block: &ir::Block) -> Result<()> {
             for stmt_node in &block.0 {
                 self.add_stmt_node(stmt_node)?;
             }
             Ok(())
         }
 
-        fn add_stmt_node(&mut self, stmt_node: &ir::StmtNode) -> Result<(), ()> {
+        fn add_stmt_node(&mut self, stmt_node: &ir::StmtNode) -> Result<()> {
             if let Some(comment) = &stmt_node.comments {
-                self.function_mut().add_comment(comment.clone());
+                self.function.add_comment(comment.clone());
             }
             for line in self.source[std::ops::Range::from(stmt_node.span)].lines() {
-                self.function_mut().add_comment(format!(";; {line}"));
+                self.function.add_comment(format!(";; {line}"));
             }
             match &stmt_node.stmt {
                 ir::Stmt::Expr(expr_node) => {
                     self.add_expr_node(expr_node)?;
                 }
                 ir::Stmt::Printf(expr_node) => {
-                    self.add_fprint(expr_node)?;
+                    self.add_printf(expr_node)?;
                 }
             };
             Ok(())
         }
 
-        fn add_fprint(&mut self, expr_node: &ir::ExprNode) -> LlvmResult {
-            let value = self.add_expr_node(expr_node)?;
-            let str_id = match value.ty().to_type_cat() {
-                lir::ty::TypeCat::Void => return Err(lir::Error),
-                lir::ty::TypeCat::Integer => self.printf_int.clone(),
-                lir::ty::TypeCat::FloatingPoint => self.printf_float.clone(),
-                lir::ty::TypeCat::Ptr => self.printf_ptr.clone(),
+        fn add_printf(&mut self, expr_node: &ir::ExprNode) -> Result<()> {
+            let value: lir::value::Primitive = self.add_expr_node(expr_node)?.try_into()?;
+
+            let str_pointer = match value.ty() {
+                lir::ty::Primitive::Integer(_) => self.printf_int.clone(),
+                lir::ty::Primitive::FloatingPoint(_) => self.printf_float.clone(),
+                lir::ty::Primitive::Pointer(_) => self.printf_ptr.clone(),
             };
-            let printf_call = lir::RawYieldingInstruction::Printf {
-                args: vec![str_id.into_typed(lir::ty::Ptr.into()), value],
-            };
-            self.function_mut()
-                .add_yielding_instruction(printf_call.try_into()?)
+
+            let (fn_handle, fn_pointer) = self.printf.clone();
+
+            self.function
+                .add_maybe_yielding_instruction(lir::instruction::Call {
+                    calling_conv: Default::default(),
+                    fn_ty: self.module.get_function_declaration(fn_handle).ty(),
+                    fn_pointer: fn_pointer.into(),
+                    fn_args: vec![str_pointer.into(), value.into()],
+                })
+                .map(|_| ())
         }
 
-        fn add_expr_node(&mut self, expr_node: &ir::ExprNode) -> LlvmResult {
-            match &expr_node.expr {
-                ir::Expr::Constant(constant) => self.add_constant_expr_node(expr_node, constant),
-                ir::Expr::Cast(node) => self.add_cast_expr_node(expr_node, node),
-                ir::Expr::UnaryArith(op, node) => self.add_unary_expr_node(expr_node, op, node),
-                ir::Expr::LvalueDeref(lvalue_node) => self.add_dereference_lvalue_node(lvalue_node),
-                ir::Expr::PostfixInc(lvalue_node) => self.add_postfix_inc_expr_node(lvalue_node),
-                ir::Expr::PostfixDec(lvalue_node) => self.add_postfix_dec_expr_node(lvalue_node),
-                ir::Expr::PrefixInc(lvalue_node) => self.add_prefix_inc_expr_node(lvalue_node),
-                ir::Expr::PrefixDec(lvalue_node) => self.add_prefix_dec_expr_node(lvalue_node),
-                ir::Expr::Reference(lvalue_node) => self.add_reference_lvalue_node(lvalue_node),
-                ir::Expr::Binary(lhs, op, rhs) => {
-                    self.add_binary_expr_node(expr_node, op, lhs, rhs)
+        fn add_expr_node(&mut self, expr_node: &ir::ExprNode) -> Result<lir::value::Element> {
+            use ir::Expr as E;
+            Ok(match &expr_node.expr {
+                E::Constant(constant) => self.add_constant_expr_node(expr_node, constant)?.into(),
+                E::Cast(node) => self.add_cast_expr_node(expr_node, node)?,
+                E::UnaryArith(op, node) => self.add_unary_expr_node(expr_node, op, node)?,
+                E::LvalueDeref(lv_node) => self.add_dereference_lvalue_node(lv_node)?,
+                E::PostfixInc(lv_node) => self.add_postfix_inc_expr_node(lv_node)?.into(),
+                E::PostfixDec(lv_node) => self.add_postfix_dec_expr_node(lv_node)?.into(),
+                E::PrefixInc(lv_node) => self.add_prefix_inc_expr_node(lv_node)?.into(),
+                E::PrefixDec(lv_node) => self.add_prefix_dec_expr_node(lv_node)?.into(),
+                E::Reference(lv_node) => self.add_reference_lvalue_node(lv_node)?.into(),
+                E::Binary(lhs, op, rhs) => self.add_binary_expr_node(expr_node, op, lhs, rhs)?,
+                E::Relation(lhs, op, rhs) => {
+                    self.add_relation_expr_node(expr_node, op, lhs, rhs)?.into()
                 }
-                ir::Expr::Relation(lhs, op, rhs) => {
-                    self.add_relation_expr_node(expr_node, op, lhs, rhs)
+                E::LogicalAnd(lhs, rhs) => {
+                    self.add_logical_and_expr_node(expr_node, lhs, rhs)?.into()
                 }
-                ir::Expr::LogicalAnd(lhs, rhs) => {
-                    self.add_logical_and_expr_node(expr_node, lhs, rhs)
+                E::LogicalOr(lhs, rhs) => {
+                    self.add_logical_or_expr_node(expr_node, lhs, rhs)?.into()
                 }
-                ir::Expr::LogicalOr(lhs, rhs) => self.add_logical_or_expr_node(expr_node, lhs, rhs),
-                ir::Expr::Assign(lvalue_node, rhs_node) => {
-                    self.add_assign_expr_node(lvalue_node, rhs_node)
-                }
-            }
+                E::Assign(lv_node, rhs_node) => self.add_assign_expr_node(lv_node, rhs_node)?,
+            })
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
@@ -196,10 +200,13 @@ mod llvm_ir_builder {
         ////////////////////////////////////////////////////////////////////////////////////////////
 
         /// Loads the value that the specified lvalue refers to.
-        fn add_dereference_lvalue_node(&mut self, lvalue_node: &ir::LvalueExprNode) -> LlvmResult {
+        fn add_dereference_lvalue_node(
+            &mut self,
+            lvalue_node: &ir::LvalueExprNode,
+        ) -> Result<lir::value::Element> {
             let ty = self.ctype_to_llvm_type(&lvalue_node.ty);
             let pointer = self.add_reference_lvalue_node(lvalue_node)?;
-            self.add_load_from_ptr(pointer, ty)
+            self.add_load_from_ptr(pointer, ty).map(Into::into)
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
@@ -207,10 +214,19 @@ mod llvm_ir_builder {
         ////////////////////////////////////////////////////////////////////////////////////////////
 
         /// Gives the pointer that corresponds to the lvalue.
-        fn add_reference_lvalue_node(&mut self, lvalue_node: &ir::LvalueExprNode) -> LlvmResult {
+        fn add_reference_lvalue_node(
+            &mut self,
+            lvalue_node: &ir::LvalueExprNode,
+        ) -> Result<lir::value::Pointer> {
             match &lvalue_node.expr {
-                ir::LvalueExpr::Ident(item_id) => self.get_symbol(item_id),
-                ir::LvalueExpr::Dereference(inner) => self.add_expr_node(inner),
+                ir::LvalueExpr::Ident(item_id) => Ok(self
+                    .get_symbol(item_id)
+                    .expect("all used identifiers should have been allocated already")
+                    .into()),
+                ir::LvalueExpr::Dereference(inner) => {
+                    let element = self.add_expr_node(inner)?;
+                    Ok(element.try_into()?)
+                }
             }
         }
 
@@ -222,16 +238,15 @@ mod llvm_ir_builder {
             &mut self,
             lvalue_node: &ir::LvalueExprNode,
             rhs_node: &ir::ExprNode,
-        ) -> LlvmResult {
+        ) -> Result<lir::value::Element> {
             // Left-hand side of the assignment is executed first
-            let lvalue = self.add_reference_lvalue_node(lvalue_node)?;
+            let pointer = self.add_reference_lvalue_node(lvalue_node)?;
             let rhs = self.add_expr_node(rhs_node)?;
-            let store_instr = lir::RawYieldlessInstruction::Store {
-                value: rhs.clone(),
-                pointer: lvalue,
-            };
-            self.function_mut()
-                .add_yieldless_instruction(store_instr.try_into()?);
+            self.function
+                .add_void_instruction(lir::instruction::Store {
+                    value: rhs.clone(),
+                    pointer,
+                })?;
             Ok(rhs)
         }
 
@@ -243,28 +258,33 @@ mod llvm_ir_builder {
             &mut self,
             outer_node: &ir::ExprNode,
             constant: &ir::Constant,
-        ) -> LlvmResult {
-            match *constant {
-                ir::Constant::Integer(v) => {
-                    lir::Constant::Integer(v).try_into_typed(match outer_node.ty {
+        ) -> Result<lir::constant::Element> {
+            Ok(match *constant {
+                ir::Constant::Integer(v) => lir::constant::Integer::new(
+                    match outer_node.ty {
                         ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
-                            lir::ty::Int(a.size_in_bits()).into()
+                            lir::ty::Integer::new_literal(a.size_in_bits())?
                         }
                         ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => unreachable!(),
-                    })
+                    },
+                    v,
+                )
+                .into(),
+                ir::Constant::Float(f) => match outer_node.ty {
+                    ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => match a {
+                        ctype::Arithmetic::Float => {
+                            lir::constant::FloatingPoint::new_float(f as f32)
+                        }
+                        ctype::Arithmetic::Double => lir::constant::FloatingPoint::new_double(f),
+                        ctype::Arithmetic::LongDouble => {
+                            lir::constant::FloatingPoint::new_double(f)
+                        }
+                        _ => unreachable!(),
+                    },
+                    ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => unreachable!(),
                 }
-                ir::Constant::Float(f) => {
-                    lir::Constant::FloatingPoint(f).try_into_typed(match outer_node.ty {
-                        ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => match a {
-                            ctype::Arithmetic::Float => lir::ty::Float.into(),
-                            ctype::Arithmetic::Double => lir::ty::Double.into(),
-                            ctype::Arithmetic::LongDouble => lir::ty::Double.into(),
-                            _ => unreachable!(),
-                        },
-                        ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => unreachable!(),
-                    })
-                }
-            }
+                .into(),
+            })
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
@@ -275,49 +295,78 @@ mod llvm_ir_builder {
             &mut self,
             outer_node: &ir::ExprNode,
             inner_node: &ir::ExprNode,
-        ) -> LlvmResult {
+        ) -> Result<lir::value::Element> {
             let to_ty = self.ctype_to_llvm_type(&outer_node.ty);
             let is_to_type_signed = self.is_ctype_signed(&outer_node.ty)?;
             let is_from_type_signed = self.is_ctype_signed(&inner_node.ty)?;
-            let inner_tyval = self.add_expr_node(inner_node)?;
-            use lir::ty::Type;
-            let cast_op = match (inner_tyval.ty(), to_ty) {
-                (Type::Int(f), Type::Int(t)) => match f.bits().cmp(&t.bits()) {
-                    std::cmp::Ordering::Less => match is_from_type_signed {
-                        true => lir::CastOp::Sext,
-                        false => lir::CastOp::Zext,
-                    },
-                    std::cmp::Ordering::Equal => return Ok(inner_tyval),
-                    std::cmp::Ordering::Greater => lir::CastOp::Trunc,
-                },
-                (Type::Int(_), Type::Float(_) | Type::Double(_)) => match is_from_type_signed {
-                    true => lir::CastOp::Sitofp,
-                    false => lir::CastOp::Uitofp,
-                },
-                (Type::Int(_), Type::Ptr(_)) => return self.cast_int_to_prt(inner_tyval, to_ty),
-                (Type::Float(_) | Type::Double(_), Type::Int(_)) => match is_to_type_signed {
-                    true => lir::CastOp::Fptosi,
-                    false => lir::CastOp::Fptoui,
-                },
-                (Type::Float(_), Type::Float(_)) => return Ok(inner_tyval),
-                (Type::Double(_), Type::Double(_)) => return Ok(inner_tyval),
-                (Type::Ptr(_), Type::Ptr(_)) => return Ok(inner_tyval),
-                (Type::Float(_), Type::Double(_)) => lir::CastOp::Fpext,
-                (Type::Double(_), Type::Float(_)) => lir::CastOp::Fptrunc,
-                (Type::Ptr(_), Type::Int(_)) => return self.cast_ptr_to_int(inner_tyval, to_ty),
-                (Type::Float(_) | Type::Double(_), Type::Ptr(_)) => unreachable!(),
-                (Type::Ptr(_), Type::Float(_) | Type::Double(_)) => unreachable!(),
-                (Type::Void(_), _) | (_, Type::Void(_)) => unreachable!(),
-            };
+            let inner = self.add_expr_node(inner_node)?;
 
-            let instr = lir::RawYieldingInstruction::Cast {
-                op: cast_op,
-                value: inner_tyval,
-                to_ty,
+            use lir::ty;
+            use lir::value::{Element, Primitive, Single};
+            let cast_instruction: lir::instruction::YieldingInstruction = match inner {
+                Element::Single(Single::Primitive(from)) => {
+                    let ty::Element::Single(ty::Single::Primitive(to)) = to_ty else { unreachable!("primitive's should only be casted to other primitive's") };
+                    match (from, to) {
+                        (Primitive::Integer(value), ty::Primitive::Integer(to_ty)) => {
+                            return self
+                                .add_int_cast(value, to_ty, is_from_type_signed)
+                                .map(Into::into);
+                        }
+                        (Primitive::Integer(value), ty::Primitive::FloatingPoint(to_ty)) => {
+                            match is_from_type_signed {
+                                true => {
+                                    lir::instruction::cast::SiToFp { value, to_ty }.try_into_()?
+                                }
+                                false => {
+                                    lir::instruction::cast::UiToFp { value, to_ty }.try_into_()?
+                                }
+                            }
+                        }
+                        (Primitive::Integer(value), ty::Primitive::Pointer(to_ty)) => {
+                            lir::instruction::cast::IntToPtr { value, to_ty }.try_into_()?
+                        }
+                        (Primitive::FloatingPoint(value), ty::Primitive::Integer(to_ty)) => {
+                            match is_to_type_signed {
+                                true => {
+                                    lir::instruction::cast::FpToSi { value, to_ty }.try_into_()?
+                                }
+                                false => {
+                                    lir::instruction::cast::FpToUi { value, to_ty }.try_into_()?
+                                }
+                            }
+                        }
+                        (Primitive::FloatingPoint(value), ty::Primitive::FloatingPoint(to_ty)) => {
+                            match value.ty().bit_size().cmp(&to_ty.bit_size()) {
+                                std::cmp::Ordering::Less => {
+                                    lir::instruction::cast::FpExt { value, to_ty }.try_into_()?
+                                }
+                                std::cmp::Ordering::Equal => return Ok(value.into()),
+                                std::cmp::Ordering::Greater => {
+                                    lir::instruction::cast::FpTrunc { value, to_ty }.try_into_()?
+                                }
+                            }
+                        }
+                        (Primitive::FloatingPoint(_), ty::Primitive::Pointer(_)) => unreachable!(),
+                        (Primitive::Pointer(value), ty::Primitive::Integer(to_ty)) => {
+                            lir::instruction::cast::PtrToInt { value, to_ty }.try_into_()?
+                        }
+                        (Primitive::Pointer(_), ty::Primitive::FloatingPoint(_)) => unreachable!(),
+                        (Primitive::Pointer(value), ty::Primitive::Pointer(to_ty)) => {
+                            if value.ty().equiv_to(&to_ty) {
+                                return Ok(value.into());
+                            } else {
+                                unreachable!()
+                            }
+                        }
+                    }
+                }
+                Element::Single(Single::Vector(_)) => unreachable!(),
+                Element::Aggregate(_) => todo!(),
             };
-
-            self.function_mut()
-                .add_yielding_instruction(instr.try_into()?)
+            Ok(self
+                .function
+                .add_instruction(cast_instruction)?
+                .try_into()?)
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
@@ -329,50 +378,66 @@ mod llvm_ir_builder {
             outer_node: &ir::ExprNode,
             op: &ir::UnaryOp,
             inner_node: &ir::ExprNode,
-        ) -> LlvmResult {
-            let inner_tyval = self.add_expr_node(inner_node)?;
+        ) -> Result<lir::value::Element> {
+            let inner = self.add_expr_node(inner_node)?;
             match op {
-                ir::UnaryOp::Neg => self.add_unary_neg_expr_node(inner_tyval),
-                ir::UnaryOp::BitNot => self.add_unary_bit_not_expr_node(inner_tyval),
-                ir::UnaryOp::Not => self.add_unary_not_expr_node(outer_node, inner_tyval),
+                ir::UnaryOp::Neg => self
+                    .add_unary_neg_expr_node(inner.try_into()?)
+                    .map(Into::into),
+                ir::UnaryOp::BitNot => self
+                    .add_unary_bit_not_expr_node(inner.try_into()?)
+                    .map(Into::into),
+                ir::UnaryOp::Not => self
+                    .add_unary_not_expr_node(outer_node, inner.try_into()?)
+                    .map(Into::into),
             }
         }
 
-        fn add_unary_neg_expr_node(&mut self, inner: lir::TypedValue) -> LlvmResult {
-            use lir::ty::TypeCat;
-            let instr = match inner.ty().to_type_cat() {
-                TypeCat::Integer => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Sub,
-                    op1: lir::Constant::Integer(0).try_into_typed(inner.ty())?,
-                    op2: inner,
-                },
-                TypeCat::FloatingPoint => lir::RawYieldingInstruction::UnaryOp {
-                    op: lir::UnaryOp::Fneg,
-                    op1: inner,
-                },
-                TypeCat::Ptr | TypeCat::Void => unreachable!(),
-            };
-            self.function_mut()
-                .add_yielding_instruction(instr.try_into()?)
+        fn add_unary_neg_expr_node(
+            &mut self,
+            inner: lir::value::Primitive,
+        ) -> Result<lir::value::Primitive> {
+            use lir::value::Primitive;
+            match inner {
+                Primitive::Integer(operand2) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Int {
+                        operator: lir::instruction::BinaryIntOp::Sub,
+                        operand1: lir::constant::Integer::new(operand2.ty(), 0).into(),
+                        operand2,
+                    })
+                    .map(Into::into),
+                Primitive::FloatingPoint(operand) => self
+                    .function
+                    .add_instruction(lir::instruction::unary_op::Fp {
+                        operator: lir::instruction::UnaryFpOp::Fneg,
+                        operand,
+                    })
+                    .map(Into::into),
+                Primitive::Pointer(_) => todo!(),
+            }
         }
 
-        fn add_unary_bit_not_expr_node(&mut self, inner: lir::TypedValue) -> LlvmResult {
-            let instr = lir::RawYieldingInstruction::BinaryOp {
-                op: lir::BinaryOp::Xor,
-                op1: lir::Constant::Integer(-1).try_into_typed(inner.ty())?,
-                op2: inner,
-            };
-            self.function_mut()
-                .add_yielding_instruction(instr.try_into()?)
+        fn add_unary_bit_not_expr_node(
+            &mut self,
+            inner: lir::value::Integer,
+        ) -> Result<lir::value::Integer> {
+            self.function
+                .add_instruction(lir::instruction::binary_op::Int {
+                    operator: lir::instruction::BinaryIntOp::Xor,
+                    operand1: lir::constant::Integer::new(inner.ty(), -1).into(),
+                    operand2: inner,
+                })
+                .map(Into::into)
         }
 
         fn add_unary_not_expr_node(
             &mut self,
             outer_node: &ir::ExprNode,
-            inner: lir::TypedValue,
-        ) -> LlvmResult {
-            let result = self.add_falsy_check(inner)?;
-            self.add_cast_from_bool_to_arithmetic_ctype(result, &outer_node.ty)
+            inner: lir::value::Single,
+        ) -> Result<lir::value::Integer> {
+            let result = self.add_falsy_check(inner.into())?;
+            self.add_cast_from_bool_to_integer_ctype(result, &outer_node.ty)
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
@@ -385,72 +450,87 @@ mod llvm_ir_builder {
             op: &ir::BinaryOp,
             lhs_node: &ir::ExprNode,
             rhs_node: &ir::ExprNode,
-        ) -> LlvmResult {
-            match op {
-                ir::BinaryOp::Mul => self.add_binary_mul_expr_node(lhs_node, rhs_node),
-                ir::BinaryOp::Div => self.add_binary_div_expr_node(outer_node, lhs_node, rhs_node),
-                ir::BinaryOp::Rem => self.add_binary_rem_expr_node(outer_node, lhs_node, rhs_node),
-                ir::BinaryOp::Add => self.add_binary_add_expr_node(lhs_node, rhs_node),
-                ir::BinaryOp::Sub => self.add_binary_sub_expr_node(outer_node, lhs_node, rhs_node),
-                ir::BinaryOp::ShiftLeft => {
-                    self.add_binary_integer_instruction(lir::BinaryOp::Shl, lhs_node, rhs_node)
+        ) -> Result<lir::value::Element> {
+            use lir::instruction::BinaryIntOp;
+            Ok(match op {
+                ir::BinaryOp::Mul => self.add_binary_mul_expr_node(lhs_node, rhs_node)?.into(),
+                ir::BinaryOp::Div => self
+                    .add_binary_div_expr_node(outer_node, lhs_node, rhs_node)?
+                    .into(),
+                ir::BinaryOp::Rem => self
+                    .add_binary_rem_expr_node(outer_node, lhs_node, rhs_node)?
+                    .into(),
+                ir::BinaryOp::Add => self.add_binary_add_expr_node(lhs_node, rhs_node)?.into(),
+                ir::BinaryOp::Sub => {
+                    self.add_binary_sub_expr_node(outer_node, lhs_node, rhs_node)?
                 }
+                ir::BinaryOp::ShiftLeft => self
+                    .add_binary_integer_instruction(BinaryIntOp::Shl, lhs_node, rhs_node)?
+                    .into(),
                 ir::BinaryOp::ShiftRight => {
                     // NOTE: The shift right operation in C is implementation defined as to whether it it is
                     // logical or arithmetic. This implementation uses logical shift right.
-                    self.add_binary_integer_instruction(lir::BinaryOp::Lshr, lhs_node, rhs_node)
+                    self.add_binary_integer_instruction(BinaryIntOp::Lshr, lhs_node, rhs_node)?
+                        .into()
                 }
                 ir::BinaryOp::Bitwise(bitwise_op) => match bitwise_op {
-                    ir::BitwiseOp::And => {
-                        self.add_binary_integer_instruction(lir::BinaryOp::And, lhs_node, rhs_node)
-                    }
-                    ir::BitwiseOp::Or => {
-                        self.add_binary_integer_instruction(lir::BinaryOp::Or, lhs_node, rhs_node)
-                    }
-                    ir::BitwiseOp::Xor => {
-                        self.add_binary_integer_instruction(lir::BinaryOp::Xor, lhs_node, rhs_node)
-                    }
+                    ir::BitwiseOp::And => self
+                        .add_binary_integer_instruction(BinaryIntOp::And, lhs_node, rhs_node)?
+                        .into(),
+                    ir::BitwiseOp::Or => self
+                        .add_binary_integer_instruction(BinaryIntOp::Or, lhs_node, rhs_node)?
+                        .into(),
+                    ir::BitwiseOp::Xor => self
+                        .add_binary_integer_instruction(BinaryIntOp::Xor, lhs_node, rhs_node)?
+                        .into(),
                 },
-            }
+            })
         }
 
         fn add_binary_add_expr_node(
             &mut self,
             lhs_node: &ir::ExprNode,
             rhs_node: &ir::ExprNode,
-        ) -> LlvmResult {
-            let lhs = self.add_expr_node(lhs_node)?;
-            let rhs = self.add_expr_node(rhs_node)?;
+        ) -> Result<lir::value::Primitive> {
+            let lhs = self.add_expr_node(lhs_node)?.try_into()?;
+            let rhs = self.add_expr_node(rhs_node)?.try_into()?;
 
-            use lir::ty::TypeCat;
-            let instr = match (lhs.ty().to_type_cat(), rhs.ty().to_type_cat()) {
-                (TypeCat::Integer, TypeCat::Integer) => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Add,
-                    op1: lhs,
-                    op2: rhs,
-                },
-                (TypeCat::FloatingPoint, TypeCat::FloatingPoint) => {
-                    lir::RawYieldingInstruction::BinaryOp {
-                        op: lir::BinaryOp::Fadd,
-                        op1: lhs,
-                        op2: rhs,
-                    }
-                }
-                (TypeCat::Integer, TypeCat::Ptr) => lir::RawYieldingInstruction::GetElementPtr {
-                    ty: self.ctype_ptr_inner_to_llvm_type(&rhs_node.ty)?,
-                    ptrval: rhs,
-                    index: lhs,
-                },
-                (TypeCat::Ptr, TypeCat::Integer) => lir::RawYieldingInstruction::GetElementPtr {
-                    ty: self.ctype_ptr_inner_to_llvm_type(&lhs_node.ty)?,
-                    ptrval: lhs,
-                    index: rhs,
-                },
+            use lir::value::Primitive;
+            match (lhs, rhs) {
+                (Primitive::Integer(operand1), Primitive::Integer(operand2)) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Int {
+                        operator: lir::instruction::BinaryIntOp::Add,
+                        operand1,
+                        operand2,
+                    })
+                    .map(Into::into),
+                (Primitive::FloatingPoint(operand1), Primitive::FloatingPoint(operand2)) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Fp {
+                        operator: lir::instruction::BinaryFpOp::Fadd,
+                        operand1,
+                        operand2,
+                    })
+                    .map(Into::into),
+                (Primitive::Integer(index), Primitive::Pointer(pointer)) => self
+                    .function
+                    .add_instruction(lir::instruction::GetElementPtr {
+                        ty: self.ctype_ptr_inner_to_llvm_type(&rhs_node.ty)?,
+                        pointer,
+                        indices: vec![index],
+                    })
+                    .map(Into::into),
+                (Primitive::Pointer(pointer), Primitive::Integer(index)) => self
+                    .function
+                    .add_instruction(lir::instruction::GetElementPtr {
+                        ty: self.ctype_ptr_inner_to_llvm_type(&lhs_node.ty)?,
+                        pointer,
+                        indices: vec![index],
+                    })
+                    .map(Into::into),
                 _ => unreachable!(),
-            };
-
-            self.function_mut()
-                .add_yielding_instruction(instr.try_into()?)
+            }
         }
 
         fn add_binary_sub_expr_node(
@@ -458,90 +538,108 @@ mod llvm_ir_builder {
             outer_node: &ir::ExprNode,
             lhs_node: &ir::ExprNode,
             rhs_node: &ir::ExprNode,
-        ) -> LlvmResult {
-            let lhs = self.add_expr_node(lhs_node)?;
-            let rhs = self.add_expr_node(rhs_node)?;
+        ) -> Result<lir::value::Element> {
+            let lhs = self.add_expr_node(lhs_node)?.try_into()?;
+            let rhs = self.add_expr_node(rhs_node)?.try_into()?;
 
-            use lir::ty::TypeCat;
-            let instr = match (lhs.ty().to_type_cat(), rhs.ty().to_type_cat()) {
-                (TypeCat::Integer, TypeCat::Integer) => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Sub,
-                    op1: lhs,
-                    op2: rhs,
-                },
-                (TypeCat::FloatingPoint, TypeCat::FloatingPoint) => {
-                    lir::RawYieldingInstruction::BinaryOp {
-                        op: lir::BinaryOp::Fsub,
-                        op1: lhs,
-                        op2: rhs,
-                    }
+            use lir::value::Primitive;
+            match (lhs, rhs) {
+                (Primitive::Integer(operand1), Primitive::Integer(operand2)) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Int {
+                        operator: lir::instruction::BinaryIntOp::Sub,
+                        operand1,
+                        operand2,
+                    })
+                    .map(Into::into),
+                (Primitive::FloatingPoint(operand1), Primitive::FloatingPoint(operand2)) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Fp {
+                        operator: lir::instruction::BinaryFpOp::Fsub,
+                        operand1,
+                        operand2,
+                    })
+                    .map(Into::into),
+                (Primitive::Pointer(pointer), Primitive::Integer(integer)) => {
+                    let neg_index =
+                        self.function
+                            .add_instruction(lir::instruction::binary_op::Int {
+                                operator: lir::instruction::BinaryIntOp::Sub,
+                                operand1: lir::constant::Integer::new(integer.ty(), 0).into(),
+                                operand2: integer,
+                            })?;
+                    self.function
+                        .add_instruction(lir::instruction::GetElementPtr {
+                            ty: self.ctype_ptr_inner_to_llvm_type(&lhs_node.ty)?,
+                            pointer,
+                            indices: vec![neg_index.into()],
+                        })
+                        .map(Into::into)
                 }
-                (TypeCat::Ptr, TypeCat::Ptr) => {
-                    let int_ty = self.ctype_to_llvm_type(&outer_node.ty);
-                    let op1 = self.cast_ptr_to_int(lhs, int_ty)?;
-                    let op2 = self.cast_ptr_to_int(rhs, int_ty)?;
-                    let sub_instr = lir::RawYieldingInstruction::BinaryOp {
-                        op: lir::BinaryOp::Sub,
-                        op1,
-                        op2,
-                    };
-                    let bit_diff = self
-                        .function_mut()
-                        .add_yielding_instruction(sub_instr.try_into()?)?;
-                    lir::RawYieldingInstruction::BinaryOp {
-                        op: lir::BinaryOp::Sdiv,
-                        op1: bit_diff,
-                        op2: lir::Constant::Integer(
-                            self.ctype_ptr_inner_to_llvm_type(&lhs_node.ty)?
-                                .bit_size()
-                                .to_bytes_exact()
-                                .unwrap()
-                                .into(),
-                        )
-                        .try_into_typed(int_ty)?,
-                    }
-                }
-                (TypeCat::Ptr, TypeCat::Integer) => {
-                    let neg_index = self.function_mut().add_yielding_instruction(
-                        lir::RawYieldingInstruction::BinaryOp {
-                            op: lir::BinaryOp::Sub,
-                            op1: lir::Constant::Integer(0).try_into_typed(rhs.ty())?,
-                            op2: rhs,
-                        }
-                        .try_into()?,
-                    )?;
-                    lir::RawYieldingInstruction::GetElementPtr {
-                        ty: self.ctype_ptr_inner_to_llvm_type(&lhs_node.ty)?,
-                        ptrval: lhs,
-                        index: neg_index,
-                    }
+                (Primitive::Pointer(ptr1), Primitive::Pointer(ptr2)) => {
+                    let to_ty: lir::ty::Integer =
+                        self.ctype_to_llvm_type(&outer_node.ty).try_into()?;
+                    let operand1 =
+                        self.function
+                            .add_instruction(lir::instruction::cast::PtrToInt {
+                                value: ptr1,
+                                to_ty: to_ty.clone(),
+                            })?;
+                    let operand2 = self
+                        .function
+                        .add_instruction(lir::instruction::cast::PtrToInt { value: ptr2, to_ty })?;
+                    let byte_diff =
+                        self.function
+                            .add_instruction(lir::instruction::binary_op::Int {
+                                operator: lir::instruction::BinaryIntOp::Sub,
+                                operand1,
+                                operand2,
+                            })?;
+                    let ptr_size = self.retrieve_ptr_size(byte_diff.ty())?;
+                    let element_diff =
+                        self.function
+                            .add_instruction(lir::instruction::binary_op::Int {
+                                operator: lir::instruction::BinaryIntOp::Sdiv,
+                                operand1: byte_diff.into(),
+                                operand2: ptr_size,
+                            })?;
+                    let out_ty: lir::ty::Integer =
+                        self.ctype_to_llvm_type(&outer_node.ty).try_into()?;
+                    self.add_int_cast(element_diff.into(), out_ty, true)
+                        .map(Into::into)
                 }
                 _ => unreachable!(),
-            };
-
-            self.function_mut()
-                .add_yielding_instruction(instr.try_into()?)
+            }
         }
 
         fn add_binary_mul_expr_node(
             &mut self,
             lhs_node: &ir::ExprNode,
             rhs_node: &ir::ExprNode,
-        ) -> LlvmResult {
-            let op1 = self.add_expr_node(lhs_node)?;
-            let op2 = self.add_expr_node(rhs_node)?;
+        ) -> Result<lir::value::Primitive> {
+            let lhs = self.add_expr_node(lhs_node)?.try_into()?;
+            let rhs = self.add_expr_node(rhs_node)?.try_into()?;
 
-            use lir::ty::TypeCat;
-            let op = match (op1.ty().to_type_cat(), op2.ty().to_type_cat()) {
-                (TypeCat::Integer, TypeCat::Integer) => lir::BinaryOp::Mul,
-                (TypeCat::FloatingPoint, TypeCat::FloatingPoint) => lir::BinaryOp::Fmul,
+            use lir::value::Primitive;
+            match (lhs, rhs) {
+                (Primitive::Integer(operand1), Primitive::Integer(operand2)) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Int {
+                        operator: lir::instruction::BinaryIntOp::Mul,
+                        operand1,
+                        operand2,
+                    })
+                    .map(Into::into),
+                (Primitive::FloatingPoint(operand1), Primitive::FloatingPoint(operand2)) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Fp {
+                        operator: lir::instruction::BinaryFpOp::Fmul,
+                        operand1,
+                        operand2,
+                    })
+                    .map(Into::into),
                 _ => unreachable!(),
-            };
-
-            let instr = lir::RawYieldingInstruction::BinaryOp { op, op1, op2 };
-
-            self.function_mut()
-                .add_yielding_instruction(instr.try_into()?)
+            }
         }
 
         fn add_binary_div_expr_node(
@@ -549,27 +647,38 @@ mod llvm_ir_builder {
             outer_node: &ir::ExprNode,
             lhs_node: &ir::ExprNode,
             rhs_node: &ir::ExprNode,
-        ) -> LlvmResult {
-            let op1 = self.add_expr_node(lhs_node)?;
-            let op2 = self.add_expr_node(rhs_node)?;
+        ) -> Result<lir::value::Primitive> {
+            let lhs = self.add_expr_node(lhs_node)?.try_into()?;
+            let rhs = self.add_expr_node(rhs_node)?.try_into()?;
 
-            use lir::ty::TypeCat;
-            let op = match (op1.ty().to_type_cat(), op2.ty().to_type_cat()) {
-                (TypeCat::Integer, TypeCat::Integer) => match outer_node.ty {
-                    ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => match a.is_signed() {
-                        true => lir::BinaryOp::Sdiv,
-                        false => lir::BinaryOp::Udiv,
-                    },
-                    _ => unreachable!(),
-                },
-                (TypeCat::FloatingPoint, TypeCat::FloatingPoint) => lir::BinaryOp::Fdiv,
+            use lir::value::Primitive;
+            match (lhs, rhs) {
+                (Primitive::Integer(operand1), Primitive::Integer(operand2)) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Int {
+                        operator: match outer_node.ty {
+                            ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
+                                match a.is_signed() {
+                                    true => lir::instruction::BinaryIntOp::Sdiv,
+                                    false => lir::instruction::BinaryIntOp::Udiv,
+                                }
+                            }
+                            _ => unreachable!(),
+                        },
+                        operand1,
+                        operand2,
+                    })
+                    .map(Into::into),
+                (Primitive::FloatingPoint(operand1), Primitive::FloatingPoint(operand2)) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Fp {
+                        operator: lir::instruction::BinaryFpOp::Fdiv,
+                        operand1,
+                        operand2,
+                    })
+                    .map(Into::into),
                 _ => unreachable!(),
-            };
-
-            let instr = lir::RawYieldingInstruction::BinaryOp { op, op1, op2 };
-
-            self.function_mut()
-                .add_yielding_instruction(instr.try_into()?)
+            }
         }
 
         fn add_binary_rem_expr_node(
@@ -577,40 +686,56 @@ mod llvm_ir_builder {
             outer_node: &ir::ExprNode,
             lhs_node: &ir::ExprNode,
             rhs_node: &ir::ExprNode,
-        ) -> LlvmResult {
-            let op1 = self.add_expr_node(lhs_node)?;
-            let op2 = self.add_expr_node(rhs_node)?;
+        ) -> Result<lir::value::Primitive> {
+            let lhs = self.add_expr_node(lhs_node)?.try_into()?;
+            let rhs = self.add_expr_node(rhs_node)?.try_into()?;
 
-            use lir::ty::TypeCat;
-            let op = match (op1.ty().to_type_cat(), op2.ty().to_type_cat()) {
-                (TypeCat::Integer, TypeCat::Integer) => match outer_node.ty {
-                    ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => match a.is_signed() {
-                        true => lir::BinaryOp::Srem,
-                        false => lir::BinaryOp::Urem,
-                    },
-                    _ => unreachable!(),
-                },
-                (TypeCat::FloatingPoint, TypeCat::FloatingPoint) => lir::BinaryOp::Frem,
+            use lir::value::Primitive;
+            match (lhs, rhs) {
+                (Primitive::Integer(operand1), Primitive::Integer(operand2)) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Int {
+                        operator: match outer_node.ty {
+                            ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
+                                match a.is_signed() {
+                                    true => lir::instruction::BinaryIntOp::Srem,
+                                    false => lir::instruction::BinaryIntOp::Urem,
+                                }
+                            }
+                            _ => unreachable!(),
+                        },
+                        operand1,
+                        operand2,
+                    })
+                    .map(Into::into),
+                (Primitive::FloatingPoint(operand1), Primitive::FloatingPoint(operand2)) => self
+                    .function
+                    .add_instruction(lir::instruction::binary_op::Fp {
+                        operator: lir::instruction::BinaryFpOp::Frem,
+                        operand1,
+                        operand2,
+                    })
+                    .map(Into::into),
                 _ => unreachable!(),
-            };
-
-            let instr = lir::RawYieldingInstruction::BinaryOp { op, op1, op2 };
-
-            self.function_mut()
-                .add_yielding_instruction(instr.try_into()?)
+            }
         }
 
         fn add_binary_integer_instruction(
             &mut self,
-            op: lir::BinaryOp,
+            operator: lir::instruction::BinaryIntOp,
             lhs: &ir::ExprNode,
             rhs: &ir::ExprNode,
-        ) -> LlvmResult {
-            let op1 = self.add_expr_node(lhs)?;
-            let op2 = self.add_expr_node(rhs)?;
-            let instr = lir::RawYieldingInstruction::BinaryOp { op, op1, op2 };
-            self.function_mut()
-                .add_yielding_instruction(instr.try_into()?)
+        ) -> Result<lir::value::Integer> {
+            let operand1 = self.add_expr_node(lhs)?.try_into()?;
+            let operand2 = self.add_expr_node(rhs)?.try_into()?;
+
+            self.function
+                .add_instruction(lir::instruction::binary_op::Int::<lir::value::Integer> {
+                    operator,
+                    operand1,
+                    operand2,
+                })
+                .map(Into::into)
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
@@ -623,49 +748,53 @@ mod llvm_ir_builder {
             relation_op: &ir::RelationOp,
             lhs_node: &ir::ExprNode,
             rhs_node: &ir::ExprNode,
-        ) -> LlvmResult {
-            let op1 = self.add_expr_node(lhs_node)?;
-            let op2 = self.add_expr_node(rhs_node)?;
+        ) -> Result<lir::value::Integer> {
+            let lhs = self.add_expr_node(lhs_node)?.try_into()?;
+            let rhs = self.add_expr_node(rhs_node)?.try_into()?;
 
-            use lir::ty::TypeCat;
-            let op = match (op1.ty().to_type_cat(), op2.ty().to_type_cat()) {
-                (TypeCat::Integer, TypeCat::Integer) | (TypeCat::Ptr, TypeCat::Ptr) => {
+            use lir::value::Primitive;
+            let boolean = match (lhs, rhs) {
+                (Primitive::Integer(operand1), Primitive::Integer(operand2)) => {
                     let signed = self.is_ctype_signed(&lhs_node.ty)?;
-                    lir::CompareOp::Icmp(match (relation_op, signed) {
-                        (ir::RelationOp::Eq, _) => lir::IcmpCond::Eq,
-                        (ir::RelationOp::Ne, _) => lir::IcmpCond::Ne,
-                        (ir::RelationOp::Lt, true) => lir::IcmpCond::Slt,
-                        (ir::RelationOp::Gt, true) => lir::IcmpCond::Sgt,
-                        (ir::RelationOp::Ge, true) => lir::IcmpCond::Sge,
-                        (ir::RelationOp::Le, true) => lir::IcmpCond::Sle,
-                        (ir::RelationOp::Lt, false) => lir::IcmpCond::Ult,
-                        (ir::RelationOp::Gt, false) => lir::IcmpCond::Ugt,
-                        (ir::RelationOp::Ge, false) => lir::IcmpCond::Uge,
-                        (ir::RelationOp::Le, false) => lir::IcmpCond::Ule,
-                    })
+                    let operator = match (relation_op, signed) {
+                        (ir::RelationOp::Eq, _) => lir::instruction::IcmpCond::Eq,
+                        (ir::RelationOp::Ne, _) => lir::instruction::IcmpCond::Ne,
+                        (ir::RelationOp::Lt, true) => lir::instruction::IcmpCond::Slt,
+                        (ir::RelationOp::Gt, true) => lir::instruction::IcmpCond::Sgt,
+                        (ir::RelationOp::Ge, true) => lir::instruction::IcmpCond::Sge,
+                        (ir::RelationOp::Le, true) => lir::instruction::IcmpCond::Sle,
+                        (ir::RelationOp::Lt, false) => lir::instruction::IcmpCond::Ult,
+                        (ir::RelationOp::Gt, false) => lir::instruction::IcmpCond::Ugt,
+                        (ir::RelationOp::Ge, false) => lir::instruction::IcmpCond::Uge,
+                        (ir::RelationOp::Le, false) => lir::instruction::IcmpCond::Ule,
+                    };
+                    self.function
+                        .add_instruction(lir::instruction::compare::Int {
+                            operator,
+                            operand1,
+                            operand2,
+                        })
                 }
-                (TypeCat::FloatingPoint, TypeCat::FloatingPoint) => {
-                    lir::CompareOp::Fcmp(match relation_op {
-                        ir::RelationOp::Eq => lir::FcmpCond::Oeq,
-                        ir::RelationOp::Ne => lir::FcmpCond::One,
-                        ir::RelationOp::Lt => lir::FcmpCond::Olt,
-                        ir::RelationOp::Gt => lir::FcmpCond::Ogt,
-                        ir::RelationOp::Ge => lir::FcmpCond::Oge,
-                        ir::RelationOp::Le => lir::FcmpCond::Ole,
-                    })
+                (Primitive::FloatingPoint(operand1), Primitive::FloatingPoint(operand2)) => {
+                    let operator = match relation_op {
+                        ir::RelationOp::Eq => lir::instruction::FcmpCond::Oeq,
+                        ir::RelationOp::Ne => lir::instruction::FcmpCond::One,
+                        ir::RelationOp::Lt => lir::instruction::FcmpCond::Olt,
+                        ir::RelationOp::Gt => lir::instruction::FcmpCond::Ogt,
+                        ir::RelationOp::Ge => lir::instruction::FcmpCond::Oge,
+                        ir::RelationOp::Le => lir::instruction::FcmpCond::Ole,
+                    };
+                    self.function
+                        .add_instruction(lir::instruction::compare::Fp {
+                            operator,
+                            operand1,
+                            operand2,
+                        })
                 }
                 _ => unreachable!(),
             };
 
-            let cmp_instr = lir::RawYieldingInstruction::Compare { op, op1, op2 };
-
-            let result = self
-                .function
-                .as_mut()
-                .unwrap()
-                .add_yielding_instruction(cmp_instr.try_into()?)?;
-
-            self.add_cast_from_bool_to_arithmetic_ctype(result, &outer_node.ty)
+            self.add_cast_from_bool_to_integer_ctype(boolean?.into(), &outer_node.ty)
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
@@ -677,12 +806,12 @@ mod llvm_ir_builder {
             outer_node: &ir::ExprNode,
             lhs_node: &ir::ExprNode,
             rhs_node: &ir::ExprNode,
-        ) -> LlvmResult {
+        ) -> Result<lir::value::Integer> {
             // Create a label placeholder for the block were execution continues hereafter
-            let label_continue = self.function_mut().create_label_placeholder();
+            let label_continue = self.function.declare_block();
             // Create a label placeholder for the block that will execute rhs (will only be branched
-            // to of the lhs was falsy)
-            let label_execute_rhs = self.function_mut().create_label_placeholder();
+            // to of the lhs was truthy)
+            let label_execute_rhs = self.function.declare_block();
 
             // Execute & check lhs
             let lhs_result = {
@@ -690,24 +819,19 @@ mod llvm_ir_builder {
                 self.add_truthy_check(res)?
             };
 
-            // Skip the execution of the rhs if the lhs is falsy
-            let branch_instr = lir::RawTerminatorInstruction::BranchConditional {
-                cond: lhs_result,
-                if_dest: label_execute_rhs.clone().into(),
-                else_dest: label_continue.clone().into(),
-            };
-
             // The label of the block containing the last instruction of the computation of the lhs,
-            // that will end with the conditional branch specified above.
-            let label_end_lhs = self.function_ref().current_block_label();
+            // that will end with the conditional branch specified below.
+            let label_end_lhs = self.function.get_or_set_block_label();
 
-            self.function = Some(
-                self.function
-                    .take()
-                    .unwrap()
-                    .terminate_block(branch_instr.try_into()?)?
-                    .start_block_with_label(label_execute_rhs.into())?,
-            );
+            // Skip the execution of the rhs if the lhs is falsy
+            self.function
+                .terminate_block(lir::instruction::BranchConditional {
+                    cond: lhs_result,
+                    dest_true: label_execute_rhs.clone(),
+                    dest_false: label_continue.clone(),
+                })?;
+
+            self.function.start_block(label_execute_rhs);
 
             // Execute & check rhs
             let rhs_result = {
@@ -717,35 +841,20 @@ mod llvm_ir_builder {
 
             // The label of the block containing the last instructionn of the computation of the
             // rhs, that will end with the unconditional branch specified below.
-            let label_end_rhs = self.function_ref().current_block_label();
+            let label_end_rhs = self.function.get_or_set_block_label();
 
-            self.function = Some(
-                self.function
-                    .take()
-                    .unwrap()
-                    .terminate_block(
-                        lir::RawTerminatorInstruction::BranchUnconditional(
-                            label_continue.clone().into(),
-                        )
-                        .try_into()?,
-                    )?
-                    .start_block_with_label(label_continue.into())?,
-            );
+            self.function.terminate_block(lir::instruction::Branch {
+                dest: label_continue.clone(),
+            })?;
 
-            let result = self.function_mut().add_yielding_instruction(
-                lir::RawYieldingInstruction::Phi {
-                    args: vec![
-                        (
-                            lir::Constant::Boolean(false).try_into_typed(lir::ty::I1.into())?,
-                            label_end_lhs,
-                        ),
-                        (rhs_result, label_end_rhs),
-                    ],
-                }
-                .try_into()?,
-            )?;
+            self.function.start_block(label_continue);
 
-            self.add_cast_from_bool_to_arithmetic_ctype(result, &outer_node.ty)
+            let result = self.function.add_instruction(lir::instruction::Phi {
+                head: (lir::constant::Boolean::new(false).into(), label_end_lhs),
+                tail: vec![(rhs_result, label_end_rhs)],
+            })?;
+
+            self.add_cast_from_bool_to_integer_ctype(result.into(), &outer_node.ty)
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
@@ -757,12 +866,12 @@ mod llvm_ir_builder {
             outer_node: &ir::ExprNode,
             lhs_node: &ir::ExprNode,
             rhs_node: &ir::ExprNode,
-        ) -> LlvmResult {
+        ) -> Result<lir::value::Integer> {
             // Create a label placeholder for the block were execution continues hereafter
-            let label_continue = self.function_mut().create_label_placeholder();
+            let label_continue = self.function.declare_block();
             // Create a label placeholder for the block that will execute rhs (will only be branched
             // to of the lhs was falsy)
-            let label_execute_rhs = self.function_mut().create_label_placeholder();
+            let label_execute_rhs = self.function.declare_block();
 
             // Execute & check lhs
             let lhs_result = {
@@ -770,24 +879,19 @@ mod llvm_ir_builder {
                 self.add_truthy_check(res)?
             };
 
-            // Skip the execution of the rhs if the lhs is truthy
-            let branch_instr = lir::RawTerminatorInstruction::BranchConditional {
-                cond: lhs_result,
-                if_dest: label_continue.clone().into(),
-                else_dest: label_execute_rhs.clone().into(),
-            };
-
             // The label of the block containing the last instruction of the computation of the lhs,
-            // that will end with the conditional branch specified above.
-            let label_end_lhs = self.function_ref().current_block_label();
+            // that will end with the conditional branch specified below.
+            let label_end_lhs = self.function.get_or_set_block_label();
 
-            self.function = Some(
-                self.function
-                    .take()
-                    .unwrap()
-                    .terminate_block(branch_instr.try_into()?)?
-                    .start_block_with_label(label_execute_rhs.into())?,
-            );
+            // Skip the execution of the rhs if the lhs is truthy
+            self.function
+                .terminate_block(lir::instruction::BranchConditional {
+                    cond: lhs_result,
+                    dest_true: label_continue.clone(),
+                    dest_false: label_execute_rhs.clone(),
+                })?;
+
+            self.function.start_block(label_execute_rhs);
 
             // Execute & check rhs
             let rhs_result = {
@@ -797,342 +901,300 @@ mod llvm_ir_builder {
 
             // The label of the block containing the last instructionn of the computation of the
             // rhs, that will end with the unconditional branch specified below.
-            let label_end_rhs = self.function_ref().current_block_label();
+            let label_end_rhs = self.function.get_or_set_block_label();
 
-            self.function = Some(
-                self.function
-                    .take()
-                    .unwrap()
-                    .terminate_block(
-                        lir::RawTerminatorInstruction::BranchUnconditional(
-                            label_continue.clone().into(),
-                        )
-                        .try_into()?,
-                    )?
-                    .start_block_with_label(label_continue.into())?,
-            );
+            self.function.terminate_block(lir::instruction::Branch {
+                dest: label_continue.clone(),
+            })?;
 
-            let result = self.function_mut().add_yielding_instruction(
-                lir::RawYieldingInstruction::Phi {
-                    args: vec![
-                        (
-                            lir::Constant::Boolean(true).try_into_typed(lir::ty::I1.into())?,
-                            label_end_lhs,
-                        ),
-                        (rhs_result, label_end_rhs),
-                    ],
+            self.function.start_block(label_continue);
+
+            let result = self.function.add_instruction(lir::instruction::Phi {
+                head: (lir::constant::Boolean::new(true).into(), label_end_lhs),
+                tail: vec![(rhs_result, label_end_rhs)],
+            })?;
+
+            self.add_cast_from_bool_to_integer_ctype(result.into(), &outer_node.ty)
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////////////////
+        // Prefix increment & decrement, Postfix increment & decrement
+        ////////////////////////////////////////////////////////////////////////////////////////////
+
+        fn add_prefix_inc_expr_node(
+            &mut self,
+            lvalue_node: &ir::LvalueExprNode,
+        ) -> Result<lir::value::Primitive> {
+            use lir::instruction::{BinaryFpOp as FpOp, BinaryIntOp as IntOp};
+            self.add_prepostfix_incdec_expr_node(lvalue_node, IntOp::Add, 1, FpOp::Fadd, 1., 1)
+                .map(|(_, new_value)| new_value)
+        }
+
+        fn add_prefix_dec_expr_node(
+            &mut self,
+            lvalue_node: &ir::LvalueExprNode,
+        ) -> Result<lir::value::Primitive> {
+            use lir::instruction::{BinaryFpOp as FpOp, BinaryIntOp as IntOp};
+            self.add_prepostfix_incdec_expr_node(lvalue_node, IntOp::Sub, 1, FpOp::Fsub, 1., -1)
+                .map(|(_, new_value)| new_value)
+        }
+
+        fn add_postfix_inc_expr_node(
+            &mut self,
+            lvalue_node: &ir::LvalueExprNode,
+        ) -> Result<lir::value::Primitive> {
+            use lir::instruction::{BinaryFpOp as FpOp, BinaryIntOp as IntOp};
+            self.add_prepostfix_incdec_expr_node(lvalue_node, IntOp::Add, 1, FpOp::Fadd, 1., 1)
+                .map(|(value, _)| value)
+        }
+
+        fn add_postfix_dec_expr_node(
+            &mut self,
+            lvalue_node: &ir::LvalueExprNode,
+        ) -> Result<lir::value::Primitive> {
+            use lir::instruction::{BinaryFpOp as FpOp, BinaryIntOp as IntOp};
+            self.add_prepostfix_incdec_expr_node(lvalue_node, IntOp::Sub, 1, FpOp::Fsub, 1., -1)
+                .map(|(value, _)| value)
+        }
+
+        fn add_prepostfix_incdec_expr_node(
+            &mut self,
+            lvalue_node: &ir::LvalueExprNode,
+            int_op: lir::instruction::BinaryIntOp,
+            int_constant: i128,
+            fp_op: lir::instruction::BinaryFpOp,
+            fp_constant: f32,
+            ptr_offset: i128,
+        ) -> Result<(lir::value::Primitive, lir::value::Primitive)> {
+            let value_ty: lir::ty::Primitive =
+                self.ctype_to_llvm_type(&lvalue_node.ty).try_into()?;
+            let pointer = self.add_reference_lvalue_node(lvalue_node)?;
+            let value: lir::value::Primitive =
+                self.add_load_from_ptr(pointer.clone(), value_ty)?.into();
+
+            use lir::value::Primitive;
+            let new_value: lir::value::Primitive = match value.clone() {
+                Primitive::Integer(integer) => {
+                    let operand2 = lir::constant::Integer::new(integer.ty(), int_constant).into();
+                    self.function
+                        .add_instruction(lir::instruction::binary_op::Int {
+                            operator: int_op,
+                            operand1: integer,
+                            operand2,
+                        })?
+                        .into()
                 }
-                .try_into()?,
-            )?;
-
-            self.add_cast_from_bool_to_arithmetic_ctype(result, &outer_node.ty)
-        }
-
-        ////////////////////////////////////////////////////////////////////////////////////////////
-        // Prefix increment
-        ////////////////////////////////////////////////////////////////////////////////////////////
-
-        fn add_prefix_inc_expr_node(&mut self, lvalue_node: &ir::LvalueExprNode) -> LlvmResult {
-            let value_ty = self.ctype_to_llvm_type(&lvalue_node.ty);
-            let pointer = self.add_reference_lvalue_node(lvalue_node)?;
-            let value = self.add_load_from_ptr(pointer.clone(), value_ty)?;
-
-            use lir::ty::TypeCat;
-            let inc_instr = match value.ty().to_type_cat() {
-                TypeCat::Integer => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Add,
-                    op1: lir::Constant::Integer(1).try_into_typed(value.ty())?,
-                    op2: value,
-                },
-                TypeCat::FloatingPoint => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Fadd,
-                    op1: lir::Constant::FloatingPoint(1.).try_into_typed(value.ty())?,
-                    op2: value,
-                },
-                TypeCat::Ptr => lir::RawYieldingInstruction::GetElementPtr {
-                    ty: self.ctype_ptr_inner_to_llvm_type(&lvalue_node.ty)?,
-                    ptrval: value,
-                    index: lir::Constant::Integer(1).try_into_typed(lir::ty::I32.into())?,
-                },
-                _ => unreachable!(),
+                Primitive::FloatingPoint(fp) => {
+                    let operand2 = match fp.ty() {
+                        lir::ty::FloatingPoint::Float(_) => {
+                            lir::constant::FloatingPoint::new_float(fp_constant).into()
+                        }
+                        lir::ty::FloatingPoint::Double(_) => {
+                            lir::constant::FloatingPoint::new_double(fp_constant as _).into()
+                        }
+                        _ => unreachable!(),
+                    };
+                    self.function
+                        .add_instruction(lir::instruction::binary_op::Fp {
+                            operator: fp_op,
+                            operand1: fp,
+                            operand2,
+                        })?
+                        .into()
+                }
+                Primitive::Pointer(pointer) => self
+                    .function
+                    .add_instruction(lir::instruction::GetElementPtr {
+                        ty: self.ctype_ptr_inner_to_llvm_type(&lvalue_node.ty)?,
+                        pointer,
+                        indices: vec![lir::constant::Integer::new(lir::ty::I32, ptr_offset).into()],
+                    })?
+                    .into(),
             };
 
-            let incremented_value = self
-                .function_mut()
-                .add_yielding_instruction(inc_instr.try_into()?)?;
+            self.function
+                .add_void_instruction(lir::instruction::Store {
+                    value: new_value.clone(),
+                    pointer,
+                })?;
 
-            let store_instr = lir::RawYieldlessInstruction::Store {
-                value: incremented_value.clone(),
-                pointer,
-            };
-
-            self.function_mut()
-                .add_yieldless_instruction(store_instr.try_into()?);
-
-            Ok(incremented_value)
-        }
-
-        ////////////////////////////////////////////////////////////////////////////////////////////
-        // Prefix decrement
-        ////////////////////////////////////////////////////////////////////////////////////////////
-
-        fn add_prefix_dec_expr_node(&mut self, lvalue_node: &ir::LvalueExprNode) -> LlvmResult {
-            let value_ty = self.ctype_to_llvm_type(&lvalue_node.ty);
-            let pointer = self.add_reference_lvalue_node(lvalue_node)?;
-            let value = self.add_load_from_ptr(pointer.clone(), value_ty)?;
-
-            use lir::ty::TypeCat;
-            let inc_instr = match value.ty().to_type_cat() {
-                TypeCat::Integer => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Sub,
-                    op1: value,
-                    op2: lir::Constant::Integer(1).try_into_typed(value_ty)?,
-                },
-                TypeCat::FloatingPoint => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Fsub,
-                    op1: value,
-                    op2: lir::Constant::FloatingPoint(1.).try_into_typed(value_ty)?,
-                },
-                TypeCat::Ptr => lir::RawYieldingInstruction::GetElementPtr {
-                    ty: self.ctype_ptr_inner_to_llvm_type(&lvalue_node.ty)?,
-                    ptrval: value,
-                    index: lir::Constant::Integer(-1).try_into_typed(lir::ty::I32.into())?,
-                },
-                _ => unreachable!(),
-            };
-
-            let decremented_value = self
-                .function_mut()
-                .add_yielding_instruction(inc_instr.try_into()?)?;
-
-            let store_instr = lir::RawYieldlessInstruction::Store {
-                value: decremented_value.clone(),
-                pointer,
-            };
-
-            self.function_mut()
-                .add_yieldless_instruction(store_instr.try_into()?);
-
-            Ok(decremented_value)
-        }
-
-        ////////////////////////////////////////////////////////////////////////////////////////////
-        // Postfix increment
-        ////////////////////////////////////////////////////////////////////////////////////////////
-
-        fn add_postfix_inc_expr_node(&mut self, lvalue_node: &ir::LvalueExprNode) -> LlvmResult {
-            let value_ty = self.ctype_to_llvm_type(&lvalue_node.ty);
-            let pointer = self.add_reference_lvalue_node(lvalue_node)?;
-            let value = self.add_load_from_ptr(pointer.clone(), value_ty)?;
-
-            use lir::ty::TypeCat;
-            let inc_instr = match value.ty().to_type_cat() {
-                TypeCat::Integer => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Add,
-                    op1: lir::Constant::Integer(1).try_into_typed(value.ty())?,
-                    op2: value.clone(),
-                },
-                TypeCat::FloatingPoint => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Fadd,
-                    op1: lir::Constant::FloatingPoint(1.).try_into_typed(value.ty())?,
-                    op2: value.clone(),
-                },
-                TypeCat::Ptr => lir::RawYieldingInstruction::GetElementPtr {
-                    ty: self.ctype_ptr_inner_to_llvm_type(&lvalue_node.ty)?,
-                    ptrval: value.clone(),
-                    index: lir::Constant::Integer(1).try_into_typed(lir::ty::I32.into())?,
-                },
-                _ => unreachable!(),
-            };
-
-            let incremented_value = self
-                .function_mut()
-                .add_yielding_instruction(inc_instr.try_into()?)?;
-
-            let store_instr = lir::RawYieldlessInstruction::Store {
-                value: incremented_value,
-                pointer,
-            };
-
-            self.function_mut()
-                .add_yieldless_instruction(store_instr.try_into()?);
-
-            Ok(value)
-        }
-
-        ////////////////////////////////////////////////////////////////////////////////////////////
-        // Postfix decrement
-        ////////////////////////////////////////////////////////////////////////////////////////////
-
-        fn add_postfix_dec_expr_node(&mut self, lvalue_node: &ir::LvalueExprNode) -> LlvmResult {
-            let value_ty = self.ctype_to_llvm_type(&lvalue_node.ty);
-            let pointer = self.add_reference_lvalue_node(lvalue_node)?;
-            let value = self.add_load_from_ptr(pointer.clone(), value_ty)?;
-
-            use lir::ty::TypeCat;
-            let inc_instr = match value.ty().to_type_cat() {
-                TypeCat::Integer => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Sub,
-                    op1: value.clone(),
-                    op2: lir::Constant::Integer(1).try_into_typed(value_ty)?,
-                },
-                TypeCat::FloatingPoint => lir::RawYieldingInstruction::BinaryOp {
-                    op: lir::BinaryOp::Fsub,
-                    op1: value.clone(),
-                    op2: lir::Constant::FloatingPoint(1.).try_into_typed(value_ty)?,
-                },
-                TypeCat::Ptr => lir::RawYieldingInstruction::GetElementPtr {
-                    ty: self.ctype_ptr_inner_to_llvm_type(&lvalue_node.ty)?,
-                    ptrval: value.clone(),
-                    index: lir::Constant::Integer(-1).try_into_typed(lir::ty::I32.into())?,
-                },
-                _ => unreachable!(),
-            };
-
-            let decremented_value = self
-                .function_mut()
-                .add_yielding_instruction(inc_instr.try_into()?)?;
-
-            let store_instr = lir::RawYieldlessInstruction::Store {
-                value: decremented_value,
-                pointer,
-            };
-
-            self.function_mut()
-                .add_yieldless_instruction(store_instr.try_into()?);
-
-            Ok(value)
+            Ok((value, new_value))
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
         // Utility methods
         ////////////////////////////////////////////////////////////////////////////////////////////
 
-        fn cast_ptr_to_int(&mut self, ptr: lir::TypedValue, int_ty: lir::ty::Type) -> LlvmResult {
-            self.function_mut().add_yielding_instruction(
-                lir::RawYieldingInstruction::Cast {
-                    op: lir::CastOp::Ptrtoint,
-                    value: ptr,
-                    to_ty: int_ty,
-                }
-                .try_into()?,
-            )
-        }
-
-        fn cast_int_to_prt(&mut self, int: lir::TypedValue, ptr_ty: lir::ty::Type) -> LlvmResult {
-            self.function_mut().add_yielding_instruction(
-                lir::RawYieldingInstruction::Cast {
-                    op: lir::CastOp::Inttoptr,
-                    value: int,
-                    to_ty: ptr_ty,
-                }
-                .try_into()?,
-            )
-        }
-
         /// Adds a cast instruction from the boolean to the llvm type corresponding to the ctype.
         /// Doesn't insert a cast if the ctype is `1` bit wide.
         ///
-        /// Assumes a non-arithmetic ctype is unreachable.
+        /// Assumes a non-integer ctype is unreachable.
         ///
-        /// Returns the tyval from the inserted cast, or the original bool_tyval if no cast was
+        /// Returns the boolean value from the inserted cast, or the original boolean if no cast was
         /// inserted.
-        fn add_cast_from_bool_to_arithmetic_ctype(
+        fn add_cast_from_bool_to_integer_ctype(
             &mut self,
-            bool_tyval: lir::TypedValue,
+            boolean: lir::value::Boolean,
             ctype: &ctype::CType,
-        ) -> LlvmResult {
+        ) -> Result<lir::value::Integer> {
             match ctype {
                 ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
                     let target_bit_size = a.size_in_bits();
                     if target_bit_size != 1 {
-                        let cast_instr = lir::RawYieldingInstruction::Cast {
-                            op: lir::CastOp::Zext,
-                            value: bool_tyval,
-                            to_ty: lir::ty::Int(target_bit_size).into(),
-                        };
                         return self
                             .function
-                            .as_mut()
-                            .unwrap()
-                            .add_yielding_instruction(cast_instr.try_into()?);
+                            .add_instruction(lir::instruction::cast::ZextInt {
+                                value: boolean,
+                                to_ty: lir::ty::Integer::new_literal(target_bit_size)?,
+                            })
+                            .map(Into::into);
                     }
                 }
                 ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => unreachable!(),
             }
-            Ok(bool_tyval)
+            Ok(boolean.into())
+        }
+
+        fn add_int_cast(
+            &mut self,
+            value: lir::value::Integer,
+            to_ty: lir::ty::Integer,
+            sign_extend: bool,
+        ) -> Result<lir::value::Integer> {
+            match value.ty().bit_size().cmp(&to_ty.bit_size()) {
+                std::cmp::Ordering::Less => match sign_extend {
+                    true => self
+                        .function
+                        .add_instruction(lir::instruction::cast::SextInt { value, to_ty })
+                        .map(Into::into),
+                    false => self
+                        .function
+                        .add_instruction(lir::instruction::cast::ZextInt { value, to_ty })
+                        .map(Into::into),
+                },
+                std::cmp::Ordering::Equal => Ok(value),
+                std::cmp::Ordering::Greater => self
+                    .function
+                    .add_instruction(lir::instruction::cast::TruncInt { value, to_ty })
+                    .map(Into::into),
+            }
         }
 
         /// Returns an `i1` which is `true` if the inner is truthy (according to c).
-        fn add_truthy_check(&mut self, inner: lir::TypedValue) -> LlvmResult {
-            if inner.ty() == lir::ty::I1.into() {
-                return Ok(inner);
+        fn add_truthy_check(&mut self, inner: lir::value::Element) -> Result<lir::value::Boolean> {
+            let inner_ty = inner.ty();
+
+            if inner_ty.equiv_to(&lir::ty::I1.into()) {
+                return Ok(inner.try_into().expect(
+                    "integers with type i1 should be losslessly convertible to boolean values",
+                ));
             }
-            use lir::ty::TypeCat;
-            let cmp_instr = match inner.ty().to_type_cat() {
-                TypeCat::Void => unreachable!(),
-                TypeCat::Integer => lir::RawYieldingInstruction::Compare {
-                    op: lir::CompareOp::Icmp(lir::IcmpCond::Ne),
-                    op1: lir::Constant::Integer(0).try_into_typed(inner.ty())?,
-                    op2: inner,
+
+            use lir::value::{Element, Primitive, Single};
+            match inner {
+                Element::Single(single) => match single {
+                    Single::Primitive(primitive) => match primitive {
+                        Primitive::Integer(integer) => self
+                            .function
+                            .add_instruction(lir::instruction::compare::Int {
+                                operator: lir::instruction::IcmpCond::Ne,
+                                operand1: lir::constant::Integer::new(integer.ty(), 0).into(),
+                                operand2: integer,
+                            })
+                            .map(Into::into),
+                        Primitive::FloatingPoint(fp) => self
+                            .function
+                            .add_instruction(lir::instruction::compare::Fp {
+                                // unordered neq, because NaN is truthy
+                                operator: lir::instruction::FcmpCond::Une,
+                                operand1: lir::constant::FloatingPoint::zero_typed(fp.ty()).into(),
+                                operand2: fp,
+                            })
+                            .map(Into::into),
+                        Primitive::Pointer(ptr) => self
+                            .function
+                            .add_instruction(lir::instruction::compare::Ptr {
+                                operator: lir::instruction::IcmpCond::Ne,
+                                operand1: lir::constant::Pointer::NULL.into(),
+                                operand2: ptr,
+                            })
+                            .map(Into::into),
+                    },
+                    Single::Vector(_) => unreachable!(),
                 },
-                TypeCat::FloatingPoint => lir::RawYieldingInstruction::Compare {
-                    // unordered neq, because NaN is truthy
-                    op: lir::CompareOp::Fcmp(lir::FcmpCond::Une),
-                    op1: lir::Constant::FloatingPoint(0.).try_into_typed(inner.ty())?,
-                    op2: inner,
-                },
-                TypeCat::Ptr => lir::RawYieldingInstruction::Compare {
-                    op: lir::CompareOp::Icmp(lir::IcmpCond::Ne),
-                    op1: lir::Constant::NullPointer.try_into_typed(inner.ty())?,
-                    op2: inner,
-                },
-            };
-            self.function_mut()
-                .add_yielding_instruction(cmp_instr.try_into()?)
+                Element::Aggregate(_) => todo!(),
+            }
         }
 
         /// Returns an `i1` which is `true` if the inner is falsy (according to c).
         ///
         /// Prefer `add_truthy_check` if possible, because it doesn't have to insert an instruction
         /// if the inner type is already `i1`.
-        fn add_falsy_check(&mut self, inner: lir::TypedValue) -> LlvmResult {
-            use lir::ty::TypeCat;
-            let cmp_instr = match inner.ty().to_type_cat() {
-                TypeCat::Void => unreachable!(),
-                TypeCat::Integer => lir::RawYieldingInstruction::Compare {
-                    op: lir::CompareOp::Icmp(lir::IcmpCond::Eq),
-                    op1: lir::Constant::Integer(0).try_into_typed(inner.ty())?,
-                    op2: inner,
+        fn add_falsy_check(&mut self, inner: lir::value::Element) -> Result<lir::value::Boolean> {
+            use lir::value::{Element, Primitive, Single};
+            let cmp_instr: lir::instruction::YieldingInstruction = match inner {
+                Element::Single(single) => match single {
+                    Single::Primitive(primitive) => match primitive {
+                        Primitive::Integer(integer) => lir::instruction::compare::Int {
+                            operator: lir::instruction::IcmpCond::Eq,
+                            operand1: lir::constant::Integer::new(integer.ty(), 0).into(),
+                            operand2: integer,
+                        }
+                        .try_into_()?,
+                        Primitive::FloatingPoint(fp) => lir::instruction::compare::Fp {
+                            // unordered neq, because NaN is truthy
+                            operator: lir::instruction::FcmpCond::Oeq,
+                            operand1: lir::constant::FloatingPoint::zero_typed(fp.ty()).into(),
+                            operand2: fp,
+                        }
+                        .try_into_()?,
+                        Primitive::Pointer(ptr) => lir::instruction::compare::Ptr {
+                            operator: lir::instruction::IcmpCond::Eq,
+                            operand1: lir::constant::Pointer::NULL.into(),
+                            operand2: ptr,
+                        }
+                        .try_into_()?,
+                    },
+                    Single::Vector(_) => unreachable!(),
                 },
-                TypeCat::FloatingPoint => lir::RawYieldingInstruction::Compare {
-                    // ordered eq, because NaN is truthy
-                    op: lir::CompareOp::Fcmp(lir::FcmpCond::Oeq),
-                    op1: lir::Constant::FloatingPoint(0.).try_into_typed(inner.ty())?,
-                    op2: inner,
-                },
-                TypeCat::Ptr => lir::RawYieldingInstruction::Compare {
-                    op: lir::CompareOp::Icmp(lir::IcmpCond::Eq),
-                    op1: lir::Constant::NullPointer.try_into_typed(inner.ty())?,
-                    op2: inner,
-                },
+                Element::Aggregate(_) => todo!(),
             };
-            self.function_mut()
-                .add_yielding_instruction(cmp_instr.try_into()?)
+            Ok(self.function.add_instruction(cmp_instr)?.try_into()?)
         }
 
-        fn add_load_from_ptr(&mut self, pointer: lir::TypedValue, ty: lir::ty::Type) -> LlvmResult {
-            let load_instr = lir::RawYieldingInstruction::Load { ty, pointer }.try_into()?;
-            self.function_mut().add_yielding_instruction(load_instr)
+        fn retrieve_ptr_size(&mut self, size_ty: lir::ty::Integer) -> Result<lir::value::Integer> {
+            let size_as_ptr = self
+                .function
+                .add_instruction(lir::instruction::GetElementPtr {
+                    ty: lir::ty::Pointer::new_literal().build(),
+                    pointer: lir::constant::Pointer::NULL.into(),
+                    indices: vec![lir::constant::Integer::new(lir::ty::I1, 1).into()],
+                })?;
+            self.function
+                .add_instruction(lir::instruction::cast::PtrToInt {
+                    value: size_as_ptr,
+                    to_ty: size_ty,
+                })
+                .map(Into::into)
         }
 
-        fn ctype_to_llvm_type(&self, ctype: &ctype::CType) -> lir::ty::Type {
+        /// Adds an llvm instruction that loads data of the type `ty` at the address `pointer`.
+        fn add_load_from_ptr<T: lir::ty::ElementType>(
+            &mut self,
+            pointer: lir::value::Pointer,
+            ty: T,
+        ) -> Result<lir::value::Register<T>> {
+            self.function
+                .add_instruction(lir::instruction::Load { ty, pointer })
+        }
+
+        fn ctype_to_llvm_type(&self, ctype: &ctype::CType) -> lir::ty::Element {
             match ctype {
                 ctype::CType::Scalar(scalar) => match scalar {
                     ctype::Scalar::Arithmetic(arithmetic) => match arithmetic {
-                        ctype::Arithmetic::Float => lir::ty::Float.into(),
-                        ctype::Arithmetic::Double => lir::ty::Double.into(),
-                        ctype::Arithmetic::LongDouble => lir::ty::Double.into(),
+                        ctype::Arithmetic::Float => lir::ty::Float::new_literal().into(),
+                        ctype::Arithmetic::Double => lir::ty::Double::new_literal().into(),
+                        ctype::Arithmetic::LongDouble => lir::ty::Double::new_literal().into(),
                         ctype::Arithmetic::Char
                         | ctype::Arithmetic::SignedChar
                         | ctype::Arithmetic::SignedShortInt
@@ -1141,28 +1203,32 @@ mod llvm_ir_builder {
                         | ctype::Arithmetic::UnsignedChar
                         | ctype::Arithmetic::UnsignedShortInt
                         | ctype::Arithmetic::UnsignedInt
-                        | ctype::Arithmetic::UnsignedLongInt => {
-                            lir::ty::Int(arithmetic.size_in_bits()).into()
-                        }
+                        | ctype::Arithmetic::UnsignedLongInt => lir::ty::Integer::new_literal(
+                            arithmetic.size_in_bits(),
+                        )
+                        .expect("all c integer bit sizes should be valid llvm integer bit sizes")
+                        .into(),
                     },
-                    ctype::Scalar::Pointer(_, _) => lir::ty::Ptr.into(),
+                    ctype::Scalar::Pointer(_, _) => lir::ty::Pointer::new_literal().build().into(),
                 },
             }
         }
 
         /// Converts a ctype that is known to be a pointer to the llvm equivalent of the type it
         /// points to. Returns an Err(()) if the ctype is not a ptr.
-        fn ctype_ptr_inner_to_llvm_type(&self, ctype: &ctype::CType) -> Result<lir::ty::Type, ()> {
+        fn ctype_ptr_inner_to_llvm_type(&self, ctype: &ctype::CType) -> Result<lir::ty::Element> {
             match ctype {
                 ctype::CType::Scalar(scalar) => match scalar {
-                    ctype::Scalar::Arithmetic(_) => Err(()),
+                    ctype::Scalar::Arithmetic(_) => {
+                        Err("cannot retrieve inner type of non-pointer type")?
+                    }
                     ctype::Scalar::Pointer(inner, _) => Ok(self.ctype_to_llvm_type(inner)),
                 },
             }
         }
 
         /// Treats ptrs as unsigned, will return Err for aggregates
-        fn is_ctype_signed(&self, ctype: &ir::ctype::CType) -> Result<bool, ()> {
+        fn is_ctype_signed(&self, ctype: &ir::ctype::CType) -> Result<bool> {
             match ctype {
                 ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => Ok(a.is_signed()),
                 ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => Ok(false),

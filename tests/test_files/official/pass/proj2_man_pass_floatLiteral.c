@@ -1,4 +1,3 @@
-//ignore
 //output:
 float x = 0.478984;
 float y = 5489451.245847;
