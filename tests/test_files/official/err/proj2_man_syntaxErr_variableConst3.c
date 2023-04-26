@@ -1,2 +1,5 @@
 //fail-any:
-int z const = 875213;
+
+int main() {
+    int z const = 875213;
+}

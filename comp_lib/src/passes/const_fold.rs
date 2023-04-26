@@ -1,6 +1,7 @@
 use crate::ast::{
-    Ast, BinaryOperator, BinaryOperatorNode, BlockStatement, Expression, ExpressionNode, Literal,
-    LiteralNode, Statement, UnaryOperator, UnaryOperatorNode,
+    ArrayDeclaration, Ast, BinaryOperator, BinaryOperatorNode, BlockStatementNode, Declaration,
+    Expression, ExpressionNode, ExternalDeclaration, FunctionDefinition, Literal, LiteralNode,
+    Statement, SwitchStatement, UnaryOperator, UnaryOperatorNode, VariableDeclaration,
 };
 
 pub fn const_fold(ast: &mut Ast) {
@@ -32,12 +33,53 @@ impl Folder {
     }
 
     fn fold(self, ast: &mut Ast) {
-        self.fold_block_statement(&mut ast.global);
+        for external_decl in &mut ast.global_declarations {
+            self.fold_external_declaration(&mut external_decl.data);
+        }
     }
 
-    fn fold_block_statement(&self, bs: &mut BlockStatement) {
+    fn fold_external_declaration(&self, exdecl: &mut ExternalDeclaration) {
+        match exdecl {
+            ExternalDeclaration::FunctionDefinition(FunctionDefinition { body, .. }) => {
+                self.fold_block_statement(body);
+            }
+            ExternalDeclaration::Declaration(decl) => {
+                self.fold_declaration(decl, &None);
+            }
+        }
+    }
+
+    fn fold_declaration<'a>(
+        &self,
+        declaration: &'a mut Declaration,
+        last_assign: &Option<(&'a str, Value)>,
+    ) -> Option<(&'a str, Value)> {
+        match declaration {
+            Declaration::Variable(VariableDeclaration {
+                ident,
+                initializer,
+                is_array,
+                ..
+            }) => {
+                let res = initializer.as_mut().and_then(|initializer| {
+                    self.fold_expr_node(&mut initializer.1, last_assign)
+                        .map(|v| (ident.data.as_str(), v))
+                });
+                if let Some(array) = is_array {
+                    if let ArrayDeclaration::Known(expr) = &mut array.data {
+                        self.fold_expr_node(expr, last_assign);
+                    }
+                    return None;
+                }
+                res
+            }
+            Declaration::FunctionDeclaration(_) => None,
+        }
+    }
+
+    fn fold_block_statement(&self, bs: &mut BlockStatementNode) {
         let mut last_assign = None;
-        for statement in &mut bs.0 {
+        for statement in &mut bs.stmts {
             last_assign = self.fold_statement(&mut statement.data, last_assign);
         }
     }
@@ -48,24 +90,61 @@ impl Folder {
         last_assign: Option<(&'a str, Value)>,
     ) -> Option<(&'a str, Value)> {
         match statement {
-            Statement::Declaration {
-                ident, initializer, ..
-            } => initializer.as_mut().and_then(|initializer| {
-                self.fold_expr_node(&mut initializer.1, &last_assign)
-                    .map(|v| (ident.data.as_str(), v))
-            }),
+            Statement::Declaration(decl) => return self.fold_declaration(decl, &last_assign),
             Statement::Expression(expr_node) => {
                 self.fold_expr_node(expr_node, &last_assign);
-                None
             }
+            Statement::If(i) => {
+                self.fold_expr_node(&mut i.condition, &None);
+                self.fold_block_statement(&mut i.if_body);
+                if let Some(else_body) = &mut i.else_body {
+                    self.fold_block_statement(else_body);
+                }
+            }
+            Statement::Switch(i) => {
+                self.fold_switch(i);
+            }
+            Statement::While(i) => {
+                self.fold_expr_node(&mut i.condition, &None);
+                self.fold_block_statement(&mut i.body);
+            }
+            Statement::For(i) => {
+                if let Some(init) = &mut i.init {
+                    self.fold_statement(&mut init.data, None);
+                }
+                if let Some(condition) = &mut i.condition {
+                    self.fold_expr_node(condition, &None);
+                }
+                if let Some(iter) = &mut i.iter {
+                    self.fold_expr_node(iter, &None);
+                }
+
+                self.fold_block_statement(&mut i.body);
+            }
+            Statement::Break => {}
+            Statement::Continue => {}
+            Statement::Return(_) => {}
             Statement::Printf(expr_node) => {
                 self.fold_expr_node(expr_node, &last_assign);
-                None
             }
             Statement::BlockStatement(bs) => {
                 self.fold_block_statement(bs);
-                None
             }
+        }
+        None
+    }
+
+    fn fold_switch(&self, switch: &mut SwitchStatement) {
+        for case in &mut switch.cases {
+            let body = match case {
+                crate::ast::SwitchCase::Expr(case) => {
+                    self.fold_expr(&mut case.expr.data, &None);
+                    &mut case.body
+                }
+                crate::ast::SwitchCase::Default(case) => &mut case.body,
+            };
+
+            self.fold_block_statement(body);
         }
     }
 
@@ -96,11 +175,27 @@ impl Folder {
                 None // Assignment expression itself is not const-folded
             }
             Expression::Binary(lhs, op, rhs) => self.fold_binary_op(op, lhs, rhs, last_assign),
+            Expression::ArraySubscript(lhs, rhs) => {
+                if let Some(folded) = self.fold_expr(&mut lhs.data, last_assign) {
+                    replace_with_literal(lhs, folded);
+                }
+                if let Some(folded) = self.fold_expr(&mut rhs.data, last_assign) {
+                    replace_with_literal(rhs, folded);
+                }
+                None // ArraySubscript expression itself is not const-folded
+            }
             Expression::Unary(op, expr) => self.fold_unary_op(op, expr, last_assign),
             Expression::Cast(_, expr_node) => {
                 let inner_folded = self.fold_expr(&mut expr_node.data, last_assign)?;
                 replace_with_literal(expr_node, inner_folded);
                 None // Cast expression itself is not const-folded
+            }
+            Expression::FunctionCall(fc) => {
+                for arg in &mut fc.args {
+                    let folded = self.fold_expr(&mut arg.data, last_assign)?;
+                    replace_with_literal(arg, folded);
+                }
+                None // Function call expression itself is not const-folded
             }
             Expression::Literal(lit) => Some(lit.data.into()),
             Expression::Ident(ident) => last_assign

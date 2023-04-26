@@ -128,111 +128,495 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         Self { input }
     }
 
+    fn extract_comments(&self, token_index: isize) -> Option<String> {
+        let comment_tokens = self
+            .input
+            .get_hidden_tokens_to_left(token_index, generated::clexer::COMMENTS as isize);
+
+        if comment_tokens.is_empty() {
+            None
+        } else {
+            Some(join_comment_tokens(comment_tokens.into_iter()))
+        }
+    }
+
     pub fn build_from_translation_unit(
         self,
         ctx: &cst::TranslationUnit,
     ) -> AggregateResult<ast::Ast> {
         let mut res = AggregateResult::new_ok(Vec::with_capacity(ctx.content.len()));
+        let mut include_stdio = None;
 
         for statement in &ctx.content {
-            if let Some(statement) = self.build_from_statement(statement) {
-                statement.add_to(&mut res, |v, s| v.push(s));
+            use cst::ExternalDeclaration;
+            match statement.as_ref() {
+                ExternalDeclaration::ExternalDeclarationStatementContext(decl) => self
+                    .build_from_declaration_statement(decl.value.as_deref().unwrap())
+                    .map(|data| ast::ExternalDeclarationNode {
+                        span: extract_span(decl),
+                        data: ast::ExternalDeclaration::Declaration(data),
+                        comments: None,
+                    })
+                    .add_to(&mut res, |r, s| r.push(s)),
+                ExternalDeclaration::ExternalDeclarationFunctionDefinitionContext(func) => self
+                    .build_from_function_definition(func.value.as_deref().unwrap())
+                    .map(|data| ast::ExternalDeclarationNode {
+                        span: extract_span(func),
+                        data: ast::ExternalDeclaration::FunctionDefinition(data),
+                        comments: None,
+                    })
+                    .add_to(&mut res, |r, s| r.push(s)),
+                ExternalDeclaration::ExternalDeclarationIncludeContext(incl) => {
+                    // TODO: warn when included multiple times
+                    include_stdio = Some(extract_span(incl))
+                }
+                ExternalDeclaration::Error(ectx) => tree_error(ectx),
             }
         }
 
-        res.map(|mut stmts| {
-            stmts.shrink_to_fit();
+        res.map(|mut global_declarations| {
+            global_declarations.shrink_to_fit();
             ast::Ast {
-                global: ast::BlockStatement(stmts),
+                include_stdio,
+                global_declarations,
             }
         })
+    }
+
+    fn build_from_block_item(
+        &self,
+        ctx: &cst::BlockItem,
+    ) -> AggregateResult<Option<ast::StatementNode>> {
+        use cst::BlockItem;
+        match ctx {
+            BlockItem::BlockItemDeclarationContext(decl) => self
+                .build_from_declaration_statement(decl.value.as_deref().unwrap())
+                .map(|data| {
+                    Some(ast::StatementNode {
+                        span: extract_span(ctx),
+                        data: ast::Statement::Declaration(data),
+                        comments: self
+                            .extract_comments(ctx.start().token_index.load(Ordering::Relaxed)),
+                    })
+                }),
+            BlockItem::BlockItemStatementContext(stmt) => self
+                .build_from_statement(stmt.value.as_deref().unwrap())
+                .map(|v| v.ok()),
+            BlockItem::Error(ectx) => tree_error(ectx),
+        }
     }
 
     fn build_from_statement(
         &self,
         ctx: &cst::Statement,
-    ) -> Option<AggregateResult<ast::StatementNode>> {
+    ) -> AggregateResult<Result<ast::StatementNode, Span>> {
         use cst::Statement;
         let data = match ctx {
-            Statement::StatementExprContext(expr) => match expr.value.as_deref() {
-                Some(value) => self.build_from_expr(value).map(ast::Statement::Expression),
-                None => return None,
-            },
-            Statement::StatementDeclarationContext(decl) => {
-                self.build_from_declaration_statement(decl.value.as_deref().unwrap())
+            Statement::StatementExprContext(expr) => self
+                .build_from_expr(expr.value.as_deref().unwrap())
+                .map(ast::Statement::Expression),
+            Statement::StatementSelectionContext(stmt) => {
+                self.build_from_selection_statement(stmt.value.as_deref().unwrap())
+            }
+            Statement::StatementIterationContext(stmt) => {
+                self.build_from_iteration_statement(stmt.value.as_deref().unwrap())
+            }
+            Statement::StatementJumpContext(stmt) => {
+                self.build_from_jump_statement(stmt.value.as_deref().unwrap())
             }
             Statement::StatementPrintfContext(printf) => self
                 .build_from_expr(printf.value.as_deref().unwrap())
                 .map(ast::Statement::Printf),
-            Statement::StatementBlockContext(block) => {
-                self.build_from_block_statement(block.value.as_deref().unwrap())
+            Statement::StatementBlockContext(block) => self
+                .build_from_block_statement(block.value.as_deref().unwrap())
+                .map(ast::Statement::BlockStatement),
+            Statement::StatementEmptyContext(_) => {
+                return AggregateResult::new_ok(Err(extract_span(ctx)))
             }
             Statement::Error(ectx) => tree_error(ectx),
         };
 
-        let comment_tokens = self.input.get_hidden_tokens_to_left(
-            ctx.start().token_index.load(Ordering::Relaxed),
-            generated::clexer::COMMENTS as isize,
-        );
+        let comments = self.extract_comments(ctx.start().token_index.load(Ordering::Relaxed));
 
-        let comments = if comment_tokens.is_empty() {
-            None
-        } else {
-            Some(join_comment_tokens(comment_tokens.into_iter()))
+        data.map(|data| {
+            Ok(ast::StatementNode {
+                span: extract_span(ctx),
+                data,
+                comments,
+            })
+        })
+    }
+
+    fn build_from_selection_statement(
+        &self,
+        ctx: &cst::SelectionStatement,
+    ) -> AggregateResult<ast::Statement> {
+        use cst::SelectionStatement;
+        match ctx {
+            SelectionStatement::SelectionStatementIfContext(ctx) => self
+                .build_from_if_statement(ctx.value.as_deref().unwrap())
+                .map(ast::Statement::If),
+            SelectionStatement::SelectionStatementSwitchContext(ctx) => self
+                .build_form_switch_statement(ctx.value.as_deref().unwrap())
+                .map(ast::Statement::Switch),
+            SelectionStatement::Error(ectx) => tree_error(ectx),
+        }
+    }
+
+    fn build_from_if_statement(&self, ctx: &cst::IfStatement) -> AggregateResult<ast::IfStatement> {
+        use cst::IfStatement;
+        match ctx {
+            IfStatement::IfStatementIfContext(ctx) => self
+                .build_from_expr(ctx.value.as_deref().unwrap())
+                .zip(self.build_from_statement(ctx.body.as_deref().unwrap()))
+                .map(|(condition, if_body)| ast::IfStatement {
+                    condition,
+                    if_body: to_block_statements(if_body),
+                    else_body: None,
+                }),
+            IfStatement::IfStatementIfElseContext(ctx) => self
+                .build_from_expr(ctx.value.as_deref().unwrap())
+                .zip(self.build_from_statement(ctx.body_if.as_deref().unwrap()))
+                .zip(self.build_from_statement(ctx.body_else.as_deref().unwrap()))
+                .map(|((condition, if_body), else_body)| ast::IfStatement {
+                    condition,
+                    if_body: to_block_statements(if_body),
+                    else_body: Some(to_block_statements(else_body)),
+                }),
+            IfStatement::Error(ectx) => tree_error(ectx),
+        }
+    }
+
+    fn build_form_switch_statement(
+        &self,
+        ctx: &cst::SwitchStatement,
+    ) -> AggregateResult<ast::SwitchStatement> {
+        fn build_case_body<'a, 'input, I>(
+            builder: &AstBuilder,
+            span: Span,
+            stmt: I,
+        ) -> AggregateResult<ast::BlockStatementNode>
+        where
+            I: Iterator<Item = &'a Rc<cst::Statement<'input>>>,
+            'input: 'a,
+        {
+            let mut res = AggregateResult::new_ok(Vec::new());
+
+            for block_item in stmt {
+                builder
+                    .build_from_statement(block_item.deref())
+                    .add_to(&mut res, |v, s| {
+                        if let Ok(s) = s {
+                            v.push(s)
+                        }
+                    });
+            }
+
+            res.map(|stmts| ast::BlockStatementNode { span, stmts })
+        }
+
+        let mut cases = AggregateResult::new_ok(Vec::new());
+        let mut default_case = None;
+        for case in &ctx.body {
+            match case.deref() {
+                cst::SwitchCase::SwitchCaseExprContext(case) => {
+                    let label = case.label.as_deref().unwrap();
+                    self.build_from_expr(label.value.as_deref().unwrap())
+                        .zip(build_case_body(self, extract_span(case), case.body.iter()))
+                        .map(|(expr, body)| {
+                            ast::SwitchCase::Expr(ast::SwithCaseExprNode {
+                                label_span: extract_span(label),
+                                expr,
+                                body,
+                            })
+                        })
+                        .add_to(&mut cases, |res, v| res.push(v))
+                }
+                cst::SwitchCase::SwitchCaseDefaultContext(case) => {
+                    let span = extract_span_from_token(case.label.as_deref().unwrap());
+                    if let Some(other_default_span) = default_case {
+                        cases.add_err(
+                            DiagnosticBuilder::new(span).build_double_default(other_default_span),
+                        );
+                    } else {
+                        default_case = Some(span);
+                        build_case_body(self, extract_span(case), case.body.iter())
+                            .map(|body| {
+                                ast::SwitchCase::Default(ast::SwitchCaseDefaultNode {
+                                    label_span: span,
+                                    body,
+                                })
+                            })
+                            .add_to(&mut cases, |res, v| res.push(v))
+                    }
+                }
+                cst::SwitchCase::Error(ectx) => tree_error(ectx),
+            }
+        }
+
+        cases
+            .zip(self.build_from_expr(ctx.value.as_deref().unwrap()))
+            .map(|(cases, expr)| ast::SwitchStatement { expr, cases })
+    }
+
+    fn build_from_iteration_statement(
+        &self,
+        ctx: &cst::IterationStatement,
+    ) -> AggregateResult<ast::Statement> {
+        use cst::IterationStatement;
+        match ctx {
+            IterationStatement::IterationStatementWhileContext(ctx) => self
+                .build_from_while_statement(ctx.value.as_deref().unwrap())
+                .map(ast::Statement::While),
+            IterationStatement::IterationStatementForContext(ctx) => self
+                .build_from_for_statement(ctx.value.as_deref().unwrap())
+                .map(ast::Statement::For),
+            IterationStatement::Error(ectx) => tree_error(ectx),
+        }
+    }
+
+    fn build_from_while_statement(
+        &self,
+        ctx: &cst::WhileStatement,
+    ) -> AggregateResult<ast::WhileStatement> {
+        self.build_from_expr(ctx.value.as_deref().unwrap())
+            .zip(self.build_from_statement(ctx.body.as_deref().unwrap()))
+            .map(|(condition, body)| ast::WhileStatement {
+                condition,
+                body: to_block_statements(body),
+            })
+    }
+
+    fn build_from_for_statement(
+        &self,
+        ctx: &cst::ForStatement,
+    ) -> AggregateResult<ast::ForStatement> {
+        use cst::ForStatement;
+
+        fn map_transpose<T, U, F>(v: Option<T>, map: F) -> AggregateResult<Option<U>>
+        where
+            F: FnOnce(T) -> AggregateResult<U>,
+        {
+            match v {
+                Some(t) => map(t).map(Some),
+                None => AggregateResult::new_ok(None),
+            }
+        }
+
+        let (res, cond, iter, body) = match ctx {
+            ForStatement::ForStatementDeclContext(ctx) => (
+                map_transpose(ctx.init.as_deref(), |init| {
+                    self.build_from_declaration_statement(init)
+                        .map(|init| ast::StatementNode {
+                            span: extract_span(ctx.init.as_deref().unwrap()),
+                            data: ast::Statement::Declaration(init),
+                            comments: None,
+                        })
+                }),
+                ctx.cond.as_deref(),
+                ctx.iter.as_deref(),
+                ctx.body.as_deref().unwrap(),
+            ),
+
+            ForStatement::ForStatementExprContext(ctx) => (
+                map_transpose(ctx.init.as_deref(), |init| {
+                    self.build_from_expr(init).map(|init| ast::StatementNode {
+                        span: extract_span(ctx.init.as_deref().unwrap()),
+                        data: ast::Statement::Expression(init),
+                        comments: None,
+                    })
+                }),
+                ctx.cond.as_deref(),
+                ctx.iter.as_deref(),
+                ctx.body.as_deref().unwrap(),
+            ),
+            ForStatement::Error(ectx) => tree_error(ectx),
         };
+        res.zip(map_transpose(cond, |v| self.build_from_expr(v)))
+            .zip(map_transpose(iter, |v| self.build_from_expr(v)))
+            .zip(self.build_from_statement(body))
+            .map(|(((init, condition), iter), body)| ast::ForStatement {
+                init: init.map(Box::new),
+                condition,
+                iter,
+                body: to_block_statements(body),
+            })
+    }
 
-        Some(data.map(|data| ast::StatementNode {
-            span: extract_span(ctx),
-            data,
-            comments,
-        }))
+    fn build_from_jump_statement(
+        &self,
+        ctx: &cst::JumpStatement,
+    ) -> AggregateResult<ast::Statement> {
+        use cst::JumpStatement;
+        match ctx {
+            JumpStatement::JumpStatementBreakContext(_) => {
+                AggregateResult::new_ok(ast::Statement::Break)
+            }
+            JumpStatement::JumpStatementContinueContext(_) => {
+                AggregateResult::new_ok(ast::Statement::Continue)
+            }
+            JumpStatement::JumpStatementReturnContext(ctx) => match ctx.value.as_deref() {
+                Some(expr) => self
+                    .build_from_expr(expr)
+                    .map(|expr| ast::Statement::Return(Some(expr))),
+                None => AggregateResult::new_ok(ast::Statement::Return(None)),
+            },
+            JumpStatement::Error(ectx) => tree_error(ectx),
+        }
     }
 
     fn build_from_declaration_statement(
         &self,
         ctx: &cst::DeclarationStatement,
-    ) -> AggregateResult<ast::Statement> {
+    ) -> AggregateResult<ast::Declaration> {
         use cst::DeclarationStatement;
         match ctx {
             DeclarationStatement::DeclarationStatementWithoutInitializerContext(decl) => self
                 .build_from_type_name(decl.type_name.as_deref().unwrap())
                 .zip(self.build_from_identifier(decl.ident.as_deref().unwrap()))
-                .map(|(type_name, ident)| ast::Statement::Declaration {
-                    type_name,
-                    ident,
-                    initializer: None,
+                .zip(match decl.array.as_deref() {
+                    Some(array) => self.build_from_array_declaration(array).map(Some),
+                    None => AggregateResult::new_ok(None),
+                })
+                .map(|((type_name, ident), is_array)| {
+                    ast::Declaration::Variable(ast::VariableDeclaration {
+                        type_name,
+                        ident,
+                        is_array,
+                        initializer: None,
+                    })
                 }),
             DeclarationStatement::DeclarationStatementWithInitializerContext(decl) => self
                 .build_from_type_name(decl.type_name.as_deref().unwrap())
                 .zip(self.build_from_identifier(decl.ident.as_deref().unwrap()))
+                .zip(match decl.array.as_deref() {
+                    Some(array) => self.build_from_array_declaration(array).map(Some),
+                    None => AggregateResult::new_ok(None),
+                })
                 .zip(self.build_from_expr(decl.rhs.as_deref().unwrap()))
-                .map(|((type_name, ident), initializer)| {
+                .map(|(((type_name, ident), is_array), initializer)| {
                     let op_span = extract_span_from_token(decl.op.as_deref().unwrap());
-                    ast::Statement::Declaration {
+                    ast::Declaration::Variable(ast::VariableDeclaration {
                         type_name,
                         ident,
+                        is_array,
                         initializer: Some((op_span, initializer)),
-                    }
+                    })
                 }),
+            DeclarationStatement::DeclarationStatementFunctionDeclarationContext(decl) => self
+                .build_from_function_declaration(decl.value.as_deref().unwrap())
+                .map(ast::Declaration::FunctionDeclaration),
             DeclarationStatement::Error(ectx) => tree_error(ectx),
         }
+    }
+
+    fn build_from_array_declaration(
+        &self,
+        ctx: &cst::ArrayDeclaration,
+    ) -> AggregateResult<ast::ArrayDeclarationNode> {
+        use cst::ArrayDeclaration;
+        let data = match ctx {
+            ArrayDeclaration::ArrayDeclarationPlainContext(_) => {
+                AggregateResult::new_ok(ast::ArrayDeclaration::Unknown)
+            }
+            ArrayDeclaration::ArrayDeclarationExprContext(ctx) => self
+                .build_from_cond_expr(ctx.value.as_deref().unwrap())
+                .map(ast::ArrayDeclaration::Known),
+            ArrayDeclaration::Error(ectx) => tree_error(ectx),
+        };
+
+        data.map(|data| ast::ArrayDeclarationNode {
+            span: extract_span(ctx),
+            data,
+        })
+    }
+
+    fn build_from_function_declaration(
+        &self,
+        ctx: &cst::FunctionDeclaration,
+    ) -> AggregateResult<ast::FunctionDeclaration> {
+        self.build_from_prototype(ctx.prototype.as_deref().unwrap())
+            .map(|(return_type, ident, params)| ast::FunctionDeclaration {
+                return_type,
+                ident,
+                params,
+            })
+    }
+
+    fn build_from_function_definition(
+        &self,
+        ctx: &cst::FunctionDefinition,
+    ) -> AggregateResult<ast::FunctionDefinition> {
+        self.build_from_prototype(ctx.prototype.as_deref().unwrap())
+            .zip(self.build_from_block_statement(ctx.body.as_deref().unwrap()))
+            .map(
+                |((return_type, ident, params), body)| ast::FunctionDefinition {
+                    return_type,
+                    ident,
+                    params,
+                    body,
+                },
+            )
+    }
+
+    fn build_from_prototype(
+        &self,
+        ctx: &cst::FunctionPrototype,
+    ) -> AggregateResult<(
+        ast::QualifiedTypeNode,
+        ast::IdentNode,
+        Vec<ast::FunctionParam>,
+    )> {
+        self.build_from_type_name(ctx.type_name.as_deref().unwrap())
+            .zip(self.build_from_identifier(ctx.ident.as_deref().unwrap()))
+            .zip({
+                let mut res = AggregateResult::new_ok(Vec::new());
+                for param in &ctx.params {
+                    self.build_from_function_param(param)
+                        .add_to(&mut res, |r, p| r.push(p));
+                }
+                res
+            })
+            .map(|((return_type, ident), params)| (return_type, ident, params))
+    }
+
+    fn build_from_function_param(
+        &self,
+        ctx: &cst::FunctionParam,
+    ) -> AggregateResult<ast::FunctionParam> {
+        self.build_from_type_name(ctx.type_name.as_deref().unwrap())
+            .zip(match ctx.ident.as_deref() {
+                Some(ident) => self.build_from_identifier(ident).map(Some),
+                None => AggregateResult::new_ok(None),
+            })
+            .map(|(type_name, ident)| ast::FunctionParam {
+                span: extract_span(ctx),
+                type_name,
+                ident,
+            })
     }
 
     fn build_from_block_statement(
         &self,
         ctx: &cst::BlockStatement,
-    ) -> AggregateResult<ast::Statement> {
+    ) -> AggregateResult<ast::BlockStatementNode> {
         let mut res = AggregateResult::new_ok(Vec::with_capacity(ctx.content.len()));
 
-        for statement in &ctx.content {
-            if let Some(statement) = self.build_from_statement(statement) {
-                statement.add_to(&mut res, |v, s| v.push(s));
-            }
+        for block_item in &ctx.content {
+            self.build_from_block_item(block_item)
+                .add_to(&mut res, |res, stmt| {
+                    if let Some(stmt) = stmt {
+                        res.push(stmt)
+                    }
+                });
         }
 
         res.map(|mut stmts| {
             stmts.shrink_to_fit();
-            ast::Statement::BlockStatement(ast::BlockStatement(stmts))
+            ast::BlockStatementNode {
+                span: extract_span(ctx),
+                stmts,
+            }
         })
     }
 
@@ -515,6 +899,22 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
             PostfixExpr::PostfixExprPrimaryContext(primary) => {
                 return self.build_from_primary_expr(primary.value.as_deref().unwrap());
             }
+            PostfixExpr::PostfixExprArraySubscriptContext(ctx) => self
+                .build_from_postfix_expr(ctx.value.as_deref().unwrap())
+                .zip(self.build_from_expr(ctx.rhs.as_deref().unwrap()))
+                .map(|(lhs, rhs)| ast::Expression::ArraySubscript(Box::new(lhs), Box::new(rhs))),
+            PostfixExpr::PostfixExprFunctionCallContext(ctx) => {
+                let mut args = AggregateResult::new_ok(Vec::new());
+                for arg in &ctx.args {
+                    self.build_from_expr(arg.deref())
+                        .add_to(&mut args, |res, v| res.push(v));
+                }
+                self.build_from_identifier(ctx.ident.as_deref().unwrap())
+                    .zip(args)
+                    .map(|(ident, args)| {
+                        ast::Expression::FunctionCall(ast::FunctionCall { ident, args })
+                    })
+            }
             PostfixExpr::PostfixExprPostfixContext(postfix) => {
                 use generated::clexer as g;
                 let op_token = postfix.op.as_deref().unwrap();
@@ -660,6 +1060,25 @@ fn join_comment_tokens<'a>(tokens: impl Iterator<Item = &'a cst::TFTok<'a>>) -> 
         })
         .collect::<Vec<String>>()
         .join("\n")
+}
+
+/// If the stmt is a BlockStatement returns that, if it isen't the statement gets wrapped in a new
+/// BlockStatement
+fn to_block_statements(stmt: Result<ast::StatementNode, Span>) -> ast::BlockStatementNode {
+    match stmt {
+        Ok(ast::StatementNode {
+            data: ast::Statement::BlockStatement(block),
+            ..
+        }) => block,
+        Ok(stmt) => ast::BlockStatementNode {
+            span: stmt.span,
+            stmts: vec![stmt],
+        },
+        Err(span) => ast::BlockStatementNode {
+            span,
+            stmts: Vec::new(),
+        },
+    }
 }
 
 fn with_qualifiers(

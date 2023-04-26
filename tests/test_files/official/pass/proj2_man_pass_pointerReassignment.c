@@ -1,18 +1,21 @@
 //output:
-const int b = -6250;
-const int x = 5;
 
-int* non_const_pointer = &x;
+int main() {
+    const int b = -6250;
+    const int x = 5;
 
-*non_const_pointer = 36941;
+    int* non_const_pointer = &x;
 
-non_const_pointer = &b;
+    *non_const_pointer = 36941;
+
+    non_const_pointer = &b;
 
 
-char c = 'x';
-char nl = '\n';
+    char c = 'x';
+    char nl = '\n';
 
-char* char_ptr = &c;
+    char* char_ptr = &c;
 
-*char_ptr = '\t';
-char_ptr = &nl;
+    *char_ptr = '\t';
+    char_ptr = &nl;
+}

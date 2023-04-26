@@ -1,14 +1,15 @@
 //output:
 
+int main() {
+    int x = 5;
 
-int x = 5;
+    float f = x;
 
-float f = x;
+    int z = -32682;
 
-int z = -32682;
+    f = 33.0 * z + x;
 
-f = 33.0 * z + x;
+    z = f * 0.7;
 
-z = f * 0.7;
-
-int k = 'a' + 'z';
+    int k = 'a' + 'z';
+}

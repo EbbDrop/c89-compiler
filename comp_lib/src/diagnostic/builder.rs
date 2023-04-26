@@ -60,6 +60,12 @@ impl DiagnosticBuilder {
         self.build_custom(Code::Unimplemented, format!("not implemented: {feature}"))
     }
 
+    pub fn build_double_default(mut self, first_seen: Span) -> Diagnostic {
+        self.add_additional_span(first_seen, Some("first case here".to_string()));
+        let msg = "multiple default cases in switch".to_string();
+        self.build_custom(Code::DuplicateDefault, msg)
+    }
+
     pub fn build_duplicate_qualifier(mut self, qualifier: &str, first_seen: Span) -> Diagnostic {
         self.add_additional_span(first_seen, Some("first seen here".to_string()));
         let msg = format!("duplicate qualifier: {qualifier}");

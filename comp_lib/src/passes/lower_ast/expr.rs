@@ -40,6 +40,9 @@ pub fn build_ir_expr(
         ast::Expression::Binary(left, op, right) => {
             build_binary_op_ir_expr(op, left, right, span, scope)
         }
+        ast::Expression::ArraySubscript(_lhs, _rhs) => AggregateResult::new_err(
+            DiagnosticBuilder::new(span).build_unimplemented("array subscription"),
+        ),
         ast::Expression::Unary(op, inner) => build_unary_op_ir_expr(op, inner, span, scope),
         ast::Expression::Cast(type_name, inner) => build_ir_expr(inner, scope).and_then(|inner| {
             cast(
@@ -49,6 +52,9 @@ pub fn build_ir_expr(
                 type_name.span,
             )
         }),
+        ast::Expression::FunctionCall(_) => AggregateResult::new_err(
+            DiagnosticBuilder::new(span).build_unimplemented("function call"),
+        ),
         ast::Expression::Literal(lit) => literal(lit),
         ast::Expression::Ident(idt) => ident(idt, false, scope).and_then(lvalue_dereference),
     }

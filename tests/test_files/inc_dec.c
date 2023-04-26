@@ -8,12 +8,14 @@
 //4
 //3
 
-int a = 3;
-printf(a++);
-printf(a++);
-printf(a--);
-printf(a--);
-printf(++a);
-printf(++a);
-printf(--a);
-printf(--a);
+int main() {
+    int a = 3;
+    printf(a++);
+    printf(a++);
+    printf(a--);
+    printf(a--);
+    printf(++a);
+    printf(++a);
+    printf(--a);
+    printf(--a);
+}

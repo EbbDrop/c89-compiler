@@ -1,4 +1,5 @@
 //fail-any:
 
-float x* = 5;
-
+int main() {
+    float x* = 5;
+}

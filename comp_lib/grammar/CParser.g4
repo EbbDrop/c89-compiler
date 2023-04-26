@@ -7,4 +7,10 @@ options { tokenVocab = CLexer; }
 
 import Statement;
 
-translationUnit: (content+=statement)* EOF;
+translationUnit: (content+=externalDeclaration)* EOF;
+
+externalDeclaration
+    : value=declarationStatement                                # ExternalDeclarationStatement
+    | value=functionDefinition                                  # ExternalDeclarationFunctionDefinition
+    | value=INCLUDE                                             # ExternalDeclarationInclude
+    ;

@@ -1,5 +1,7 @@
 //fail-any:
 
-int x = 54;
+int main() {
+    int x = 54;
 
-float y = &x;
+    float y = &x;
+}

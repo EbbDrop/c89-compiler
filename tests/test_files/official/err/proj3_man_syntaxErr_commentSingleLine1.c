@@ -1,4 +1,6 @@
 //fail-any:
-/
-int this_is_not_correct = 4;
 
+int main() {
+    /
+    int this_is_not_correct = 4;
+}

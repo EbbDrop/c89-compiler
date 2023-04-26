@@ -1,9 +1,11 @@
 //output:
 
-char x = 'a';
+int main() {
+    char x = 'a';
 
-char* chr_ptr = &x;
+    char* chr_ptr = &x;
 
-*chr_ptr = 'b';
+    *chr_ptr = 'b';
 
-char another_char = *chr_ptr;
+    char another_char = *chr_ptr;
+}

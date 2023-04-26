@@ -3,11 +3,50 @@ use crate::diagnostic::Span;
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ast {
-    pub global: BlockStatement,
+    pub include_stdio: Option<Span>,
+    pub global_declarations: Vec<ExternalDeclarationNode>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct BlockStatement(pub Vec<StatementNode>);
+pub struct ExternalDeclarationNode {
+    pub span: Span,
+    pub data: ExternalDeclaration,
+    pub comments: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExternalDeclaration {
+    FunctionDefinition(FunctionDefinition),
+    Declaration(Declaration),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionDefinition {
+    pub return_type: QualifiedTypeNode,
+    pub ident: IdentNode,
+    pub params: Vec<FunctionParam>,
+    pub body: BlockStatementNode,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionDeclaration {
+    pub return_type: QualifiedTypeNode,
+    pub ident: IdentNode,
+    pub params: Vec<FunctionParam>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionParam {
+    pub span: Span,
+    pub type_name: QualifiedTypeNode,
+    pub ident: Option<IdentNode>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlockStatementNode {
+    pub span: Span,
+    pub stmts: Vec<StatementNode>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatementNode {
@@ -17,15 +56,94 @@ pub struct StatementNode {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Declaration {
+    Variable(VariableDeclaration),
+    FunctionDeclaration(FunctionDeclaration),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VariableDeclaration {
+    pub type_name: QualifiedTypeNode,
+    pub ident: IdentNode,
+    pub is_array: Option<ArrayDeclarationNode>,
+    pub initializer: Option<(Span, ExpressionNode)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArrayDeclarationNode {
+    pub span: Span,
+    pub data: ArrayDeclaration,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArrayDeclaration {
+    /// `arr[];`
+    Unknown,
+    /// `arr[3];`
+    Known(ExpressionNode),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
-    Declaration {
-        type_name: QualifiedTypeNode,
-        ident: IdentNode,
-        initializer: Option<(Span, ExpressionNode)>,
-    },
+    Declaration(Declaration),
     Expression(ExpressionNode),
     Printf(ExpressionNode),
-    BlockStatement(BlockStatement),
+    If(IfStatement),
+    Switch(SwitchStatement),
+    While(WhileStatement),
+    For(ForStatement),
+    Break,
+    Continue,
+    Return(Option<ExpressionNode>),
+    BlockStatement(BlockStatementNode),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IfStatement {
+    pub condition: ExpressionNode,
+    pub if_body: BlockStatementNode,
+    pub else_body: Option<BlockStatementNode>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SwitchStatement {
+    pub expr: ExpressionNode,
+    /// Guaranteed to have exactly 0 or 1 `Switch Case::Default` nodes. This can't be a seperate
+    /// since the relative order is importand.
+    pub cases: Vec<SwitchCase>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SwitchCase {
+    Expr(SwithCaseExprNode),
+    Default(SwitchCaseDefaultNode),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SwithCaseExprNode {
+    pub label_span: Span,
+    pub expr: ExpressionNode,
+    pub body: BlockStatementNode,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SwitchCaseDefaultNode {
+    pub label_span: Span,
+    pub body: BlockStatementNode,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WhileStatement {
+    pub condition: ExpressionNode,
+    pub body: BlockStatementNode,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForStatement {
+    pub init: Option<Box<StatementNode>>,
+    pub condition: Option<ExpressionNode>,
+    pub iter: Option<ExpressionNode>,
+    pub body: BlockStatementNode,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -84,10 +202,18 @@ pub enum Expression {
         Box<ExpressionNode>,
     ),
     Binary(Box<ExpressionNode>, BinaryOperatorNode, Box<ExpressionNode>),
+    ArraySubscript(Box<ExpressionNode>, Box<ExpressionNode>),
     Unary(UnaryOperatorNode, Box<ExpressionNode>),
     Cast(QualifiedTypeNode, Box<ExpressionNode>),
+    FunctionCall(FunctionCall),
     Literal(LiteralNode),
     Ident(IdentNode),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FunctionCall {
+    pub ident: IdentNode,
+    pub args: Vec<ExpressionNode>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

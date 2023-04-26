@@ -1,9 +1,11 @@
 //fail-any:
 
-int x = 54;
+int main() {
+    int x = 54;
 
-int z = -33;
+    int z = -33;
 
-int* p = &z;
+    int* p = &z;
 
-x = p*;
+    x = p*;
+}

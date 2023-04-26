@@ -1,4 +1,6 @@
 //output:
 
-char x = 'x';
-char dot = '.';
+int main() {
+    char x = 'x';
+    char dot = '.';
+}

@@ -298,17 +298,17 @@ fn parses_unary_expr() {
         };
     }
     // postfix operators
-    check_unary_expr_ok!("foo++" => [DoublePlusPostfix: 3..5], ["foo": 0..3]);
-    check_unary_expr_ok!("foo--" => [DoubleMinusPostfix: 3..5], ["foo": 0..3]);
+    check_unary_expr_ok!("foo++" => [DoublePlusPostfix: 16..18], ["foo": 13..16]);
+    check_unary_expr_ok!("foo--" => [DoubleMinusPostfix: 16..18], ["foo": 13..16]);
     // prefix operators
-    check_unary_expr_ok!("++foo" => [DoublePlusPrefix: 0..2], ["foo": 2..5]);
-    check_unary_expr_ok!("--foo" => [DoubleMinusPrefix: 0..2], ["foo": 2..5]);
-    check_unary_expr_ok!("!foo" => [Bang: 0..1], ["foo": 1..4]);
-    check_unary_expr_ok!("+foo" => [Plus: 0..1], ["foo": 1..4]);
-    check_unary_expr_ok!("-foo" => [Minus: 0..1], ["foo": 1..4]);
-    check_unary_expr_ok!("~foo" => [Tilde: 0..1], ["foo": 1..4]);
-    check_unary_expr_ok!("&foo" => [Ampersand: 0..1], ["foo": 1..4]);
-    check_unary_expr_ok!("*foo" => [Star: 0..1], ["foo": 1..4]);
+    check_unary_expr_ok!("++foo" => [DoublePlusPrefix: 13..15], ["foo": 15..18]);
+    check_unary_expr_ok!("--foo" => [DoubleMinusPrefix: 13..15], ["foo": 15..18]);
+    check_unary_expr_ok!("!foo" => [Bang: 13..14], ["foo": 14..17]);
+    check_unary_expr_ok!("+foo" => [Plus: 13..14], ["foo": 14..17]);
+    check_unary_expr_ok!("-foo" => [Minus: 13..14], ["foo": 14..17]);
+    check_unary_expr_ok!("~foo" => [Tilde: 13..14], ["foo": 14..17]);
+    check_unary_expr_ok!("&foo" => [Ampersand: 13..14], ["foo": 14..17]);
+    check_unary_expr_ok!("*foo" => [Star: 13..14], ["foo": 14..17]);
 }
 
 #[test]
@@ -320,17 +320,17 @@ fn parses_cast_expr() {
         "(const int *const) foo".to_owned(),
         ast::Expression::Cast(
             ast::QualifiedTypeNode {
-                span: (1..17).into(),
+                span: (14..30).into(),
                 data: ast::QualifiedType {
-                    is_const: Some((12..17).into()),
+                    is_const: Some((25..30).into()),
                     inner: ast::UnqualifiedTypeNode {
-                        span: (1..17).into(),
+                        span: (14..30).into(),
                         data: ast::UnqualifiedType::PointerType(Box::new(ast::QualifiedTypeNode {
-                            span: (1..10).into(),
+                            span: (14..23).into(),
                             data: ast::QualifiedType {
-                                is_const: Some((1..6).into()),
+                                is_const: Some((14..19).into()),
                                 inner: ast::UnqualifiedTypeNode {
-                                    span: (7..10).into(),
+                                    span: (20..23).into(),
                                     data: ast::UnqualifiedType::PlainType(
                                         ast::PlainType::Primitive(ast::PrimitiveType::Int),
                                     ),
@@ -341,9 +341,9 @@ fn parses_cast_expr() {
                 },
             },
             Box::new(ast::ExpressionNode {
-                span: (19..22).into(),
+                span: (32..35).into(),
                 data: ast::Expression::Ident(ast::IdentNode {
-                    span: (19..22).into(),
+                    span: (32..35).into(),
                     data: "foo".to_owned(),
                 }),
             }),
@@ -355,7 +355,7 @@ fn assert_expr_integer_lit(raw_int_lit: &str, expected: ast::Literal) {
     assert_expr_eq(
         raw_int_lit.to_string(),
         ast::Expression::Literal(ast::LiteralNode {
-            span: (0..raw_int_lit.len()).into(),
+            span: (13..raw_int_lit.len() + 13).into(),
             data: expected,
         }),
     );
@@ -365,7 +365,7 @@ fn assert_expr_float_lit(raw_float_lit: &str, expected_value: f64) {
     assert_expr_eq(
         raw_float_lit.to_string(),
         ast::Expression::Literal(ast::LiteralNode {
-            span: (0..raw_float_lit.len()).into(),
+            span: (13..raw_float_lit.len() + 13).into(),
             data: ast::Literal::Float(expected_value),
         }),
     );
@@ -375,7 +375,7 @@ fn assert_expr_char_lit(raw_inner_char_lit: &str, expected_value: i128) {
     assert_expr_eq(
         format!("'{}'", raw_inner_char_lit),
         ast::Expression::Literal(ast::LiteralNode {
-            span: (0..(raw_inner_char_lit.len() + 2)).into(),
+            span: (13..(raw_inner_char_lit.len() + 15)).into(),
             data: ast::Literal::Char(expected_value),
         }),
     );
@@ -385,27 +385,56 @@ fn assert_expr_ident(raw_ident: &str, expected_ident: &str) {
     assert_expr_eq(
         raw_ident.to_string(),
         ast::Expression::Ident(ast::IdentNode {
-            span: (0..raw_ident.len()).into(),
+            span: (13..raw_ident.len() + 13).into(),
             data: expected_ident.to_owned(),
         }),
     )
 }
 
 fn assert_expr_eq(raw_expr: String, expected_expr: ast::Expression) {
-    let input = raw_expr + ";";
+    let start = 13;
+    let end = start + raw_expr.len();
+    let input = format!("int main() {{ {raw_expr}; }}");
     let res = parse(&input);
     let is_ok = res.is_ok();
     assert_eq!(
         res.into_value(),
         Some(ast::Ast {
-            global: ast::BlockStatement(vec![ast::StatementNode {
+            include_stdio: None,
+            global_declarations: vec![ast::ExternalDeclarationNode {
+                span: (0..(end + 3)).into(),
                 comments: None,
-                span: (0..input.len()).into(),
-                data: ast::Statement::Expression(ast::ExpressionNode {
-                    span: (0..(input.len() - 1)).into(),
-                    data: expected_expr
-                }),
-            }]),
+                data: ast::ExternalDeclaration::FunctionDefinition(ast::FunctionDefinition {
+                    return_type: ast::QualifiedTypeNode {
+                        span: (0..3).into(),
+                        data: ast::QualifiedType {
+                            is_const: None,
+                            inner: ast::UnqualifiedTypeNode {
+                                span: (0..3).into(),
+                                data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                                    ast::PrimitiveType::Int
+                                ))
+                            }
+                        }
+                    },
+                    ident: ast::IdentNode {
+                        span: (4..8).into(),
+                        data: "main".to_owned()
+                    },
+                    params: Vec::new(),
+                    body: ast::BlockStatementNode {
+                        span: (11..(end + 3)).into(),
+                        stmts: vec![ast::StatementNode {
+                            comments: None,
+                            span: (start..(end + 1)).into(),
+                            data: ast::Statement::Expression(ast::ExpressionNode {
+                                span: (start..end).into(),
+                                data: expected_expr
+                            }),
+                        }]
+                    },
+                })
+            }]
         })
     );
     assert!(is_ok);

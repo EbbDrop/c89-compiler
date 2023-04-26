@@ -1,13 +1,16 @@
 //output:
-int x = 5;
-int z = x + 3;
 
-x = z * z * z * (x + x);
+int main() {
+    int x = 5;
+    int z = x + 3;
 
-float f = 0.986312;
-float f2 = f * 33.0 + 2.0;
+    x = z * z * z * (x + x);
 
-f2 = f2 + f;
+    float f = 0.986312;
+    float f2 = f * 33.0 + 2.0;
 
-char c = 'a';
-c = 'b';
+    f2 = f2 + f;
+
+    char c = 'a';
+    c = 'b';
+}

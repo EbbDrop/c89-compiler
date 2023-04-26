@@ -86,6 +86,9 @@ unaryExpr
 
 postfixExpr
     : value=primaryExpr                                         # PostfixExprPrimary
+    | ident=identifier PAREN_LEFT
+      (args+=expr)? (COMMA args+=expr)* PAREN_RIGHT             # PostfixExprFunctionCall
+    | value=postfixExpr BRACKET_LEFT rhs=expr BRACKET_RIGHT     # PostfixExprArraySubscript
     | value=postfixExpr op=(DOUBLE_PLUS | DOUBLE_MINUS)         # PostfixExprPostfix
     ;
 

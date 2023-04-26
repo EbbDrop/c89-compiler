@@ -1,4 +1,7 @@
 //fail:
 //UndeclaredIdent
-int a = 3;
-int b = a + c;
+
+int main() {
+    int a = 3;
+    int b = a + c;
+}

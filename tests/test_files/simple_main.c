@@ -1,5 +1,6 @@
 //output:
+//1
 
 int main() {
-    int const y = 6532;
+  printf(1);
 }

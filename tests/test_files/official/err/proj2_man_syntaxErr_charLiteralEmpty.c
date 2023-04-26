@@ -1,3 +1,5 @@
 //fail-any:
 
-char invalid = '';
+int main() {
+    char invalid = '';
+}

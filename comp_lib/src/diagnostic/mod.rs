@@ -87,6 +87,7 @@ pub enum Code {
     UndeclaredIdent,
     AlreadyDefined,
     UsingUninit,
+    DuplicateDefault,
 }
 
 impl Code {

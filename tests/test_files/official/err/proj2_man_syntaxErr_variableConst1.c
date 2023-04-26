@@ -1,2 +1,5 @@
 //warn-any:
-const x = 5;
+
+int main() {
+    const x = 5;
+}

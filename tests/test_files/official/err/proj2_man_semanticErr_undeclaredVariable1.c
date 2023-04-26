@@ -1,6 +1,7 @@
 //fail-any:
 
+int main() {
+    int some_variable;
 
-int some_variable;
-
-some_variable = x + 3;
+    some_variable = x + 3;
+}

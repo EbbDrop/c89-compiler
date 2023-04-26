@@ -1,9 +1,12 @@
 //output:
-int number = -55;
 
-number++;
-number = number++;
+int main() {
+    int number = -55;
 
-int n = number++;
+    number++;
+    number = number++;
 
-n = n - n++;
+    int n = number++;
+
+    n = n - n++;
+}

@@ -14,17 +14,19 @@
 //3.800000
 //-3.800000
 
-printf(5 + 3);
-printf(5 - 3);
-printf(5 * 3);
-printf(5 / 3);
-printf(+ 3);
-printf(- 3);
-printf(4 % 3);
-printf(4 % 9);
-printf(5.2 + 3.8);
-printf(5.2 - 3.8);
-printf(5.2 * 3.8);
-printf(5.2 / 3.8);
-printf(+ 3.8);
-printf(- 3.8);
+int main() {
+    printf(5 + 3);
+    printf(5 - 3);
+    printf(5 * 3);
+    printf(5 / 3);
+    printf(+ 3);
+    printf(- 3);
+    printf(4 % 3);
+    printf(4 % 9);
+    printf(5.2 + 3.8);
+    printf(5.2 - 3.8);
+    printf(5.2 * 3.8);
+    printf(5.2 / 3.8);
+    printf(+ 3.8);
+    printf(- 3.8);
+}

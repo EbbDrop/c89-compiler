@@ -1,6 +1,9 @@
 //output:
-int x = 5;
-x--;
 
-int z = x--;
-x = x-- + z--;
+int main() {
+    int x = 5;
+    x--;
+
+    int z = x--;
+    x = x-- + z--;
+}
