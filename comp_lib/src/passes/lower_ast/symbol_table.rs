@@ -67,7 +67,7 @@ impl<'a, I> ScopedHandle<'a, I> {
     /// Create a new scope inside this scope.
     ///
     /// You will not be able to use this scope as long as the inner scope lives.
-    pub fn _new_scope(&mut self) -> ScopedHandle<'_, I> {
+    pub fn new_scope(&mut self) -> ScopedHandle<'_, I> {
         let start = self.root_table.vars.len();
         ScopedHandle {
             root_table: self.root_table,
@@ -160,7 +160,7 @@ mod tests {
             id_a = root_scope.declare("A".to_owned(), 'a').unwrap();
 
             {
-                let mut inner_scope = root_scope._new_scope();
+                let mut inner_scope = root_scope.new_scope();
 
                 id_b = inner_scope.declare("B".to_owned(), 'b').unwrap();
                 assert_eq!(inner_scope._reference("B"), Some((id_b, &'b')));
@@ -190,12 +190,12 @@ mod tests {
             id_a = root_scope.declare("A".to_owned(), 'a').unwrap();
 
             id_b1 = {
-                let mut inner_scope = root_scope._new_scope();
+                let mut inner_scope = root_scope.new_scope();
 
                 inner_scope.declare("B".to_owned(), 'b').unwrap()
             };
             id_b2 = {
-                let mut inner_scope = root_scope._new_scope();
+                let mut inner_scope = root_scope.new_scope();
 
                 inner_scope.declare("B".to_owned(), 'b').unwrap()
             };
@@ -224,7 +224,7 @@ mod tests {
             id_outer = root_scope.declare("A".to_owned(), 'o').unwrap();
 
             {
-                let mut inner_scope = root_scope._new_scope();
+                let mut inner_scope = root_scope.new_scope();
 
                 id_inner = inner_scope.declare("A".to_owned(), 'i').unwrap();
                 assert_eq!(inner_scope._reference("A"), Some((id_inner, &'i')));

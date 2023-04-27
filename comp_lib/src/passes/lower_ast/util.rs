@@ -1,7 +1,43 @@
 use crate::ir::{
     ctype::{self, CType},
     expr::{Expr, ExprNode},
+    table::Item,
 };
+
+use super::symbol_table::ScopedHandle;
+
+#[derive(Debug)]
+pub struct Scope<'a> {
+    pub vars: ScopedHandle<'a, Item>,
+    pub func_return_type: &'a CType,
+    pub in_switch: bool,
+    pub in_loop: bool,
+}
+
+impl<'s> Scope<'s> {
+    pub fn new_scope(&mut self) -> Scope<'_> {
+        Scope {
+            vars: self.vars.new_scope(),
+            func_return_type: self.func_return_type,
+            in_switch: self.in_switch,
+            in_loop: self.in_loop,
+        }
+    }
+
+    pub fn in_switch(self) -> Self {
+        Self {
+            in_switch: true,
+            ..self
+        }
+    }
+
+    pub fn in_loop(self) -> Self {
+        Self {
+            in_loop: true,
+            ..self
+        }
+    }
+}
 
 /// Only inserts a cast if `to_ty != inner.ty`. This function does *not* check if the cast is
 /// allowed.

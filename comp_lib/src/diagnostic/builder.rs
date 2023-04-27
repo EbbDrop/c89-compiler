@@ -247,6 +247,21 @@ impl DiagnosticBuilder {
         )
     }
 
+    pub fn build_wrong_statement_type(
+        self,
+        field_name: &str,
+        got_type: &ir::ctype::CType,
+        want_type: TypeCat,
+    ) -> Diagnostic {
+        self.build_custom(
+            Code::UnexpectedType,
+            format!(
+                "{field_name} needs {}, but got a expresion of type `{got_type}`",
+                want_type.long_name()
+            ),
+        )
+    }
+
     pub fn build_too_big_constant(self, value: i128) -> Diagnostic {
         self.build_custom(
             Code::TooBigConstant,
@@ -275,6 +290,34 @@ impl DiagnosticBuilder {
         self.build_custom(
             Code::UsingUninit,
             format!("`{name}` is possibly uninitialized"),
+        )
+    }
+
+    pub fn build_invalid_break(self) -> Diagnostic {
+        self.build_custom(
+            Code::InvalidJumpStmt,
+            "break statement not inside loop or switch".to_owned(),
+        )
+    }
+
+    pub fn build_invalid_continue(self) -> Diagnostic {
+        self.build_custom(
+            Code::InvalidJumpStmt,
+            "continue statement not inside loop".to_owned(),
+        )
+    }
+
+    pub fn build_case_not_int(self) -> Diagnostic {
+        self.build_custom(
+            Code::SwitchCaseNotInt,
+            "switch case does not have interger type".to_owned(),
+        )
+    }
+
+    pub fn build_case_not_folded(self) -> Diagnostic {
+        self.build_custom(
+            Code::SwitchCaseNotFolded,
+            "was not able to fold switch case".to_owned(),
         )
     }
 }

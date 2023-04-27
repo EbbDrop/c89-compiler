@@ -88,6 +88,9 @@ pub enum Code {
     AlreadyDefined,
     UsingUninit,
     DuplicateDefault,
+    InvalidJumpStmt,
+    SwitchCaseNotFolded,
+    SwitchCaseNotInt,
 }
 
 impl Code {

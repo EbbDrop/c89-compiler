@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use super::{expr::build_ir_expr, expr::build_ir_lvalue, symbol_table::ScopedTable};
+use super::{expr::build_ir_expr, expr::build_ir_lvalue, symbol_table::ScopedTable, util::Scope};
 use crate::{
     ast::*,
     diagnostic::{AggregateResult, Code},
@@ -8,7 +8,6 @@ use crate::{
         ctype::{Arithmetic::*, CType::*, Scalar::*},
         expr::{ExprNode, LvalueExprNode},
     },
-    passes::lower_ast::symbol_table::ScopedHandle,
     structures::ir::*,
 };
 
@@ -78,6 +77,18 @@ fn aggr_res_eq<T: PartialEq + Debug>(res: AggregateResult<T>, exp: T) {
     }
 }
 
+fn create_scope(table: &mut ScopedTable) -> Scope {
+    static RETURN_TYPE: ctype::CType =
+        ctype::CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::SignedInt));
+
+    Scope {
+        vars: table.get_scoped_handle(),
+        func_return_type: &RETURN_TYPE,
+        in_switch: false,
+        in_loop: false,
+    }
+}
+
 /// For every item in the iterator, creates a `ast::ExpresionNode` with the op from `un_op` and a
 /// inner ident with the type from the iterator. This ast is then given to `build_ir_expr`. If
 /// the given AggregateResult is _err_ the `Option` in the iterator has to be `None`, otherwise
@@ -90,9 +101,10 @@ where
 {
     let mut scope = ScopedTable::default();
     for t in tests {
-        let mut scope = scope.get_scoped_handle();
+        let mut scope = create_scope(&mut scope);
 
         scope
+            .vars
             .declare(
                 "A".to_owned(),
                 table::Item {
@@ -150,9 +162,10 @@ where
     let mut scope = ScopedTable::default();
     for (i, t) in tests.into_iter().enumerate() {
         println!("testing index {}", i);
-        let mut scope = scope.get_scoped_handle();
+        let mut scope = create_scope(&mut scope);
 
         scope
+            .vars
             .declare(
                 "A".to_owned(),
                 table::Item {
@@ -164,6 +177,7 @@ where
             )
             .unwrap();
         scope
+            .vars
             .declare(
                 "B".to_owned(),
                 table::Item {
@@ -233,10 +247,11 @@ fn cast() {
     fn build_ir(
         to_ty: QualifiedType,
         from_ty: ctype::CType,
-        scope: &mut ScopedHandle,
+        scope: &mut Scope,
     ) -> (AggregateResult<ExprNode>, LvalueExprNode) {
-        let mut scope = scope._new_scope();
+        let mut scope = scope.new_scope();
         let from_id = scope
+            .vars
             .declare(
                 "FROM".to_owned(),
                 table::Item {
@@ -277,7 +292,7 @@ fn cast() {
     }
 
     let mut scope = ScopedTable::default();
-    let mut scope = scope.get_scoped_handle();
+    let mut scope = create_scope(&mut scope);
 
     let ast_int = QualifiedTypeNode {
         span: (1..1).into(),
@@ -324,7 +339,7 @@ where
     F: FnOnce(Box<expr::LvalueExprNode>) -> expr::Expr,
 {
     let mut scope = ScopedTable::default();
-    let mut scope = scope.get_scoped_handle();
+    let mut scope = create_scope(&mut scope);
 
     let ast_lit = create_unary_op(
         ast.clone(),
@@ -340,6 +355,7 @@ where
     let ty = Scalar(Arithmetic(Char));
 
     let id_a = scope
+        .vars
         .declare(
             "A".to_owned(),
             table::Item {
@@ -372,6 +388,7 @@ where
         },
     );
     scope
+        .vars
         .declare(
             "B".to_owned(),
             table::Item {
@@ -417,7 +434,7 @@ fn prefix_dec() {
 #[test]
 fn refrence() {
     let mut scope = ScopedTable::default();
-    let mut scope = scope.get_scoped_handle();
+    let mut scope = create_scope(&mut scope);
 
     let ast_lit = create_unary_op(
         UnaryOperator::Ampersand,
@@ -433,8 +450,9 @@ fn refrence() {
     let ty = Scalar(Arithmetic(Char));
 
     for is_const in [false, true] {
-        let mut scope = scope._new_scope();
+        let mut scope = scope.new_scope();
         let id_a = scope
+            .vars
             .declare(
                 "A".to_owned(),
                 table::Item {
@@ -472,7 +490,7 @@ fn refrence() {
 #[test]
 fn derefrence() {
     let mut scope = ScopedTable::default();
-    let mut scope = scope.get_scoped_handle();
+    let mut scope = create_scope(&mut scope);
 
     let ast_lit = create_unary_op(
         UnaryOperator::Star,
@@ -488,11 +506,12 @@ fn derefrence() {
     let ty = Scalar(Arithmetic(Char));
 
     for is_const in [true, false] {
-        let mut scope = scope._new_scope();
+        let mut scope = scope.new_scope();
 
         let ty_with_ptr = Scalar(Pointer(Box::new(ty.clone()), is_const));
 
         let id_a = scope
+            .vars
             .declare(
                 "A".to_owned(),
                 table::Item {
@@ -909,11 +928,7 @@ fn logical() {
 
 #[test]
 fn assign() {
-    fn build_ir(
-        to: Expression,
-        from: Expression,
-        scope: &mut ScopedHandle,
-    ) -> AggregateResult<ExprNode> {
+    fn build_ir(to: Expression, from: Expression, scope: &mut Scope) -> AggregateResult<ExprNode> {
         let ast_lit = {
             ExpressionNode {
                 span: (0..0).into(),
@@ -938,10 +953,11 @@ fn assign() {
         to_ty: ctype::CType,
         to_const: bool,
         from_ty: ctype::CType,
-        scope: &mut ScopedHandle,
+        scope: &mut Scope,
     ) -> (AggregateResult<ExprNode>, LvalueExprNode, LvalueExprNode) {
-        let mut scope = scope._new_scope();
+        let mut scope = scope.new_scope();
         let to_id = scope
+            .vars
             .declare(
                 "TO".to_owned(),
                 table::Item {
@@ -953,6 +969,7 @@ fn assign() {
             )
             .unwrap();
         let from_id = scope
+            .vars
             .declare(
                 "FROM".to_owned(),
                 table::Item {
@@ -1005,7 +1022,7 @@ fn assign() {
     }
 
     let mut scope = ScopedTable::default();
-    let mut scope = scope.get_scoped_handle();
+    let mut scope = create_scope(&mut scope);
 
     let ir = build_ir(
         Expression::Literal(LiteralNode {

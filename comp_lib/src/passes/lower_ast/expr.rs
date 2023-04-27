@@ -15,20 +15,16 @@ use crate::{
 };
 
 use super::{
-    symbol_table::ScopedHandle,
     type_checking::{
         AnyScaler, CheckBinErr, CheckBinOk, CheckUnErr, CheckUnOk, PromoteArith, TypeRuleBin,
         TypeRuleUn,
     },
-    util::{find_first_fit, maybe_cast},
+    util::{find_first_fit, maybe_cast, Scope},
 };
 
 const SIGNED_INT: CType = CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::SignedInt));
 
-pub fn build_ir_expr(
-    e: &ast::ExpressionNode,
-    scope: &mut ScopedHandle,
-) -> AggregateResult<ExprNode> {
+pub fn build_ir_expr(e: &ast::ExpressionNode, scope: &mut Scope) -> AggregateResult<ExprNode> {
     let span = e.span;
     match &e.data {
         ast::Expression::Assignment(lhs, op, rhs) => {
@@ -65,7 +61,7 @@ fn build_binary_op_ir_expr(
     left: &ast::ExpressionNode,
     right: &ast::ExpressionNode,
     span: Span,
-    scope: &mut ScopedHandle,
+    scope: &mut Scope,
 ) -> AggregateResult<ExprNode> {
     use ast::BinaryOperator::*;
     let res = build_ir_expr(left, scope);
@@ -108,7 +104,7 @@ fn build_unary_op_ir_expr(
     op: &ast::UnaryOperatorNode,
     inner: &ast::ExpressionNode,
     span: Span,
-    scope: &mut ScopedHandle,
+    scope: &mut Scope,
 ) -> AggregateResult<ExprNode> {
     use ast::UnaryOperator::*;
     let builder = UnaryBuilder {
@@ -141,7 +137,7 @@ pub fn build_ir_lvalue(
     needed_for: &str,
     will_init: bool,
     op_span: Span,
-    scope: &mut ScopedHandle,
+    scope: &mut Scope,
 ) -> AggregateResult<LvalueExprNode> {
     let lvalue = match &e.data {
         ast::Expression::Unary(op, inner) => {
@@ -177,9 +173,9 @@ fn lvalue_dereference(inner: LvalueExprNode) -> AggregateResult<ExprNode> {
 fn ident(
     idt: &ast::IdentNode,
     will_init: bool,
-    scope: &mut ScopedHandle,
+    scope: &mut Scope,
 ) -> AggregateResult<LvalueExprNode> {
-    let Some((id, ty)) = scope.reference_mut(&idt.data) else {
+    let Some((id, ty)) = scope.vars.reference_mut(&idt.data) else {
         return AggregateResult::new_err(DiagnosticBuilder::new(idt.span).build_undeclared_ident(&idt.data));
     };
 
@@ -341,7 +337,7 @@ struct UnaryBuilder<'a, 'b> {
     full_span: Span,
     op_span: Span,
     inner: &'a ast::ExpressionNode,
-    scope: &'a mut ScopedHandle<'b>,
+    scope: &'a mut Scope<'b>,
 }
 
 struct ValueUnaryBuilder {
