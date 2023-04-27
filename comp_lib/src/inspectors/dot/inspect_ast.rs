@@ -1,5 +1,6 @@
 use super::{DotTree, ToDot};
 use crate::ast;
+use std::fmt::Write;
 use std::iter;
 
 impl ToDot for ast::Ast {
@@ -311,21 +312,14 @@ impl ToDot for ast::FunctionCall {
 impl ToDot for ast::Literal {
     fn to_dot(&self) -> DotTree {
         let (name, value) = match self {
-            ast::Literal::Dec(i) => ("dec", i),
-            ast::Literal::Hex(i) => ("hex", i),
-            ast::Literal::Octal(i) => ("octal", i),
-            ast::Literal::Char(i) => ("char", i),
-            ast::Literal::Float(f) => {
-                return DotTree::new(
-                    "float".to_owned(),
-                    vec![("value", DotTree::new_leaf(f.to_string()))],
-                )
-            }
+            ast::Literal::Dec(i) => ("dec", i.to_string()),
+            ast::Literal::Hex(i) => ("hex", i.to_string()),
+            ast::Literal::Octal(i) => ("octal", i.to_string()),
+            ast::Literal::Char(i) => ("char", i.to_string()),
+            ast::Literal::Float(f) => ("float", f.to_string()),
+            ast::Literal::String(s) => ("string", to_dot_string_literal(s)),
         };
-        DotTree::new(
-            name.to_owned(),
-            vec![("value", DotTree::new_leaf(value.to_string()))],
-        )
+        DotTree::new("literal".to_owned(), vec![(name, DotTree::new_leaf(value))])
     }
 }
 
@@ -371,4 +365,30 @@ impl ToDot for ast::PrimitiveType {
 
 fn to_dot_ident(i: &str) -> DotTree {
     DotTree::new_leaf(i.to_owned())
+}
+
+fn to_dot_string_literal(string_literal: &[u8]) -> String {
+    let mut escaped = String::from("\"");
+    for c in String::from_utf8_lossy(string_literal).chars() {
+        match c {
+            '\\' | '"' => write!(escaped, "\\{c}").unwrap(),
+            '\t' => escaped += "\\t",
+            '\n' => escaped += "\\n",
+            '\r' => escaped += "\\r",
+            '\x07' => escaped += "\\a",
+            '\x08' => escaped += "\\b",
+            '\x0c' => escaped += "\\f",
+            '\x0b' => escaped += "\\v",
+            ' ' => escaped += " ",
+            c if c.is_ascii_graphic() => escaped.write_char(c).unwrap(),
+            c if c.is_ascii() => write!(escaped, "\\x{:02X}", c as u8).unwrap(),
+            c => escaped.write_char(c).unwrap(),
+        }
+        if escaped.chars().count() >= 10 {
+            escaped += "…";
+            return escaped;
+        }
+    }
+    escaped += "\"";
+    escaped
 }

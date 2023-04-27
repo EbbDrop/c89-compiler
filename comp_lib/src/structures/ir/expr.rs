@@ -217,4 +217,5 @@ pub enum LvalueExpr {
 pub enum Constant {
     Integer(i128),
     Float(f64),
+    String(Vec<u8>),
 }

@@ -100,6 +100,7 @@ primaryExpr
 
 literal
     : value=CHAR_LITERAL                                        # LiteralChar
+    | (value+=STRING_LITERAL)+                                  # LiteralString
     | value=FLOATING_POINT_LITERAL                              # LiteralFloatingPoint
     | value=integerLiteral                                      # LiteralInteger
     ;

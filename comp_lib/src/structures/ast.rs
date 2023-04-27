@@ -222,21 +222,16 @@ pub struct LiteralNode {
     pub data: Literal,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Dec(i128),
     Hex(i128),
     Octal(i128),
-    Char(i128),
+    Char(u8),
     Float(f64),
+    String(Vec<u8>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum LiteralValue {
-    Integer(i128), //TODO change this to big int?
-    Float(f64),
-    // Void,
-}
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssignmentOperatorNode {
     pub span: Span,

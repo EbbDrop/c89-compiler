@@ -989,14 +989,28 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
             Literal::LiteralCharContext(literal) => {
                 let value = literal.value.as_deref().unwrap().get_text();
 
-                // The grammar requires the first and last character to be a `'` so this will
+                // The grammar requires the first and last character to be a `'`, so this will
                 // always be safe.
                 let value = &value[1..value.len() - 1];
 
                 let span = extract_span(ctx);
 
-                parse_char_literal(value, span.start() + 1)
-                    .map(|byte| ast::Literal::Char(byte as i128))
+                parse_char_literal(value, span.start() + 1).map(ast::Literal::Char)
+            }
+            Literal::LiteralStringContext(literal) => {
+                let mut merged_string = AggregateResult::new_ok(Vec::new());
+                // `literal` can consist of multiple STRING_LITERAL tokens, e.g.
+                // `"foo" "bar"` is one literal that is equivalent to `"foobar"`.
+                for string_literal in &literal.value {
+                    let span = extract_span_from_token(string_literal.as_ref());
+                    let value = string_literal.get_text();
+                    // The grammar requires the first and last character to be a `"`, so this will
+                    // always be safe.
+                    let value = &value[1..(value.len() - 1)];
+                    parse_string_literal(value, span.start() + 1)
+                        .add_to(&mut merged_string, |ms, mut s| ms.append(&mut s));
+                }
+                merged_string.map(ast::Literal::String)
             }
             Literal::Error(ectx) => tree_error(ectx),
         };
@@ -1155,7 +1169,7 @@ fn parse_char_literal(value: &str, start_index: usize) -> AggregateResult<u8> {
 ///
 /// Note that `value` and `start_index` concern the inner literal, without surrounding quotes
 /// (`'` or `"`).
-fn _parse_string_literal(value: &str, start_index: usize) -> AggregateResult<Vec<u8>> {
+fn parse_string_literal(value: &str, start_index: usize) -> AggregateResult<Vec<u8>> {
     let literal_end = start_index + value.len();
     let mut seq = value
         .char_indices()

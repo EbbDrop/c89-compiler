@@ -209,7 +209,7 @@ fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
             return AggregateResult::new_ok(ExprNode {
                 span: lit.span,
                 ty: CType::Scalar(ctype::Scalar::Arithmetic(Char)),
-                expr: Expr::Constant(ir::expr::Constant::Integer(*i)),
+                expr: Expr::Constant(ir::expr::Constant::Integer(*i as i128)),
             })
         }
         ast::Literal::Float(value) => {
@@ -218,6 +218,17 @@ fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
                 ty: CType::Scalar(ctype::Scalar::Arithmetic(Double)),
                 expr: Expr::Constant(ir::expr::Constant::Float(*value)),
             })
+        }
+        ast::Literal::String(s) => {
+            return AggregateResult::new_ok(ExprNode {
+                span: lit.span,
+                // TODO: once pointers have an `is_array` field, set it to true here
+                ty: CType::Scalar(ctype::Scalar::Pointer(
+                    Box::new(CType::Scalar(ctype::Scalar::Arithmetic(Char))),
+                    true,
+                )),
+                expr: Expr::Constant(ir::expr::Constant::String(s.clone())),
+            });
         }
     };
 

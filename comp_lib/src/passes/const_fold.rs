@@ -14,17 +14,6 @@ enum Value {
     Float(f64),
 }
 
-impl From<Literal> for Value {
-    fn from(value: Literal) -> Self {
-        match value {
-            Literal::Dec(i) | Literal::Hex(i) | Literal::Octal(i) | Literal::Char(i) => {
-                Value::Int(i)
-            }
-            Literal::Float(f) => Value::Float(f),
-        }
-    }
-}
-
 struct Folder {}
 
 impl Folder {
@@ -153,9 +142,9 @@ impl Folder {
         expr_node: &mut ExpressionNode,
         last_assign: &Option<(&str, Value)>,
     ) -> Option<Value> {
-        if let Expression::Literal(ref value) = expr_node.data {
+        if let Expression::Literal(ref lit) = expr_node.data {
             // Literals don't need to be folded since they are already as folded as possible
-            return Some(value.data.into());
+            return self.fold_literal(&lit.data);
         }
 
         let folded = self.fold_expr(&mut expr_node.data, last_assign)?;
@@ -197,7 +186,8 @@ impl Folder {
                 }
                 None // Function call expression itself is not const-folded
             }
-            Expression::Literal(lit) => Some(lit.data.into()),
+            // This case should be unreachable, since it is handled in fold_expr_node already.
+            Expression::Literal(lit) => self.fold_literal(&lit.data),
             Expression::Ident(ident) => last_assign
                 .as_ref()
                 .and_then(|(name, value)| (*name == ident.data).then_some(*value)),
@@ -316,6 +306,15 @@ impl Folder {
             replace_with_literal(expr_node, inner_folded);
             None
         })
+    }
+
+    fn fold_literal(&self, literal: &Literal) -> Option<Value> {
+        match literal {
+            Literal::Dec(i) | Literal::Hex(i) | Literal::Octal(i) => Some(Value::Int(*i)),
+            Literal::Char(i) => Some(Value::Int(*i as i128)),
+            Literal::Float(f) => Some(Value::Float(*f)),
+            Literal::String(_) => None,
+        }
     }
 }
 

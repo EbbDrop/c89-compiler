@@ -156,32 +156,32 @@ fn parses_char_literals() {
         }
     check_literals_ok! {
         // regular chars
-        "a" => b'a' as i128,
-        "b" => b'b' as i128,
-        "c" => b'c' as i128,
-        "x" => b'x' as i128,
-        "y" => b'y' as i128,
-        "z" => b'z' as i128,
-        "!" => b'!' as i128,
-        "&" => b'&' as i128,
-        "*" => b'*' as i128,
-        "," => b',' as i128,
-        "/" => b'/' as i128,
-        "~" => b'~' as i128,
-        "^" => b'^' as i128,
-        "%" => b'%' as i128,
-        "\"" => b'"' as i128,
+        "a" => b'a',
+        "b" => b'b',
+        "c" => b'c',
+        "x" => b'x',
+        "y" => b'y',
+        "z" => b'z',
+        "!" => b'!',
+        "&" => b'&',
+        "*" => b'*',
+        "," => b',',
+        "/" => b'/',
+        "~" => b'~',
+        "^" => b'^',
+        "%" => b'%',
+        "\"" => b'"',
         // escaped chars
-        "\\'" => b'\'' as i128,
-        "\\\"" => b'\"' as i128,
-        "\\?" => b'?' as i128,
-        "\\\\" => b'\\' as i128,
+        "\\'" => b'\'',
+        "\\\"" => b'\"',
+        "\\?" => b'?',
+        "\\\\" => b'\\',
         "\\a" => 0x07,
         "\\b" => 0x08,
         "\\f" => 0x0c,
-        "\\n" => b'\n' as i128,
-        "\\r" => b'\r' as i128,
-        "\\t" => b'\t' as i128,
+        "\\n" => b'\n',
+        "\\r" => b'\r',
+        "\\t" => b'\t',
         "\\v" => 0x0b
     };
     // octal escape sequence
@@ -371,7 +371,7 @@ fn assert_expr_float_lit(raw_float_lit: &str, expected_value: f64) {
     );
 }
 
-fn assert_expr_char_lit(raw_inner_char_lit: &str, expected_value: i128) {
+fn assert_expr_char_lit(raw_inner_char_lit: &str, expected_value: u8) {
     assert_expr_eq(
         format!("'{}'", raw_inner_char_lit),
         ast::Expression::Literal(ast::LiteralNode {

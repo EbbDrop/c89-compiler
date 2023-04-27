@@ -265,7 +265,7 @@ mod llvm_ir_builder {
             outer_node: &ir::ExprNode,
             constant: &ir::Constant,
         ) -> Result<lir::constant::Element> {
-            Ok(match *constant {
+            Ok(match constant {
                 ir::Constant::Integer(v) => lir::constant::Integer::new(
                     match outer_node.ty {
                         ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
@@ -273,23 +273,34 @@ mod llvm_ir_builder {
                         }
                         ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => unreachable!(),
                     },
-                    v,
+                    *v,
                 )
                 .into(),
                 ir::Constant::Float(f) => match outer_node.ty {
                     ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => match a {
                         ctype::Arithmetic::Float => {
-                            lir::constant::FloatingPoint::new_float(f as f32)
+                            lir::constant::FloatingPoint::new_float(*f as f32)
                         }
-                        ctype::Arithmetic::Double => lir::constant::FloatingPoint::new_double(f),
+                        ctype::Arithmetic::Double => lir::constant::FloatingPoint::new_double(*f),
                         ctype::Arithmetic::LongDouble => {
-                            lir::constant::FloatingPoint::new_double(f)
+                            lir::constant::FloatingPoint::new_double(*f)
                         }
                         _ => unreachable!(),
                     },
                     ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => unreachable!(),
                 }
                 .into(),
+                ir::Constant::String(string) => {
+                    // CType of string literals is always a char array pointer
+                    let mut char_array = string.clone();
+                    char_array.push(0u8); // C strings always implicitly end with a NULL byte
+                    let constant = lir::constant::Array::new_char_array(char_array);
+                    // C string literals are constant and identical string literals may be merged.
+                    let global_var = lir::GlobalVarDefinition::new_constant(constant)
+                        .with_linkage(lir::Linkage::Private)
+                        .with_address_significance(lir::AddressSignificance::Unnamed);
+                    self.module.define_global_var(global_var).1.into()
+                }
             })
         }
 
