@@ -77,7 +77,7 @@ pub struct SwitchStmtCaseNode {
 pub enum SwitchStmtCase {
     Case {
         /// Shall be an integral constant expression.
-        label: ExprNode,
+        label: i128,
         body: BlockNode,
     },
     Default {
@@ -91,7 +91,7 @@ pub enum SwitchStmtCase {
 pub struct LoopStmtNode {
     pub span: Span,
     /// Controlling expression.
-    pub condition: ExprNode,
+    pub condition: Option<ExprNode>,
     /// Loop body.
     pub body: BlockNode,
     /// Optional continuation part of a for statement.
