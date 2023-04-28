@@ -15,7 +15,7 @@ declare_base_constant! {
     fn fmt_as_llvm_asm(self, f, opts, module) {
         ConstantPointer::Null => f.write_str("null"),
         ConstantPointer::GlobalAddress(handle) => {
-            module.global_id(*handle).fmt_as_llvm_asm(f, opts, module)
+            module.global_id(handle).fmt_as_llvm_asm(f, opts, module)
         }
     }
 }

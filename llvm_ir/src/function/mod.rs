@@ -125,8 +125,8 @@ impl FunctionDeclaration {
         fmt_function_as_llvm_asm_with_id(self, f, opts, module, "declare", function_id)
     }
 
-    pub(crate) fn id(&self, handle: LocalIdHandle) -> &id::Local {
-        self.symbols.id(handle.0)
+    pub(crate) fn id(&self, handle: &LocalIdHandle) -> &id::Local {
+        self.symbols.id(&handle.0)
     }
 
     fn create_unnamed_id_handle(&mut self) -> LocalIdHandle {
@@ -140,8 +140,26 @@ impl FunctionDeclaration {
             .map_err(|name| format!("function local name {name:?} shouldn't already exist"))
     }
 
-    fn update_unnamed_id(&mut self, handle: LocalIdHandle) -> bool {
-        self.symbols.update_unnamed_id(handle.0)
+    fn update_unnamed_id(&mut self, handle: &LocalIdHandle) -> bool {
+        self.symbols.update_unnamed_id(&handle.0)
+    }
+
+    #[deprecated = "implementation is not yet complete"]
+    fn _remove_id(&mut self, handle: &mut LocalIdHandle) -> id::Local {
+        let _removed_id = self.symbols.remove_id(&mut handle.0);
+        // TODO: check all existing blocks and instructions for validity and patch if necessary
+        todo!()
+    }
+
+    #[deprecated = "implementation is not yet complete"]
+    fn _merge_ids(
+        &mut self,
+        handle1: &mut LocalIdHandle,
+        handle2: &mut LocalIdHandle,
+    ) -> Option<id::Local> {
+        let _removed_id = self.symbols.merge_ids(&mut handle1.0, &mut handle2.0);
+        // TODO: check all existing blocks and instructions for validity and patch if necessary
+        todo!()
     }
 }
 
@@ -194,12 +212,12 @@ impl FunctionDefinition {
     }
 
     fn update_unnamed_ids(&mut self, block: &BasicBlock) {
-        self.declaration.update_unnamed_id(block.label.handle);
+        self.declaration.update_unnamed_id(&block.label.handle);
         for instruction in &block.instructions {
             match instruction {
                 instruction::Instruction::Yielding(result, _)
                 | instruction::Instruction::MaybeYielding(Some(result), _) => {
-                    self.declaration.update_unnamed_id(result.handle);
+                    self.declaration.update_unnamed_id(&result.handle);
                 }
                 instruction::Instruction::MaybeYielding(None, _)
                 | instruction::Instruction::Void(_) => {}
@@ -353,7 +371,8 @@ impl value::Value for Param {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// [`LocalIdHandle`]'s have interior mutability. They should not be used as keys in maps!
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LocalIdHandle(IdHandle);
 
 // Note that `ReturnType` is not a `ty::Type`! (because void is not a type)

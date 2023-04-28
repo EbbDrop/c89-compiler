@@ -25,10 +25,8 @@ pub fn it_works() {
     let bb2 = function.declare_block();
 
     function
-        .terminate_block(instruction::Branch { dest: bb1.clone() })
+        .terminate_and_start_declared_block(instruction::Branch { dest: bb1.clone() }, bb1.clone())
         .unwrap();
-
-    function.start_block(bb1.clone());
 
     let cond = function
         .add_instruction(instruction::compare::Int {
@@ -39,14 +37,15 @@ pub fn it_works() {
         .unwrap();
 
     function
-        .terminate_block(instruction::BranchConditional {
-            cond,
-            dest_true: bb1,
-            dest_false: bb2.clone(),
-        })
+        .terminate_and_start_declared_block(
+            instruction::BranchConditional {
+                cond,
+                dest_true: bb1,
+                dest_false: bb2.clone(),
+            },
+            bb2,
+        )
         .unwrap();
-
-    function.start_block(bb2);
 
     module
         .define_function_named("main".into(), function.build())

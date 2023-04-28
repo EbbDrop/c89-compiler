@@ -33,7 +33,7 @@ impl<T: Type> crate::FmtAsLlvmAsmMC for Identified<T> {
         module: &crate::Module,
     ) -> std::fmt::Result {
         module
-            .local_id(self.handle)
+            .local_id(&self.handle)
             .fmt_as_llvm_asm(f, opts, module)
     }
 }

@@ -30,7 +30,7 @@ impl crate::FmtAsLlvmAsmFC for Label {
         function: &crate::FunctionDeclaration,
     ) -> fmt::Result {
         function
-            .id(self.handle)
+            .id(&self.handle)
             .fmt_as_llvm_asm(f, opts, module, function)
     }
 }

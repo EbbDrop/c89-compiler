@@ -90,7 +90,7 @@ pub enum SwitchStmtCase {
 #[derive(Debug, Clone)]
 pub struct LoopStmtNode {
     pub span: Span,
-    /// Controlling expression.
+    /// Controlling expression. Can be `None` for e.g. `for (;;)`.
     pub condition: Option<ExprNode>,
     /// Loop body.
     pub body: BlockNode,

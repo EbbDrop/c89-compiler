@@ -10,7 +10,7 @@ pub struct Register<T: ty::FirstClassType> {
 
 impl<T: ty::FirstClassType> Register<T> {
     pub(crate) fn is_named(&self, function: &crate::FunctionDeclaration) -> bool {
-        function.id(self.handle).as_ref().is_named()
+        function.id(&self.handle).as_ref().is_named()
     }
 }
 
@@ -31,7 +31,7 @@ impl<T: ty::FirstClassType> crate::FmtAsLlvmAsmFC for Register<T> {
         function: &crate::FunctionDeclaration,
     ) -> std::fmt::Result {
         function
-            .id(self.handle)
+            .id(&self.handle)
             .fmt_as_llvm_asm(f, opts, module, function)
     }
 }
@@ -63,7 +63,7 @@ where
             .try_into()
             .map(|ty| Register {
                 ty,
-                handle: value.handle,
+                handle: value.handle.clone(),
             })
             .map_err(|err| ValueConversionError::wrap::<Register<T>, Self>(value, err))
     }

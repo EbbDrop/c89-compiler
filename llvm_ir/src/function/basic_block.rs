@@ -29,7 +29,7 @@ impl crate::FmtAsLlvmAsmFC for BasicBlock {
                 writeln!(f, ";{line}")?;
             }
         }
-        match function.id(self.label.handle).as_ref() {
+        match function.id(&self.label.handle).as_ref() {
             id::Id::Named(named) => {
                 named.fmt_as_llvm_asm(f, opts, module, function)?;
                 f.write_str(":\n")?;

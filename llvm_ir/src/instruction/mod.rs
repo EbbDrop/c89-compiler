@@ -54,6 +54,14 @@ macro_rules! declare_type_union_validated {
         $($(
             #[$meta] pub struct $variant($raw_variant);
 
+            impl std::ops::Deref for $variant {
+                type Target = $raw_variant;
+
+                fn deref(&self) -> &Self::Target {
+                    &self.0
+                }
+            }
+
             impl crate::FmtAsLlvmAsmFC for $variant {
                 fn fmt_as_llvm_asm(
                     &self,

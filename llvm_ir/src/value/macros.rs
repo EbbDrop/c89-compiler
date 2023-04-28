@@ -312,6 +312,17 @@ macro_rules! declare_base_value {
             }
         }
 
+        impl TryFrom<$Value> for crate::constant::$Value {
+            type Error = crate::value::ValueConversionError;
+
+            fn try_from(value: $Value) -> Result<Self, Self::Error> {
+                match value {
+                    $Value::Constant(c) => Ok(c),
+                    $Value::Register(_) => Err(crate::value::ValueConversionError::new::<$Value, Self>(value)),
+                }
+            }
+        }
+
         $(
             impl_from! {
                 |value: $Value| -> $GrandParentValue {
@@ -405,11 +416,22 @@ macro_rules! declare_base_constant {
                     $ParentConstant::from(value).into()
                 }
             }
+            impl_try_from! {
+                |value: $GrandParentConstant| -> <$Constant, crate::value::ValueConversionError> {
+                    $ParentConstant::try_from(value)?.try_into()
+                }
+            }
         )*
 
         impl_from! {
             @many |value: $Constant| -> crate::value::$ParentConstant $(, crate::value::$GrandParentConstant)* {
                 crate::value::$Constant::from(value).into()
+            }
+        }
+
+        impl_try_from! {
+            @many |value: crate::value::$ParentConstant $(, crate::value::$GrandParentConstant)*| -> <$Constant, crate::value::ValueConversionError> {
+                crate::value::$Constant::try_from(value)?.try_into()
             }
         }
 

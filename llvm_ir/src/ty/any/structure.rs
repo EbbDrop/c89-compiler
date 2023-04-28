@@ -66,7 +66,7 @@ impl Type for Structure {
             }
             // Literal opaque structs cannot be created directly. The only way to create an opaque
             // struct is by 'declaring' an opaque identified type in the module. This ensures every
-            // opaque struct type that exists, is wrapped in at least one Identifier<Structure>.
+            // opaque struct type that exists, is wrapped in at least one Identified<Structure>.
             // So all opaque struct cases should be handled by the above. Of course the struct
             // can still contain opaque elements, which is checked by the rest of this function.
             (Self::Literal(LiteralStructure(InnerLiteralStructure::Opaque)), _)

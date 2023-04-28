@@ -269,8 +269,9 @@ where
         f.write_char(' ')?;
         self.default_dest
             .fmt_as_llvm_asm(f, opts, module, function)?;
+        f.write_str(" [")?;
         for (value, label) in &self.branches {
-            f.write_str(" [ ")?;
+            f.write_char(' ')?;
             value.ty().fmt_as_llvm_asm(f, opts, module, function)?;
             f.write_char(' ')?;
             value.fmt_as_llvm_asm(f, opts, module, function)?;
@@ -278,9 +279,8 @@ where
             label.ty().fmt_as_llvm_asm(f, opts, module, function)?;
             f.write_char(' ')?;
             label.fmt_as_llvm_asm(f, opts, module, function)?;
-            f.write_str(" ]")?;
         }
-        Ok(())
+        f.write_str(" ]")
     }
 }
 

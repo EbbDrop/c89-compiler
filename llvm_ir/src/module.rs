@@ -127,7 +127,7 @@ impl Module {
 
     pub fn declare_type(&mut self) -> (TypeDeclarationHandle, ty::Identified<ty::Structure>) {
         let handle = self.create_local_unnamed_id_handle();
-        let ty = ty::Structure::new_opaque(handle);
+        let ty = ty::Structure::new_opaque(handle.clone());
         let index = self.types.len();
         self.types.push(Some((handle, ty.clone().into())));
         (TypeDeclarationHandle(index), ty)
@@ -138,7 +138,7 @@ impl Module {
         name: Name,
     ) -> Result<(TypeDeclarationHandle, ty::Identified<ty::Structure>), String> {
         let handle = self.create_local_named_id_handle(name)?;
-        let ty = ty::Structure::new_opaque(handle);
+        let ty = ty::Structure::new_opaque(handle.clone());
         let index = self.types.len();
         self.types.push(Some((handle, ty.clone().into())));
         Ok((TypeDeclarationHandle(index), ty))
@@ -146,7 +146,7 @@ impl Module {
 
     pub fn define_type<T: ty::FirstClassType>(&mut self, ty: T) -> ty::Identified<T> {
         let handle = self.create_local_unnamed_id_handle();
-        self.types.push(Some((handle, ty.clone().into())));
+        self.types.push(Some((handle.clone(), ty.clone().into())));
         ty::Identified { ty, handle }
     }
 
@@ -156,7 +156,7 @@ impl Module {
         ty: T,
     ) -> Result<ty::Identified<T>, String> {
         let handle = self.create_local_named_id_handle(name)?;
-        self.types.push(Some((handle, ty.clone().into())));
+        self.types.push(Some((handle.clone(), ty.clone().into())));
         Ok(ty::Identified { ty, handle })
     }
 
@@ -170,8 +170,9 @@ impl Module {
             return Err("forward declaring type aliases is not allowed");
         }
         let (id_handle, _) = self.types[handle.0].take().unwrap();
-        self.update_local_unnamed_id(id_handle);
-        self.types.push(Some((id_handle, new_ty.clone().into())));
+        self.update_local_unnamed_id(&id_handle);
+        self.types
+            .push(Some((id_handle.clone(), new_ty.clone().into())));
         Ok(ty::Identified {
             ty: new_ty,
             handle: id_handle,
@@ -187,7 +188,7 @@ impl Module {
         let index = self.global_var_declarations.len();
         let handle = self.create_global_unnamed_id_handle();
         self.global_var_declarations
-            .push((handle, global_var_declaration));
+            .push((handle.clone(), global_var_declaration));
 
         (
             GlobalVarDeclarationHandle(index),
@@ -210,7 +211,7 @@ impl Module {
         let index = self.global_var_declarations.len();
         let handle = self.create_global_named_id_handle(name)?;
         self.global_var_declarations
-            .push((handle, global_var_declaration));
+            .push((handle.clone(), global_var_declaration));
 
         Ok((
             GlobalVarDeclarationHandle(index),
@@ -232,7 +233,7 @@ impl Module {
         let index = self.global_var_definitions.len();
         let handle = self.create_global_unnamed_id_handle();
         self.global_var_definitions
-            .push((handle, global_var_definition));
+            .push((handle.clone(), global_var_definition));
 
         (
             GlobalVarDefinitionHandle(index),
@@ -255,7 +256,7 @@ impl Module {
         let index = self.global_var_definitions.len();
         let handle = self.create_global_named_id_handle(name)?;
         self.global_var_definitions
-            .push((handle, global_var_definition));
+            .push((handle.clone(), global_var_definition));
 
         Ok((
             GlobalVarDefinitionHandle(index),
@@ -277,7 +278,7 @@ impl Module {
         let index = self.function_declarations.len();
         let handle = self.create_global_unnamed_id_handle();
         self.function_declarations
-            .push(Some((handle, function_declaration)));
+            .push(Some((handle.clone(), function_declaration)));
 
         (
             FunctionDeclarationHandle(index),
@@ -300,7 +301,7 @@ impl Module {
         let index = self.function_declarations.len();
         let handle = self.create_global_named_id_handle(name)?;
         self.function_declarations
-            .push(Some((handle, function_declaration)));
+            .push(Some((handle.clone(), function_declaration)));
 
         Ok((
             FunctionDeclarationHandle(index),
@@ -322,7 +323,7 @@ impl Module {
         let index = self.function_definitions.len();
         let handle = self.create_global_unnamed_id_handle();
         self.function_definitions
-            .push((handle, function_definition));
+            .push((handle.clone(), function_definition));
 
         (
             FunctionDefinitionHandle(index),
@@ -345,7 +346,7 @@ impl Module {
         let index = self.function_definitions.len();
         let handle = self.create_global_named_id_handle(name)?;
         self.function_definitions
-            .push((handle, function_definition));
+            .push((handle.clone(), function_definition));
 
         Ok((
             FunctionDefinitionHandle(index),
@@ -372,7 +373,7 @@ impl Module {
             .unwrap()
             .take()
             .unwrap();
-        self.update_global_unnamed_id(id_handle);
+        self.update_global_unnamed_id(&id_handle);
         let definition = f(declaration);
         let index = self.function_definitions.len();
         self.function_definitions.push((id_handle, definition));
@@ -386,46 +387,46 @@ impl Module {
     pub(crate) fn _get_global_var_declaration_id_handle(
         &self,
         global_var_declaration: &GlobalVarDeclaration,
-    ) -> Option<GlobalIdHandle> {
+    ) -> Option<&GlobalIdHandle> {
         self.global_var_declarations
             .iter()
-            .find_map(|(handle, gvd)| std::ptr::eq(gvd, global_var_declaration).then_some(*handle))
+            .find_map(|(handle, gvd)| std::ptr::eq(gvd, global_var_declaration).then_some(handle))
     }
 
     pub(crate) fn _get_global_var_definition_id_handle(
         &self,
         global_var_definition: &GlobalVarDefinition,
-    ) -> Option<GlobalIdHandle> {
+    ) -> Option<&GlobalIdHandle> {
         self.global_var_definitions
             .iter()
-            .find_map(|(handle, gvd)| std::ptr::eq(gvd, global_var_definition).then_some(*handle))
+            .find_map(|(handle, gvd)| std::ptr::eq(gvd, global_var_definition).then_some(handle))
     }
 
     pub(crate) fn get_function_declaration_id_handle(
         &self,
         function_declaration: &FunctionDeclaration,
-    ) -> Option<GlobalIdHandle> {
+    ) -> Option<&GlobalIdHandle> {
         self.function_declarations.iter().find_map(|item| {
             item.as_ref()
-                .and_then(|(handle, fd)| std::ptr::eq(fd, function_declaration).then_some(*handle))
+                .and_then(|(handle, fd)| std::ptr::eq(fd, function_declaration).then_some(handle))
         })
     }
 
     pub(crate) fn get_function_definition_id_handle(
         &self,
         function_definition: &FunctionDefinition,
-    ) -> Option<GlobalIdHandle> {
+    ) -> Option<&GlobalIdHandle> {
         self.function_definitions
             .iter()
-            .find_map(|(handle, fd)| std::ptr::eq(fd, function_definition).then_some(*handle))
+            .find_map(|(handle, fd)| std::ptr::eq(fd, function_definition).then_some(handle))
     }
 
-    pub(crate) fn global_id(&self, handle: GlobalIdHandle) -> &id::Global {
-        self.global_symbols.id(handle.0)
+    pub(crate) fn global_id(&self, handle: &GlobalIdHandle) -> &id::Global {
+        self.global_symbols.id(&handle.0)
     }
 
-    pub(crate) fn local_id(&self, handle: LocalIdHandle) -> &id::Local {
-        self.local_symbols.id(handle.0)
+    pub(crate) fn local_id(&self, handle: &LocalIdHandle) -> &id::Local {
+        self.local_symbols.id(&handle.0)
     }
 
     fn create_global_unnamed_id_handle(&mut self) -> GlobalIdHandle {
@@ -450,12 +451,37 @@ impl Module {
             .map_err(|name| format!("module local name {name:?} shouldn't already exist"))
     }
 
-    fn update_global_unnamed_id(&mut self, handle: GlobalIdHandle) -> bool {
-        self.global_symbols.update_unnamed_id(handle.0)
+    fn update_global_unnamed_id(&mut self, handle: &GlobalIdHandle) -> bool {
+        self.global_symbols.update_unnamed_id(&handle.0)
     }
 
-    fn update_local_unnamed_id(&mut self, handle: LocalIdHandle) -> bool {
-        self.local_symbols.update_unnamed_id(handle.0)
+    fn update_local_unnamed_id(&mut self, handle: &LocalIdHandle) -> bool {
+        self.local_symbols.update_unnamed_id(&handle.0)
+    }
+
+    fn _remove_global_id(&mut self, handle: &mut GlobalIdHandle) -> id::Global {
+        self.global_symbols.remove_id(&mut handle.0)
+    }
+
+    fn _remove_local_id(&mut self, handle: &mut LocalIdHandle) -> id::Local {
+        self.local_symbols.remove_id(&mut handle.0)
+    }
+
+    fn _merge_global_ids(
+        &mut self,
+        handle1: &mut GlobalIdHandle,
+        handle2: &mut GlobalIdHandle,
+    ) -> Option<id::Global> {
+        self.global_symbols
+            .merge_ids(&mut handle1.0, &mut handle2.0)
+    }
+
+    fn _merge_local_ids(
+        &mut self,
+        handle1: &mut LocalIdHandle,
+        handle2: &mut LocalIdHandle,
+    ) -> Option<id::Local> {
+        self.local_symbols.merge_ids(&mut handle1.0, &mut handle2.0)
     }
 }
 
@@ -475,7 +501,7 @@ impl crate::FmtAsLlvmAsm for Module {
 
         for (id_handle, ty) in self.types.iter().flatten() {
             writeln!(f)?;
-            self.local_id(*id_handle).fmt_as_llvm_asm(f, opts)?;
+            self.local_id(id_handle).fmt_as_llvm_asm(f, opts)?;
             f.write_str(" = type ")?;
             {
                 use crate::FmtAsLlvmAsmMC;
@@ -486,7 +512,7 @@ impl crate::FmtAsLlvmAsm for Module {
 
         for (id_handle, gvd) in &self.global_var_declarations {
             writeln!(f)?;
-            self.global_id(*id_handle).fmt_as_llvm_asm(f, opts)?;
+            self.global_id(id_handle).fmt_as_llvm_asm(f, opts)?;
             f.write_str(" = ")?;
             {
                 use crate::FmtAsLlvmAsmMC;
@@ -497,7 +523,7 @@ impl crate::FmtAsLlvmAsm for Module {
 
         for (id_handle, gvd) in &self.global_var_definitions {
             writeln!(f)?;
-            self.global_id(*id_handle).fmt_as_llvm_asm(f, opts)?;
+            self.global_id(id_handle).fmt_as_llvm_asm(f, opts)?;
             f.write_str(" = ")?;
             {
                 use crate::FmtAsLlvmAsmMC;
@@ -508,13 +534,13 @@ impl crate::FmtAsLlvmAsm for Module {
 
         for (id_handle, fd) in self.function_declarations.iter().flatten() {
             writeln!(f)?;
-            fd.fmt_as_llvm_asm_with_id(f, opts, self, self.global_id(*id_handle))?;
+            fd.fmt_as_llvm_asm_with_id(f, opts, self, self.global_id(id_handle))?;
             writeln!(f)?;
         }
 
         for (id_handle, fd) in &self.function_definitions {
             writeln!(f)?;
-            fd.fmt_as_llvm_asm_with_id(f, opts, self, self.global_id(*id_handle))?;
+            fd.fmt_as_llvm_asm_with_id(f, opts, self, self.global_id(id_handle))?;
             writeln!(f)?;
         }
 
@@ -537,8 +563,10 @@ pub struct FunctionDefinitionHandle(usize);
 #[derive(Debug, Clone, Copy)]
 pub struct TypeDeclarationHandle(usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// [`GlobalIdHandle`]'s have interior mutability. They should not be used as keys in maps!
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GlobalIdHandle(IdHandle);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// [`LocalIdHandle`]'s have interior mutability. They should not be used as keys in maps!
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LocalIdHandle(IdHandle);

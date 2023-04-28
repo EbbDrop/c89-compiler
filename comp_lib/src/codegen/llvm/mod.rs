@@ -45,6 +45,8 @@ mod llvm_ir_builder {
         printf_int: lir::constant::Pointer,
         printf_float: lir::constant::Pointer,
         printf_ptr: lir::constant::Pointer,
+        continue_label_stack: Vec<lir::constant::Label>,
+        break_label_stack: Vec<lir::constant::Label>,
         source: &'s str,
     }
 
@@ -86,6 +88,8 @@ mod llvm_ir_builder {
                 printf_int,
                 printf_float,
                 printf_ptr,
+                continue_label_stack: Vec::new(),
+                break_label_stack: Vec::new(),
                 source,
             }
         }
@@ -138,29 +142,211 @@ mod llvm_ir_builder {
                 self.function.add_comment(format!(";; {line}"));
             }
             match &stmt_node.stmt {
-                ir::Stmt::Expr(expr_node) => {
-                    self.add_expr_node(expr_node)?;
+                ir::Stmt::Expr(node) => {
+                    self.add_expr_node(node)?;
                 }
-                ir::Stmt::Printf(expr_node) => {
-                    self.add_printf(expr_node)?;
-                }
-                ir::Stmt::IfStmt(_) => todo!(),
-                ir::Stmt::SwitchStmt(_) => todo!(),
-                ir::Stmt::LoopStmt(_) => todo!(),
-                ir::Stmt::Break => todo!(),
-                ir::Stmt::Continue => todo!(),
-                ir::Stmt::Return(_) => todo!(),
+                ir::Stmt::Printf(node) => self.add_printf(node)?,
+                ir::Stmt::IfStmt(node) => self.add_if_stmt_node(node)?,
+                ir::Stmt::SwitchStmt(node) => self.add_switch_stmt_node(node)?,
+                ir::Stmt::LoopStmt(node) => self.add_loop_stmt_node(node)?,
+                ir::Stmt::Break => self.add_break_stmt_node()?,
+                ir::Stmt::Continue => self.add_continue_stmt_node()?,
+                ir::Stmt::Return(node) => self.add_return_stmt_node(node)?,
             };
             Ok(())
+        }
+
+        fn add_if_stmt_node(&mut self, if_stmt_node: &ir::IfStmtNode) -> Result<()> {
+            // Create a label for the block where execution continues after either executing the
+            // if-branch or the else-branch.
+            let label_end = self.function.declare_block();
+            let label_if_branch = self.function.declare_block();
+            // Either the label of the else-branch, or `label_end`.
+            let dest_false = match if_stmt_node.else_branch {
+                Some(_) => self.function.declare_block(),
+                None => label_end.clone(),
+            };
+
+            let cond = {
+                let res = self.add_expr_node(&if_stmt_node.condition)?;
+                self.add_truthy_check(res)?
+            };
+
+            self.function.terminate_and_start_declared_block(
+                lir::instruction::BranchConditional {
+                    cond,
+                    dest_true: label_if_branch.clone(),
+                    dest_false: dest_false.clone(),
+                },
+                label_if_branch,
+            )?;
+
+            // Add if branch
+            self.add_block(&if_stmt_node.if_branch)?;
+
+            // Add optional else branch
+            if let Some(else_branch) = &if_stmt_node.else_branch {
+                self.function.jump_start_declared_block(dest_false)?;
+                self.add_block(else_branch)?;
+            }
+
+            self.function.jump_start_declared_block(label_end)?;
+
+            Ok(())
+        }
+
+        fn add_switch_stmt_node(&mut self, switch_stmt_node: &ir::SwitchStmtNode) -> Result<()> {
+            let control_value: lir::value::Integer =
+                self.add_expr_node(&switch_stmt_node.expr)?.try_into()?;
+            let control_value_ty = control_value.ty();
+
+            let mut branches: Vec<(lir::constant::Integer, lir::constant::Label)> = Vec::new();
+            let mut default_target: Option<lir::constant::Label> = None;
+
+            let mut bodies: Vec<(lir::constant::Label, &ir::BlockNode)> = Vec::new();
+
+            let mut last_alias = None;
+            for case in &switch_stmt_node.cases {
+                let body = match &case.data {
+                    ir::SwitchStmtCase::Case { body, .. } => body,
+                    ir::SwitchStmtCase::Default { body } => body,
+                };
+                let label = if body.stmts.is_empty() {
+                    last_alias
+                        .get_or_insert_with(|| self.function.declare_block())
+                        .clone()
+                } else {
+                    last_alias
+                        .take()
+                        .unwrap_or_else(|| self.function.declare_block())
+                };
+                match &case.data {
+                    ir::SwitchStmtCase::Case { label: value, .. } => {
+                        let int_const = lir::constant::Integer::new::<lir::ty::Integer>(
+                            control_value_ty.clone(),
+                            *value,
+                        );
+                        branches.push((int_const, label.clone()));
+                    }
+                    ir::SwitchStmtCase::Default { .. } => default_target = Some(label.clone()),
+                }
+                if !body.stmts.is_empty() {
+                    bodies.push((label, body));
+                }
+            }
+
+            if bodies.is_empty() {
+                return Ok(());
+            }
+
+            let label_end = last_alias
+                .take()
+                .unwrap_or_else(|| self.function.declare_block());
+
+            self.function.terminate_block(lir::instruction::Switch {
+                value: control_value,
+                default_dest: default_target.take().unwrap_or(label_end.clone()),
+                branches,
+            })?;
+
+            self.break_label_stack.push(label_end.clone());
+
+            for (label, block_node) in bodies {
+                self.function.jump_start_declared_block(label)?;
+                self.add_block(block_node)?;
+            }
+
+            self.function.jump_start_declared_block(label_end)?;
+
+            self.break_label_stack.pop().unwrap();
+
+            Ok(())
+        }
+
+        fn add_loop_stmt_node(&mut self, loop_stmt_node: &ir::LoopStmtNode) -> Result<()> {
+            let label_loop_start = self.function.jump_start_block()?;
+
+            let label_break = self.function.declare_block();
+            let label_continue = match &loop_stmt_node.continuation {
+                Some(_) => self.function.declare_block(),
+                None => label_loop_start.clone(),
+            };
+
+            if let Some(condition_node) = &loop_stmt_node.condition {
+                let cond = {
+                    let res = self.add_expr_node(condition_node)?;
+                    self.add_truthy_check(res)?
+                };
+                let label_body_start = self.function.declare_block();
+                self.function.terminate_and_start_declared_block(
+                    lir::instruction::BranchConditional {
+                        cond,
+                        dest_true: label_body_start.clone(),
+                        dest_false: label_break.clone(),
+                    },
+                    label_body_start,
+                )?;
+            }
+
+            // NOTE: this needs to be set *after* executing the condition. Technically this
+            // shouldn't make a difference since the condition can never contain a jump statement.
+            self.continue_label_stack.push(label_continue.clone());
+            self.break_label_stack.push(label_break.clone());
+
+            self.add_block(&loop_stmt_node.body)?;
+
+            if let Some(continuation_node) = &loop_stmt_node.continuation {
+                self.function.jump_start_declared_block(label_continue)?;
+                self.add_expr_node(continuation_node)?;
+            }
+
+            self.function
+                .terminate_block_with_branch_to(label_loop_start)?;
+
+            self.function.jump_start_declared_block(label_break)?;
+
+            self.continue_label_stack.pop().unwrap();
+            self.break_label_stack.pop().unwrap();
+
+            Ok(())
+        }
+
+        fn add_break_stmt_node(&mut self) -> Result<()> {
+            self.function.terminate_block_with_branch_to(
+                self.break_label_stack
+                    .last()
+                    .expect("break statements can only appear within loops")
+                    .clone(),
+            )
+        }
+
+        fn add_continue_stmt_node(&mut self) -> Result<()> {
+            self.function.terminate_block_with_branch_to(
+                self.continue_label_stack
+                    .last()
+                    .expect("continue statements can only appear within loops")
+                    .clone(),
+            )
+        }
+
+        fn add_return_stmt_node(&mut self, expr_node: &Option<ir::ExprNode>) -> Result<()> {
+            match expr_node {
+                Some(expr_node) => {
+                    let return_value = self.add_expr_node(expr_node)?;
+                    self.function
+                        .terminate_block(lir::instruction::Return(return_value))
+                }
+                None => self.function.terminate_block(lir::instruction::ReturnVoid),
+            }
         }
 
         fn add_printf(&mut self, expr_node: &ir::ExprNode) -> Result<()> {
             let value: lir::value::Primitive = self.add_expr_node(expr_node)?.try_into()?;
 
-            let str_pointer = match value.ty() {
-                lir::ty::Primitive::Integer(_) => self.printf_int.clone(),
-                lir::ty::Primitive::FloatingPoint(_) => self.printf_float.clone(),
-                lir::ty::Primitive::Pointer(_) => self.printf_ptr.clone(),
+            let str_pointer = match &value {
+                lir::value::Primitive::Integer(_) => self.printf_int.clone(),
+                lir::value::Primitive::FloatingPoint(_) => self.printf_float.clone(),
+                lir::value::Primitive::Pointer(_) => self.printf_ptr.clone(),
             };
 
             let (fn_handle, fn_pointer) = self.printf.clone();
@@ -825,7 +1011,7 @@ mod llvm_ir_builder {
             rhs_node: &ir::ExprNode,
         ) -> Result<lir::value::Integer> {
             // Create a label placeholder for the block were execution continues hereafter
-            let label_continue = self.function.declare_block();
+            let label_end = self.function.declare_block();
             // Create a label placeholder for the block that will execute rhs (will only be branched
             // to of the lhs was truthy)
             let label_execute_rhs = self.function.declare_block();
@@ -841,14 +1027,14 @@ mod llvm_ir_builder {
             let label_end_lhs = self.function.get_or_set_block_label();
 
             // Skip the execution of the rhs if the lhs is falsy
-            self.function
-                .terminate_block(lir::instruction::BranchConditional {
+            self.function.terminate_and_start_declared_block(
+                lir::instruction::BranchConditional {
                     cond: lhs_result,
                     dest_true: label_execute_rhs.clone(),
-                    dest_false: label_continue.clone(),
-                })?;
-
-            self.function.start_block(label_execute_rhs);
+                    dest_false: label_end.clone(),
+                },
+                label_execute_rhs,
+            )?;
 
             // Execute & check rhs
             let rhs_result = {
@@ -860,11 +1046,7 @@ mod llvm_ir_builder {
             // rhs, that will end with the unconditional branch specified below.
             let label_end_rhs = self.function.get_or_set_block_label();
 
-            self.function.terminate_block(lir::instruction::Branch {
-                dest: label_continue.clone(),
-            })?;
-
-            self.function.start_block(label_continue);
+            self.function.jump_start_declared_block(label_end)?;
 
             let result = self.function.add_instruction(lir::instruction::Phi {
                 head: (lir::constant::Boolean::new(false).into(), label_end_lhs),
@@ -885,7 +1067,7 @@ mod llvm_ir_builder {
             rhs_node: &ir::ExprNode,
         ) -> Result<lir::value::Integer> {
             // Create a label placeholder for the block were execution continues hereafter
-            let label_continue = self.function.declare_block();
+            let label_end = self.function.declare_block();
             // Create a label placeholder for the block that will execute rhs (will only be branched
             // to of the lhs was falsy)
             let label_execute_rhs = self.function.declare_block();
@@ -901,14 +1083,14 @@ mod llvm_ir_builder {
             let label_end_lhs = self.function.get_or_set_block_label();
 
             // Skip the execution of the rhs if the lhs is truthy
-            self.function
-                .terminate_block(lir::instruction::BranchConditional {
+            self.function.terminate_and_start_declared_block(
+                lir::instruction::BranchConditional {
                     cond: lhs_result,
-                    dest_true: label_continue.clone(),
+                    dest_true: label_end.clone(),
                     dest_false: label_execute_rhs.clone(),
-                })?;
-
-            self.function.start_block(label_execute_rhs);
+                },
+                label_execute_rhs,
+            )?;
 
             // Execute & check rhs
             let rhs_result = {
@@ -920,11 +1102,7 @@ mod llvm_ir_builder {
             // rhs, that will end with the unconditional branch specified below.
             let label_end_rhs = self.function.get_or_set_block_label();
 
-            self.function.terminate_block(lir::instruction::Branch {
-                dest: label_continue.clone(),
-            })?;
-
-            self.function.start_block(label_continue);
+            self.function.jump_start_declared_block(label_end)?;
 
             let result = self.function.add_instruction(lir::instruction::Phi {
                 head: (lir::constant::Boolean::new(true).into(), label_end_lhs),

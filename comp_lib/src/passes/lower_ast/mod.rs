@@ -85,8 +85,8 @@ pub fn build_ir_from_function_block(
         stmt::build_ir_from_block(block, &mut scope)
     };
 
-    res.map(|stmts| Root {
-        global: stmts,
+    res.map(|block| Root {
+        global: block,
         table: function_table.into_table(),
     })
 }

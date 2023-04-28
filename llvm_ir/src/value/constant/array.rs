@@ -9,12 +9,12 @@ declare_base_constant! {
     (Array(ConstantArray): ty::Array, (ArrayConstant, ArrayValue): ty::ArrayType)
         => (Aggregate, AggregateConstant) => Element => FirstClass
     {
-        Literal { elements: Vec<Element> },
+        ValueArray { elements: Vec<Element> },
         CharArray { elements: Vec<u8> },
     }
 
     fn fmt_as_llvm_asm(self, f, opts, module) {
-        ConstantArray::Literal { elements } => {
+        ConstantArray::ValueArray { elements } => {
             f.write_char('[')?;
             if let [head, tail @ ..] = elements.as_slice() {
                 head.ty().fmt_as_llvm_asm(f, opts, module)?;
@@ -94,7 +94,11 @@ impl Array {
         }
         Ok(Self {
             ty,
-            value: ConstantArray::Literal { elements },
+            value: ConstantArray::ValueArray { elements },
         })
+    }
+
+    pub fn is_char_array(&self) -> bool {
+        matches!(self.value, ConstantArray::CharArray { .. })
     }
 }
