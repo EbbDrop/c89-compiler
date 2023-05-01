@@ -1,4 +1,4 @@
-//warn-any:
+//fail-any:
 
 int main() {
     int x = 478;

@@ -1,11 +1,11 @@
 mod cli;
-mod compile;
 mod report;
 mod util;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 
+use comp_lib::compile;
 use compile::compile;
 use std::io::Write;
 
@@ -13,9 +13,10 @@ fn main() -> Result<()> {
     let args = cli::Args::parse();
 
     let source = cli::open_input_source(&args)?;
+    let source_name = source.name().clone();
 
     let compile_opts = cli::extract_compile_opts(&args);
-    let res = compile(&source, compile_opts);
+    let res = compile(source.source(), &source_name, &compile_opts);
 
     if !res.is_ok() {
         report::eprint_aggregate(&res, &source);

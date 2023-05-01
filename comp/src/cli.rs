@@ -1,7 +1,11 @@
-use crate::{compile::CompileOpts, util::PathOrStd};
+use crate::util::PathOrStd;
+
+use comp_lib::compile::{self, CompileOpts, CompileOptsBuilder};
+
 use anyhow::{bail, Context};
 use clap::{Parser, ValueEnum};
 use codespan_reporting::files::SimpleFile;
+
 use std::{fs::File, io::Read};
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, ValueEnum)]
@@ -76,10 +80,19 @@ pub fn open_input_source(args: &Args) -> anyhow::Result<SimpleFile<String, Strin
 }
 
 pub fn extract_compile_opts(args: &Args) -> CompileOpts {
-    CompileOpts {
-        output_format: args.output_format(),
-        const_fold: !args.skips.contains(&SkippablePasses::ConstFold),
-    }
+    let out_format = match args.output_format() {
+        OutputFormat::AntlrTree => compile::OutputFormat::AntlrTree,
+        OutputFormat::AstDot => compile::OutputFormat::AstDot,
+        OutputFormat::AstRustDbg => compile::OutputFormat::AstRustDbg,
+        OutputFormat::IrRustDbg => compile::OutputFormat::IrRustDbg,
+        OutputFormat::LlvmIr => compile::OutputFormat::LlvmIr,
+    };
+
+    CompileOptsBuilder::new()
+        .output_format(out_format)
+        .const_fold(!args.skips.contains(&SkippablePasses::ConstFold))
+        .for_assignments()
+        .build()
 }
 
 pub fn open_output(args: &Args) -> anyhow::Result<Box<dyn std::io::Write>> {

@@ -64,7 +64,7 @@ impl Span {
 
 // WARNING: Don't change the order of these (Error codes will change)
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Code {
     /// This is an internal code that should never be used for actual diagnostics.
     Unspecified = 0,
@@ -362,6 +362,24 @@ impl<T> AggregateResult<T> {
         self.value = None;
         self.diagnostics
             .push_back((DiagnosticKind::Err, diagnostic));
+    }
+
+    /// Runs the predicate for all recoverable diagnostics, turning the diagnostics where the
+    /// predicate returns `true` into an error. This will also make the `AggregateResult` itself
+    /// an _err_.
+    pub fn upgrade_diagnostics<F>(&mut self, mut predicate: F)
+    where
+        F: FnMut(&Diagnostic) -> bool,
+    {
+        for (kind, diagnostic) in &mut self.diagnostics {
+            if *kind == DiagnosticKind::Err {
+                continue;
+            }
+            if predicate(diagnostic) {
+                *kind = DiagnosticKind::Err;
+                self.value = None;
+            }
+        }
     }
 
     /// Maps an `AggregateResult<T, E>` to `AggregateResult<U, E>` by applying a function to a

@@ -1,4 +1,4 @@
-//warn-any:
+//fail-any:
 
 int main() {
     char invalid = 'abcdef';

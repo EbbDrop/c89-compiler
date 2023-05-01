@@ -5,27 +5,16 @@ use std::{
 };
 
 use comp_lib::{
-    codegen,
+    compile::CompileOptsBuilder,
     diagnostic::{AggregateResult, Code, DiagnosticKind},
-    passes,
 };
 
 include! {concat!(env!("OUT_DIR"), "/tests.rs")}
 
 pub fn compile(file_name: &str, source: &str) -> AggregateResult<Vec<u8>> {
-    let cst = passes::parse::parse_to_cst(source);
+    let opts = CompileOptsBuilder::new().for_assignments().build();
 
-    let mut ast = cst.and_then(|cst| passes::lower_cst::lower(&cst));
-
-    if let Some(ast) = ast.value_mut() {
-        passes::const_fold::const_fold(ast);
-    }
-
-    let ir = ast.and_then(|ast| passes::lower_ast::build_ir_from_ast(&ast));
-
-    let llvm_ir = ir.and_then(|ir| codegen::llvm::build_from_ir(&ir, file_name, source));
-
-    llvm_ir.map(|s| format!("{s}\n").into_bytes())
+    comp_lib::compile::compile(source, file_name, &opts)
 }
 
 fn run_lli(input_ir: Vec<u8>) -> String {
@@ -69,7 +58,7 @@ fn output_test(file: &str, expected: &str) {
                 DiagnosticKind::Err => println!("Err: {d:?}"),
             }
         }
-        println!("");
+        println!();
     }
     let llvm = res.into_value().unwrap();
     let output = run_lli(llvm);
@@ -91,9 +80,8 @@ fn diagnostics_test(file: &str, expected_codes: Vec<Code>, needs_err: bool) {
     if !needs_err && res.is_err() {
         println!("Expected compile to succeed with only warnigs, but it didn't! Here are the error diagnostics:");
         for (t, d) in res.diagnostics() {
-            match t {
-                DiagnosticKind::Err => println!("Err: {d:?}"),
-                _ => {}
+            if t == DiagnosticKind::Err {
+                println!("Err: {d:?}")
             }
         }
         panic!("");
@@ -101,7 +89,7 @@ fn diagnostics_test(file: &str, expected_codes: Vec<Code>, needs_err: bool) {
 
     let mut found_code = Vec::new();
     for (_, d) in res.diagnostics() {
-        found_code.push(d.code().clone());
+        found_code.push(*d.code());
     }
     if expected_codes != found_code {
         println!(
@@ -121,18 +109,15 @@ fn diagnostics_any_test(file: &str, needs_err: bool) {
         if !res.is_err() {
             panic!("Expected compile to fail, but it didn't!");
         }
-    } else {
-        if res.is_err() {
-            println!("Expected compile to succeed with only warnigs, but it didn't! Here are the error diagnostics:");
-            for (t, d) in res.diagnostics() {
-                match t {
-                    DiagnosticKind::Err => println!("Err: {d:?}"),
-                    _ => {}
-                }
+    } else if res.is_err() {
+        println!("Expected compile to succeed with only warnigs, but it didn't! Here are the error diagnostics:");
+        for (t, d) in res.diagnostics() {
+            if t == DiagnosticKind::Err {
+                println!("Err: {d:?}")
             }
-            panic!("");
-        } else if !res.is_rec() {
-            panic!("Expected to compile with warnigs, but it didn't!");
         }
+        panic!("");
+    } else if !res.is_rec() {
+        panic!("Expected to compile with warnigs, but it didn't!");
     }
 }
