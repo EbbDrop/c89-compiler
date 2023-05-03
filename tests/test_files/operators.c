@@ -14,19 +14,21 @@
 //3.800000
 //-3.800000
 
+#include <stdio.h>
+
 int main() {
-    printf(5 + 3);
-    printf(5 - 3);
-    printf(5 * 3);
-    printf(5 / 3);
-    printf(+ 3);
-    printf(- 3);
-    printf(4 % 3);
-    printf(4 % 9);
-    printf(5.2 + 3.8);
-    printf(5.2 - 3.8);
-    printf(5.2 * 3.8);
-    printf(5.2 / 3.8);
-    printf(+ 3.8);
-    printf(- 3.8);
+    printf("%i\n", 5 + 3);
+    printf("%i\n", 5 - 3);
+    printf("%i\n", 5 * 3);
+    printf("%i\n", 5 / 3);
+    printf("%i\n", + 3);
+    printf("%i\n", - 3);
+    printf("%i\n", 4 % 3);
+    printf("%i\n", 4 % 9);
+    printf("%f\n", 5.2 + 3.8);
+    printf("%f\n", 5.2 - 3.8);
+    printf("%f\n", 5.2 * 3.8);
+    printf("%f\n", 5.2 / 3.8);
+    printf("%f\n", + 3.8);
+    printf("%f\n", - 3.8);
 }

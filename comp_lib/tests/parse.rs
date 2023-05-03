@@ -400,7 +400,6 @@ fn assert_expr_eq(raw_expr: String, expected_expr: ast::Expression) {
     assert_eq!(
         res.into_value(),
         Some(ast::Ast {
-            include_stdio: None,
             global_declarations: vec![ast::ExternalDeclarationNode {
                 span: (0..(end + 3)).into(),
                 comments: None,
@@ -422,6 +421,7 @@ fn assert_expr_eq(raw_expr: String, expected_expr: ast::Expression) {
                         data: "main".to_owned()
                     },
                     params: Vec::new(),
+                    is_vararg: false,
                     body: ast::BlockStatementNode {
                         span: (11..(end + 3)).into(),
                         stmts: vec![ast::StatementNode {

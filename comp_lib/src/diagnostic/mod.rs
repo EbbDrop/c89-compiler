@@ -92,6 +92,7 @@ pub enum Code {
     SwitchCaseNotFolded,
     SwitchCaseNotInt,
     InvalidArraySize,
+    NonConstGlobalInitializer,
 }
 
 impl Code {
@@ -426,6 +427,14 @@ impl<T> AggregateResult<T> {
         }
     }
 
+    /// Aggregates the diagnostics of `other` with `self`, discarding the value of self.
+    #[must_use]
+    pub fn aggregate<U>(mut self, mut other: AggregateResult<U>) -> AggregateResult<U> {
+        self.diagnostics.append(&mut other.diagnostics);
+        other.diagnostics = self.diagnostics;
+        other
+    }
+
     /// Returns `other` if the result has a value, aggregating their diagnostics. Otherwise returns
     /// an _err_ `AggregateResult<U>` with the diagnostics of `self`.
     ///
@@ -538,5 +547,28 @@ impl<T> AggregateResult<T> {
             other.value = None;
         }
         other.diagnostics.append(&mut self.diagnostics);
+    }
+
+    pub fn transpose_from(value: Option<Self>) -> AggregateResult<Option<T>> {
+        match value {
+            Some(res) => res.map(Some),
+            None => AggregateResult::new_ok(None),
+        }
+    }
+}
+
+impl<T> AggregateResult<Option<T>> {
+    pub fn transpose(self) -> Option<AggregateResult<T>> {
+        match self.value {
+            Some(value @ Some(_)) => Some(AggregateResult {
+                value,
+                diagnostics: self.diagnostics,
+            }),
+            Some(None) => None,
+            None => Some(AggregateResult {
+                value: None,
+                diagnostics: self.diagnostics,
+            }),
+        }
     }
 }

@@ -1,25 +1,23 @@
-use crate::{
-    ast,
-    ir::{
-        ctype::{self, CType},
-        expr::{Expr, ExprNode},
-        table::Item,
-    },
-};
-
 use super::symbol_table::ScopedHandle;
+use crate::ast;
+use crate::ir;
+use crate::ir::ctype::{self, CType};
+use crate::ir::expr::{Expr, ExprNode};
+use crate::ir::table::VariableItem;
 
 #[derive(Debug)]
-pub struct Scope<'a> {
-    pub vars: ScopedHandle<'a, Item>,
+pub struct FunctionScope<'a, 'g> {
+    pub global: &'g ir::Root,
+    pub vars: ScopedHandle<'a, VariableItem>,
     pub func_return_type: &'a CType,
     pub in_switch: bool,
     pub in_loop: bool,
 }
 
-impl<'s> Scope<'s> {
-    pub fn new_scope(&mut self) -> Scope<'_> {
-        Scope {
+impl<'s, 'g> FunctionScope<'s, 'g> {
+    pub fn new_scope(&mut self) -> FunctionScope {
+        FunctionScope {
+            global: self.global,
             vars: self.vars.new_scope(),
             func_return_type: self.func_return_type,
             in_switch: self.in_switch,
@@ -87,6 +85,12 @@ pub fn extract_literal_int(expr: &ast::Expression) -> Result<i128, LiteralExtrac
         },
         _ => Err(LiteralExtractErr::NotALiteral),
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct DeclarationType {
+    pub ty: CType,
+    pub is_const: bool,
 }
 
 #[cfg(test)]

@@ -23,8 +23,9 @@ pub enum Expr {
     // Array subscripting can already be converted to a Add and Deref
 
     // 3.3.2.2
-    // first expr should have type functionPointer
-    // FunctionCall(ExprNode, Vec<ExprNode>)
+    // The first value should actually be an LvalueExprNode that is a function pointer.
+    // For now only direct function calls are supported, so an identifier is sufficient.
+    FunctionCall(String, Vec<ExprNode>),
 
     // 3.3.2.3
     // . and ->
@@ -208,6 +209,8 @@ pub struct LvalueExprNode {
 pub enum LvalueExpr {
     /// 3.3.1
     Ident(ItemId),
+
+    GlobalIdent(String),
 
     /// 3.3.3.2
     /// Inner expr will be pointer type, the out type will be the type that was pointed to

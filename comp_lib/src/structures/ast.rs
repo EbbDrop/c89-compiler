@@ -3,7 +3,6 @@ use crate::diagnostic::Span;
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ast {
-    pub include_stdio: Option<Span>,
     pub global_declarations: Vec<ExternalDeclarationNode>,
 }
 
@@ -24,7 +23,8 @@ pub enum ExternalDeclaration {
 pub struct FunctionDefinition {
     pub return_type: QualifiedTypeNode,
     pub ident: IdentNode,
-    pub params: Vec<FunctionParam>,
+    pub params: Vec<FunctionParamNode>,
+    pub is_vararg: bool,
     pub body: BlockStatementNode,
 }
 
@@ -32,14 +32,16 @@ pub struct FunctionDefinition {
 pub struct FunctionDeclaration {
     pub return_type: QualifiedTypeNode,
     pub ident: IdentNode,
-    pub params: Vec<FunctionParam>,
+    pub params: Vec<FunctionParamNode>,
+    pub is_vararg: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FunctionParam {
+pub struct FunctionParamNode {
     pub span: Span,
     pub type_name: QualifiedTypeNode,
     pub ident: Option<IdentNode>,
+    pub array_parts: Vec<ArrayDeclarationNode>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -87,7 +89,6 @@ pub enum ArrayDeclaration {
 pub enum Statement {
     Declaration(Declaration),
     Expression(ExpressionNode),
-    Printf(ExpressionNode),
     If(IfStatement),
     Switch(SwitchStatement),
     While(WhileStatement),

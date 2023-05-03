@@ -113,6 +113,16 @@ macro_rules! declare_value_cat {
             }
         }
 
+        impl TryFrom<$Value> for crate::constant::$Value {
+            type Error = crate::value::ValueConversionError;
+
+            fn try_from(value: $Value) -> Result<Self, Self::Error> {
+                match value {
+                    $($Value::$ChildValue(c) => Ok(Self::$ChildValue(c.try_into()?)),)+
+                }
+            }
+        }
+
         impl<T: $TypeCat> From<crate::value::Register<T>> for $Value {
             fn from(value: crate::value::Register<T>) -> Self {
                 let handle = value.handle;
@@ -183,7 +193,7 @@ macro_rules! declare_constant_cat {
         $( @no_special $no_special:tt; )?
         $( @FmtAsLlvmAsmFC $FmtAsLlvmAsmFC:tt; )?
         ($Constant:ident, ($ConstantCat:ident, $ValueCat:path): $TypeCat:path)
-        $( => ($ParentConstant:ty, $ParentConstantCat:path) $(=> $GrandParentConstant:ident)* )?
+        $( => ($ParentConstant:ident, $ParentConstantCat:path) $(=> $GrandParentConstant:ident)* )?
         { $( $ChildConstant:ident ),+ $(,)? }
     ) => {
         pub trait $ConstantCat: $ValueCat + Into<$Constant> $(+ $ParentConstantCat)? {
@@ -205,6 +215,37 @@ macro_rules! declare_constant_cat {
         //         }
         //     }
         // }
+
+        $(
+            impl From<$Constant> for crate::value::$ParentConstant {
+                fn from(value: $Constant) -> Self {
+                    crate::value::$Constant::from(value).into()
+                }
+            }
+
+            impl TryFrom<crate::value::$ParentConstant> for $Constant {
+                type Error = crate::value::ValueConversionError;
+
+                fn try_from(value: crate::value::$ParentConstant) -> Result<Self, Self::Error> {
+                    crate::value::$Constant::try_from(value)?.try_into()
+                }
+            }
+
+            $(
+            impl From<$Constant> for crate::value::$GrandParentConstant {
+                fn from(value: $Constant) -> Self {
+                    crate::value::$Constant::from(value).into()
+                }
+            }
+
+            impl TryFrom<crate::value::$GrandParentConstant> for $Constant {
+                type Error = crate::value::ValueConversionError;
+
+                fn try_from(value: crate::value::$GrandParentConstant) -> Result<Self, Self::Error> {
+                    crate::value::$Constant::try_from(value)?.try_into()
+                }
+            }
+        )*)?
 
         when! { not ($($no_special)?) {
             impl From<crate::constant::Undef<crate::ty::$Constant>> for $Constant {

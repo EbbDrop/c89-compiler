@@ -145,7 +145,6 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         ctx: &cst::TranslationUnit,
     ) -> AggregateResult<ast::Ast> {
         let mut res = AggregateResult::new_ok(Vec::with_capacity(ctx.content.len()));
-        let mut include_stdio = None;
 
         for statement in &ctx.content {
             use cst::ExternalDeclaration;
@@ -167,8 +166,11 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                     })
                     .add_to(&mut res, |r, s| r.push(s)),
                 ExternalDeclaration::ExternalDeclarationIncludeContext(incl) => {
-                    // TODO: warn when included multiple times
-                    include_stdio = Some(extract_span(incl))
+                    let span = extract_span(incl);
+                    AggregateResult::new_ok(generate_printf_from_include_stdio(span))
+                        .add_to(&mut res, |r, s| r.push(s));
+                    AggregateResult::new_ok(generate_scanf_from_include_stdio(span))
+                        .add_to(&mut res, |r, s| r.push(s));
                 }
                 ExternalDeclaration::Error(ectx) => tree_error(ectx),
             }
@@ -177,7 +179,6 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         res.map(|mut global_declarations| {
             global_declarations.shrink_to_fit();
             ast::Ast {
-                include_stdio,
                 global_declarations,
             }
         })
@@ -224,9 +225,6 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
             Statement::StatementJumpContext(stmt) => {
                 self.build_from_jump_statement(stmt.value.as_deref().unwrap())
             }
-            Statement::StatementPrintfContext(printf) => self
-                .build_from_expr(printf.value.as_deref().unwrap())
-                .map(ast::Statement::Printf),
             Statement::StatementBlockContext(block) => self
                 .build_from_block_statement(block.value.as_deref().unwrap())
                 .map(ast::Statement::BlockStatement),
@@ -537,11 +535,14 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         ctx: &cst::FunctionDeclaration,
     ) -> AggregateResult<ast::FunctionDeclaration> {
         self.build_from_prototype(ctx.prototype.as_deref().unwrap())
-            .map(|(return_type, ident, params)| ast::FunctionDeclaration {
-                return_type,
-                ident,
-                params,
-            })
+            .map(
+                |(return_type, ident, params, is_vararg)| ast::FunctionDeclaration {
+                    return_type,
+                    ident,
+                    params,
+                    is_vararg,
+                },
+            )
     }
 
     fn build_from_function_definition(
@@ -551,10 +552,11 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         self.build_from_prototype(ctx.prototype.as_deref().unwrap())
             .zip(self.build_from_block_statement(ctx.body.as_deref().unwrap()))
             .map(
-                |((return_type, ident, params), body)| ast::FunctionDefinition {
+                |((return_type, ident, params, is_vararg), body)| ast::FunctionDefinition {
                     return_type,
                     ident,
                     params,
+                    is_vararg,
                     body,
                 },
             )
@@ -564,9 +566,10 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         &self,
         ctx: &cst::FunctionPrototype,
     ) -> AggregateResult<(
-        ast::QualifiedTypeNode,
-        ast::IdentNode,
-        Vec<ast::FunctionParam>,
+        ast::QualifiedTypeNode,      // return type
+        ast::IdentNode,              // ident
+        Vec<ast::FunctionParamNode>, // params
+        bool,                        // is_vararg
     )> {
         self.build_from_type_name(ctx.type_name.as_deref().unwrap())
             .zip(self.build_from_identifier(ctx.ident.as_deref().unwrap()))
@@ -578,22 +581,26 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                 }
                 res
             })
-            .map(|((return_type, ident), params)| (return_type, ident, params))
+            .map(|((return_type, ident), params)| {
+                (return_type, ident, params, ctx.varargs.is_some())
+            })
     }
 
     fn build_from_function_param(
         &self,
         ctx: &cst::FunctionParam,
-    ) -> AggregateResult<ast::FunctionParam> {
+    ) -> AggregateResult<ast::FunctionParamNode> {
         self.build_from_type_name(ctx.type_name.as_deref().unwrap())
             .zip(match ctx.ident.as_deref() {
                 Some(ident) => self.build_from_identifier(ident).map(Some),
                 None => AggregateResult::new_ok(None),
             })
-            .map(|(type_name, ident)| ast::FunctionParam {
+            .zip(self.build_from_array_declarations(&ctx.array))
+            .map(|((type_name, ident), array_parts)| ast::FunctionParamNode {
                 span: extract_span(ctx),
                 type_name,
                 ident,
+                array_parts,
             })
     }
 
@@ -1301,6 +1308,72 @@ fn parse_hex_escape(
         )
     }
     result
+}
+
+fn generate_printf_from_include_stdio(span: Span) -> ast::ExternalDeclarationNode {
+    generate_io_format_fn_from_include_stdio("printf".to_owned(), span)
+}
+
+fn generate_scanf_from_include_stdio(span: Span) -> ast::ExternalDeclarationNode {
+    generate_io_format_fn_from_include_stdio("scanf".to_owned(), span)
+}
+
+fn generate_io_format_fn_from_include_stdio(
+    name: String,
+    span: Span,
+) -> ast::ExternalDeclarationNode {
+    ast::ExternalDeclarationNode {
+        span,
+        data: ast::ExternalDeclaration::Declaration(ast::Declaration::FunctionDeclaration(
+            ast::FunctionDeclaration {
+                return_type: ast::QualifiedTypeNode {
+                    span,
+                    data: ast::QualifiedType {
+                        is_const: None,
+                        inner: ast::UnqualifiedTypeNode {
+                            span,
+                            data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                                ast::PrimitiveType::Int,
+                            )),
+                        },
+                    },
+                },
+                ident: ast::IdentNode { span, data: name },
+                params: vec![ast::FunctionParamNode {
+                    span,
+                    type_name: ast::QualifiedTypeNode {
+                        span,
+                        data: ast::QualifiedType {
+                            is_const: None,
+                            inner: ast::UnqualifiedTypeNode {
+                                span,
+                                data: ast::UnqualifiedType::PointerType(Box::new(
+                                    ast::QualifiedTypeNode {
+                                        span,
+                                        data: ast::QualifiedType {
+                                            is_const: Some(span),
+                                            inner: ast::UnqualifiedTypeNode {
+                                                span,
+                                                data: ast::UnqualifiedType::PlainType(
+                                                    ast::PlainType::Primitive(
+                                                        ast::PrimitiveType::Char,
+                                                    ),
+                                                ),
+                                            },
+                                        },
+                                    },
+                                )),
+                            },
+                        },
+                    },
+                    ident: None,
+                    array_parts: Vec::new(),
+                }],
+                is_vararg: true,
+            },
+        )),
+        comments: Some("included via #include<stdio.h>".to_owned()),
+    }
 }
 
 #[cfg(test)]

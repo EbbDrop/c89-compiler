@@ -1,4 +1,4 @@
-use crate::ir::table::{Item, ItemId, Table};
+use crate::ir::table::{ItemId, Table, VariableItem};
 
 /// A table of items with a associated names in a scope.
 ///
@@ -9,21 +9,25 @@ use crate::ir::table::{Item, ItemId, Table};
 /// [`into_table`]: ScopedTable::into_table
 /// [`get_scoped_handle`]: ScopedTable::get_scoped_handle
 #[derive(Debug)]
-pub struct ScopedTable<I = Item> {
+pub struct ScopedTable<I = VariableItem> {
     table: Table<I>,
-    vars: Vec<(String, ItemId)>,
+    idents: Vec<(String, ItemId)>,
 }
 
 impl<I> Default for ScopedTable<I> {
     fn default() -> Self {
         Self {
             table: Table::default(),
-            vars: Vec::default(),
+            idents: Vec::default(),
         }
     }
 }
 
 impl<I> ScopedTable<I> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     /// Turns into a table forgetting naming and scope details and only having the items linked to
     /// there [`ItemId`]s.
     pub fn into_table(self) -> Table<I> {
@@ -39,7 +43,7 @@ impl<I> ScopedTable<I> {
     where
         'a: 'b,
     {
-        let start = self.vars.len();
+        let start = self.idents.len();
         ScopedHandle {
             root_table: self,
             start,
@@ -53,7 +57,7 @@ impl<I> ScopedTable<I> {
 /// this scope. Reading items will look first in this scope and then go further out to bigger
 /// scopes to find the item.
 #[derive(Debug)]
-pub struct ScopedHandle<'a, I = Item> {
+pub struct ScopedHandle<'a, I = VariableItem> {
     root_table: &'a mut ScopedTable<I>,
     start: usize,
 }
@@ -68,7 +72,7 @@ impl<'a, I> ScopedHandle<'a, I> {
     ///
     /// You will not be able to use this scope as long as the inner scope lives.
     pub fn new_scope(&mut self) -> ScopedHandle<'_, I> {
-        let start = self.root_table.vars.len();
+        let start = self.root_table.idents.len();
         ScopedHandle {
             root_table: self.root_table,
             start,
@@ -78,14 +82,14 @@ impl<'a, I> ScopedHandle<'a, I> {
     /// Adds a new item to this scope, returning its root table id in a [`Ok`]. If there is already a item with
     /// this name in this scope, [`Err`] will be returned with its [`ItemId`].
     pub fn declare(&mut self, name: String, item: I) -> Result<ItemId, ItemId> {
-        if let Some(id) = self.root_table.vars[self.start..]
+        if let Some(id) = self.root_table.idents[self.start..]
             .iter()
             .find(|(n, _)| n == &name)
         {
             return Err(id.1);
         }
         let id = self.root_table.table.add_item(item);
-        self.root_table.vars.push((name, id));
+        self.root_table.idents.push((name, id));
         Ok(id)
     }
 
@@ -94,7 +98,7 @@ impl<'a, I> ScopedHandle<'a, I> {
     /// directly returned. If the name is not found in any scope a [`None`] is returned.
     pub fn _reference(&self, name: &str) -> Option<(ItemId, &I)> {
         self.root_table
-            .vars
+            .idents
             .iter()
             .rev()
             .find(|(n, _)| n == name)
@@ -107,7 +111,7 @@ impl<'a, I> ScopedHandle<'a, I> {
     /// Same rules as [`reference`] but gived a `&mut I`
     pub fn reference_mut(&mut self, name: &str) -> Option<(ItemId, &mut I)> {
         self.root_table
-            .vars
+            .idents
             .iter()
             .rev()
             .find(|(n, _)| n == name)
@@ -120,7 +124,7 @@ impl<'a, I> ScopedHandle<'a, I> {
 
 impl<'a, I> Drop for ScopedHandle<'a, I> {
     fn drop(&mut self) {
-        self.root_table.vars.truncate(self.start);
+        self.root_table.idents.truncate(self.start);
     }
 }
 

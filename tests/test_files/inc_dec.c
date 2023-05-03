@@ -8,14 +8,16 @@
 //4
 //3
 
+#include <stdio.h>
+
 int main() {
     int a = 3;
-    printf(a++);
-    printf(a++);
-    printf(a--);
-    printf(a--);
-    printf(++a);
-    printf(++a);
-    printf(--a);
-    printf(--a);
+    printf("%i\n", a++);
+    printf("%i\n", a++);
+    printf("%i\n", a--);
+    printf("%i\n", a--);
+    printf("%i\n", ++a);
+    printf("%i\n", ++a);
+    printf("%i\n", --a);
+    printf("%i\n", --a);
 }

@@ -14,7 +14,7 @@ use std::fmt::{self, Write};
 use std::ops::Deref;
 
 /// The default function declaration returns void and doesn't have any parameters.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FunctionDeclaration {
     pub linkage: Linkage,
     pub visibility: Visibility,

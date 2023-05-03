@@ -26,6 +26,27 @@ where
     }
 }
 
+impl<I> Clone for IdStore<I>
+where
+    // NOTE: On top of the constraints specified by `IdStore`, for `Clone` to work, the ids must be
+    // `Clone` as well.
+    I: From<id::Id> + AsRef<id::Id> + AsMut<id::Id> + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            // It's fine to just clone these since `Name`s don't have interior mutability.
+            names: self.names.clone(),
+            // These must be deep-cloned, i.e. disconnected from the previous IdStore.
+            ids: self
+                .ids
+                .iter()
+                .map(|(handle, id)| (Rc::new(Cell::new(handle.get())), id.clone()))
+                .collect(),
+            unnamed_id_counter: self.unnamed_id_counter,
+        }
+    }
+}
+
 /// Id handles have interior mutability. This means they should not be used as keys in maps!
 ///
 /// To prevent being used as keys, `PartialOrd` and `Hash` are not implemented.

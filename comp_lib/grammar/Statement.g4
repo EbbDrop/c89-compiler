@@ -6,7 +6,6 @@ statement
     | value=selectionStatement                                  # StatementSelection
     | value=iterationStatement                                  # StatementIteration
     | value=jumpStatement                                       # StatementJump
-    | KW_PRINTF PAREN_LEFT value=expr PAREN_RIGHT SEMICOLON     # StatementPrintf
     | value=blockStatement                                      # StatementBlock
     | SEMICOLON                                                 # StatementEmpty
     ;
@@ -89,9 +88,12 @@ functionDefinition
 
 functionPrototype
     : type_name=typeName ident=identifier
-      PAREN_LEFT (params+=functionParam)? (COMMA params+=functionParam)* PAREN_RIGHT
+      PAREN_LEFT
+        ( ( (params+=functionParam)? (COMMA params+=functionParam)* (COMMA varargs=ELLIPSIS)? )
+        | varargs=ELLIPSIS )
+      PAREN_RIGHT
     ;
 
 functionParam
-    : type_name=typeName ident=identifier?
+    : type_name=typeName ident=identifier? (array+=arrayDeclaration)*
     ;

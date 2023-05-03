@@ -16,6 +16,8 @@
 //1
 //0
 
+#include <stdio.h>
+
 int main() {
     int one = 1;
     int* op = &one;
@@ -26,20 +28,20 @@ int main() {
     int t = *tp;
 
 
-    printf(o > t);
-    printf(t > o);
-    printf(t > t);
-    printf(o < t);
-    printf(t < o);
-    printf(t < t);
-    printf(o <= t);
-    printf(t <= t);
-    printf(t <= o);
-    printf(o >= t);
-    printf(t >= t);
-    printf(t >= o);
-    printf(o == o);
-    printf(2 == 4);
-    printf(2 != t);
-    printf(t != t);
+    printf("%i\n", o > t);
+    printf("%i\n", t > o);
+    printf("%i\n", t > t);
+    printf("%i\n", o < t);
+    printf("%i\n", t < o);
+    printf("%i\n", t < t);
+    printf("%i\n", o <= t);
+    printf("%i\n", t <= t);
+    printf("%i\n", t <= o);
+    printf("%i\n", o >= t);
+    printf("%i\n", t >= t);
+    printf("%i\n", t >= o);
+    printf("%i\n", o == o);
+    printf("%i\n", 2 == 4);
+    printf("%i\n", 2 != t);
+    printf("%i\n", t != t);
 }

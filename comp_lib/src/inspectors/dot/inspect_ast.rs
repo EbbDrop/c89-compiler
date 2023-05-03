@@ -7,19 +7,9 @@ impl ToDot for ast::Ast {
     fn to_dot(&self) -> DotTree {
         DotTree::new(
             "translation unit".to_owned(),
-            self.include_stdio
+            self.global_declarations
                 .iter()
-                .map(|_| {
-                    (
-                        "include",
-                        DotTree::new_leaf("#include <stdio.h>".to_owned()),
-                    )
-                })
-                .chain(
-                    self.global_declarations
-                        .iter()
-                        .map(|d| ("ext decl", d.data.to_dot())),
-                )
+                .map(|d| ("ext decl", d.data.to_dot()))
                 .collect(),
         )
     }
@@ -88,12 +78,16 @@ impl ToDot for ast::FunctionDeclaration {
             ]
             .into_iter()
             .chain(self.params.iter().map(|p| ("", p.to_dot())))
+            .chain(
+                self.is_vararg
+                    .then_some(("vararg", DotTree::new_leaf("...".to_owned()))),
+            )
             .collect(),
         )
     }
 }
 
-impl ToDot for ast::FunctionParam {
+impl ToDot for ast::FunctionParamNode {
     fn to_dot(&self) -> DotTree {
         DotTree::new(
             "param".to_owned(),
@@ -118,6 +112,10 @@ impl ToDot for ast::FunctionDefinition {
             ]
             .into_iter()
             .chain(self.params.iter().map(|p| ("", p.to_dot())))
+            .chain(
+                self.is_vararg
+                    .then_some(("vararg", DotTree::new_leaf("...".to_owned()))),
+            )
             .chain(iter::once(("body", self.body.to_dot())))
             .collect(),
         )
@@ -153,9 +151,6 @@ impl ToDot for ast::Statement {
                     .map(|expr| ("expr", expr.data.to_dot()))
                     .collect(),
             ),
-            ast::Statement::Printf(e) => {
-                DotTree::new("printf".to_owned(), vec![("expr", e.data.to_dot())])
-            }
             ast::Statement::BlockStatement(bs) => bs.to_dot(),
         }
     }

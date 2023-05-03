@@ -1,6 +1,8 @@
 //output:
 //1
 
+#include <stdio.h>
+
 int main() {
-  printf(1);
+  printf("%i\n", 1);
 }

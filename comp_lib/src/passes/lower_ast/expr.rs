@@ -11,20 +11,21 @@ use crate::{
             BinaryOp, BitwiseOp, Expr, ExprNode, LvalueExpr, LvalueExprNode, RelationOp, UnaryOp,
         },
     },
-    passes::lower_ast::type_checking::{CompatPointer, PointerInteger, UsualArithConversions},
-};
-
-use super::{
-    type_checking::{
-        AnyScaler, CheckBinErr, CheckBinOk, CheckUnErr, CheckUnOk, PromoteArith, TypeRuleBin,
-        TypeRuleUn,
+    passes::lower_ast::{
+        type_checking::{
+            AnyScaler, CheckBinErr, CheckBinOk, CheckUnErr, CheckUnOk, CompatPointer,
+            PointerInteger, PromoteArith, TypeRuleBin, TypeRuleUn, UsualArithConversions,
+        },
+        util::{find_first_fit, maybe_cast, FunctionScope},
     },
-    util::{find_first_fit, maybe_cast, Scope},
 };
 
 const SIGNED_INT: CType = CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::SignedInt));
 
-pub fn build_ir_expr(e: &ast::ExpressionNode, scope: &mut Scope) -> AggregateResult<ExprNode> {
+pub fn build_ir_expr(
+    e: &ast::ExpressionNode,
+    scope: &mut FunctionScope,
+) -> AggregateResult<ExprNode> {
     let span = e.span;
     match &e.data {
         ast::Expression::Assignment(lhs, op, rhs) => {
@@ -48,11 +49,21 @@ pub fn build_ir_expr(e: &ast::ExpressionNode, scope: &mut Scope) -> AggregateRes
                 type_name.span,
             )
         }),
-        ast::Expression::FunctionCall(_) => AggregateResult::new_err(
-            DiagnosticBuilder::new(span).build_unimplemented("function call"),
-        ),
+        ast::Expression::FunctionCall(fcall) => {
+            let mut args_res = AggregateResult::new_ok(Vec::new());
+            for arg in &fcall.args {
+                build_ir_expr(arg, scope).add_to(&mut args_res, |res, a| res.push(a));
+            }
+            args_res.combine(function_ident(&fcall.ident, scope), |args, (id, func)| {
+                ir::ExprNode {
+                    span,
+                    ty: func.return_type.clone(),
+                    expr: ir::Expr::FunctionCall(String::from(id), args),
+                }
+            })
+        }
         ast::Expression::Literal(lit) => literal(lit),
-        ast::Expression::Ident(idt) => ident(idt, false, scope).map(lvalue_dereference),
+        ast::Expression::Ident(idt) => variable_ident(idt, false, scope).map(lvalue_dereference),
     }
 }
 
@@ -61,7 +72,7 @@ fn build_binary_op_ir_expr(
     left: &ast::ExpressionNode,
     right: &ast::ExpressionNode,
     span: Span,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<ExprNode> {
     use ast::BinaryOperator::*;
     let res = build_ir_expr(left, scope);
@@ -104,7 +115,7 @@ fn build_unary_op_ir_expr(
     op: &ast::UnaryOperatorNode,
     inner: &ast::ExpressionNode,
     span: Span,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<ExprNode> {
     use ast::UnaryOperator::*;
     let builder = UnaryBuilder {
@@ -137,7 +148,7 @@ pub fn build_ir_lvalue(
     needed_for: &str,
     will_init: bool,
     op_span: Span,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<LvalueExprNode> {
     let lvalue = match &e.data {
         ast::Expression::Unary(op, inner) => {
@@ -155,7 +166,7 @@ pub fn build_ir_lvalue(
         ast::Expression::ArraySubscript(left, right) => {
             Some(arrays_subscript(right, left, e.span, scope))
         }
-        ast::Expression::Ident(idt) => Some(ident(idt, will_init, scope)),
+        ast::Expression::Ident(idt) => Some(variable_ident(idt, will_init, scope)),
         _ => None,
     };
     lvalue.unwrap_or_else(|| {
@@ -169,7 +180,7 @@ fn arrays_subscript(
     left: &ast::ExpressionNode,
     right: &ast::ExpressionNode,
     span: Span,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<LvalueExprNode> {
     build_ir_expr(left, scope)
         .zip(build_ir_expr(right, scope))
@@ -210,34 +221,61 @@ fn lvalue_dereference(inner: LvalueExprNode) -> ExprNode {
     }
 }
 
-fn ident(
+fn variable_ident(
     idt: &ast::IdentNode,
     will_init: bool,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<LvalueExprNode> {
-    let Some((id, ty)) = scope.vars.reference_mut(&idt.data) else {
-        return AggregateResult::new_err(DiagnosticBuilder::new(idt.span).build_undeclared_ident(&idt.data));
+    let mut res = AggregateResult::new_ok(());
+
+    let (expr, ty, is_const) = if let Some((id, ty)) = scope.vars.reference_mut(&idt.data) {
+        // init checks are disabled for arrays since we can't check element by element (yet)
+        if !will_init
+            && !ty.initialized
+            && !matches!(ty.ty, CType::Aggregate(ctype::Aggregate::Array(_)))
+        {
+            res.add_rec_diagnostic(DiagnosticBuilder::new(idt.span).build_usign_uninit(&idt.data));
+        } else if will_init {
+            ty.initialized = true;
+        }
+        (LvalueExpr::Ident(id), ty.ty.clone(), ty.is_const)
+    } else if let Some(global_var) = scope.global.vars.get(&idt.data) {
+        (
+            LvalueExpr::GlobalIdent(idt.data.clone()),
+            global_var.ty.clone(),
+            global_var.is_const,
+        )
+    } else {
+        return AggregateResult::new_err(
+            DiagnosticBuilder::new(idt.span).build_undeclared_ident(&idt.data),
+        );
     };
 
-    let mut res = AggregateResult::new_ok(());
-    // init checks are disabled for arrays since we can't check element by element (yet)
-    if !will_init
-        && !ty.initialized
-        && !matches!(ty.ty, CType::Aggregate(ctype::Aggregate::Array(_)))
-    {
-        res.add_rec_diagnostic(DiagnosticBuilder::new(idt.span).build_usign_uninit(&idt.data));
-    } else if will_init {
-        ty.initialized = true;
-    }
     res.map(|()| LvalueExprNode {
         span: idt.span,
-        is_const: ty.is_const,
-        ty: ty.ty.clone(),
-        expr: LvalueExpr::Ident(id),
+        is_const,
+        ty,
+        expr,
     })
 }
 
-fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
+fn function_ident<'a, 'b, 'c, 'g: 'a>(
+    ident_node: &'a ast::IdentNode,
+    scope: &'b mut FunctionScope<'c, 'g>,
+) -> AggregateResult<(&'a str, &'b ir::FunctionNode)> {
+    scope
+        .global
+        .functions
+        .get_key_value(&ident_node.data)
+        .map(|(k, v)| AggregateResult::new_ok((k.as_str(), v)))
+        .unwrap_or_else(|| {
+            AggregateResult::new_err(
+                DiagnosticBuilder::new(ident_node.span).build_undeclared_ident(&ident_node.data),
+            )
+        })
+}
+
+pub fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
     use ctype::Arithmetic::*;
     // TODO these need to change if we ever support sufixes
     let (value, pos_types) = match &lit.data {
@@ -388,11 +426,11 @@ pub fn assign(
     })
 }
 
-struct UnaryBuilder<'a, 'b> {
+struct UnaryBuilder<'a, 'b, 'g> {
     full_span: Span,
     op_span: Span,
     inner: &'a ast::ExpressionNode,
-    scope: &'a mut Scope<'b>,
+    scope: &'a mut FunctionScope<'b, 'g>,
 }
 
 struct ValueUnaryBuilder {
@@ -407,7 +445,7 @@ enum LvalueBuildErr {
     WrongType(TypeCat),
 }
 
-impl<'a, 'b> UnaryBuilder<'a, 'b> {
+impl<'a, 'b, 'g> UnaryBuilder<'a, 'b, 'g> {
     fn lvalue_build<R, F>(self, rule: R, name: &str, build: F) -> AggregateResult<ExprNode>
     where
         R: FnOnce(&CType, bool) -> Result<CType, LvalueBuildErr>,

@@ -13,6 +13,9 @@ FLOATING_POINT_LITERAL: ( [0-9]* '.' [0-9]+ | [0-9]+ '.' [0-9]* ) ([eE] [+-]? [0
 STRING_LITERAL: '"' ( ~[\n\r\\"] | '\\' ~[\n\r] )* '"';
 CHAR_LITERAL: '\'' ( ~[\n\r\\'] | '\\' ~[\n\r] )+ '\'';
 
+// 3-char symbols
+ELLIPSIS: '...';
+
 // 2-char symbols
 DOUBLE_PIPE: '||';
 DOUBLE_AMPERSAND: '&&';
@@ -55,7 +58,6 @@ KW_CONST: 'const';
 KW_CHAR: 'char';
 KW_INT: 'int';
 KW_FLOAT: 'float';
-KW_PRINTF: 'printf'; // TODO: FIXME: remove this
 KW_VOID: 'void';
 KW_IF: 'if';
 KW_ELSE: 'else';

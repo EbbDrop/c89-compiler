@@ -342,6 +342,13 @@ impl DiagnosticBuilder {
 
         self.build_custom(Code::InvalidArraySize, message.to_owned())
     }
+
+    pub fn build_non_const_global_initializer(self) -> Diagnostic {
+        self.build_custom(
+            Code::NonConstGlobalInitializer,
+            "global variables can only be initialized by constant expressions".to_owned(),
+        )
+    }
 }
 
 pub struct DiagnosticBuilder {

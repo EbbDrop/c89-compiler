@@ -3,7 +3,7 @@ use crate::{
     diagnostic::{builder::InvalidArraySize, AggregateResult, DiagnosticBuilder, Span},
     ir::{
         ctype::{self, CType},
-        table::Item,
+        table::VariableItem,
         BlockNode, ExprNode, IfStmtNode, LoopStmtNode, LvalueExpr, LvalueExprNode, Stmt, StmtNode,
         SwitchStmtCase, SwitchStmtCaseNode, SwitchStmtNode,
     },
@@ -11,15 +11,14 @@ use crate::{
 
 use super::{
     expr,
-    symbol_table::ScopedHandle,
     type_checking::{AnyScaler, CheckUnErr, PromoteArith, TypeRuleUn},
-    util::{self, extract_literal_int, LiteralExtractErr, Scope},
+    util::{extract_literal_int, DeclarationType, FunctionScope, LiteralExtractErr},
 };
 
 /// WARNING! Does not create its own new scope!
 pub fn build_ir_from_block(
     block: &ast::BlockStatementNode,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<BlockNode> {
     let mut res = AggregateResult::new_ok(Vec::new());
     for statement in &block.stmts {
@@ -52,13 +51,14 @@ fn check_type<R: TypeRuleUn>(
 
 pub fn build_ir_from_statement(
     statement: &ast::StatementNode,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<Vec<StmtNode>> {
     let expr = match &statement.data {
         ast::Statement::Declaration(ast::Declaration::FunctionDeclaration(_)) => {
             AggregateResult::new_rec(
                 Vec::new(),
-                DiagnosticBuilder::new(statement.span).build_unimplemented("forward declarations"),
+                DiagnosticBuilder::new(statement.span)
+                    .build_unimplemented("nested function declarations"),
             )
         }
         ast::Statement::Declaration(ast::Declaration::Variable(decl)) => {
@@ -108,24 +108,6 @@ pub fn build_ir_from_statement(
         ast::Statement::BlockStatement(block) => {
             return build_ir_from_block(block, &mut scope.new_scope()).map(|block| block.stmts);
         }
-        ast::Statement::Printf(e) => {
-            let e = expr::build_ir_expr(e, scope);
-            e.map(|expr| match &expr.ty {
-                CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
-                    if a.is_integral() {
-                        let p = a.promote().0;
-                        util::maybe_cast(expr, CType::Scalar(ctype::Scalar::Arithmetic(p)))
-                    } else {
-                        util::maybe_cast(
-                            expr,
-                            CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::Double)),
-                        )
-                    }
-                }
-                _ => expr,
-            })
-            .map(|expr| vec![Stmt::Printf(expr)])
-        }
     };
 
     expr.map(|stmts| {
@@ -146,7 +128,7 @@ pub fn build_ir_from_statement(
 
 fn return_statement(
     e: Option<&ast::ExpressionNode>,
-    _scope: &mut Scope,
+    _scope: &mut FunctionScope,
 ) -> AggregateResult<Vec<Stmt>> {
     match e {
         Some(_e) => AggregateResult::new_err(
@@ -159,7 +141,7 @@ fn return_statement(
 fn if_statement(
     stmt: &ast::IfStatement,
     span: Span,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<IfStmtNode> {
     let res = expr::build_ir_expr(&stmt.condition, scope);
 
@@ -184,7 +166,7 @@ fn if_statement(
 fn switch_statement(
     stmt: &ast::SwitchStatement,
     span: Span,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<SwitchStmtNode> {
     let res = expr::build_ir_expr(&stmt.expr, scope)
         .and_then(|expr| check_type(PromoteArith::only_int(), expr, "switch quantity"));
@@ -243,7 +225,7 @@ fn switch_statement(
 fn while_statement(
     stmt: &ast::WhileStatement,
     span: Span,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<LoopStmtNode> {
     expr::build_ir_expr(&stmt.condition, scope)
         .and_then(|expr| check_type(AnyScaler, expr, "while condition"))
@@ -262,7 +244,7 @@ fn while_statement(
 fn for_statement(
     stmt: &ast::ForStatement,
     span: Span,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<(Vec<StmtNode>, LoopStmtNode)> {
     let mut init_scope = scope.new_scope();
 
@@ -296,10 +278,10 @@ fn for_statement(
     init.zip(loop_stmt)
 }
 
-pub fn variable_declaration(
+fn variable_declaration(
     decl: &ast::VariableDeclaration,
     span: Span,
-    scope: &mut Scope,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<Vec<Stmt>> {
     // This has to be done first, so that the ident is not declared yet.
     let init_expr = match decl.initializer.as_ref() {
@@ -309,35 +291,49 @@ pub fn variable_declaration(
         None => AggregateResult::new_ok(None),
     };
 
-    declaration(
-        &decl.type_name,
-        &decl.ident,
-        &decl.array_parts,
-        decl.initializer.is_some(),
-        &mut scope.vars,
-    )
-    .zip(init_expr)
-    .and_then(|((mut to, declare_stmt), init_expr)| {
-        // This is the initializing assignment whitch is allowed to const values
-        to.is_const = false;
-        let init_expr =
-            init_expr.map(|(op_span, init_expr)| expr::assign(to, init_expr, span, *op_span));
+    declaration_type(&decl.type_name, &decl.array_parts)
+        .and_then(|DeclarationType { ty, is_const }| {
+            let item = VariableItem {
+                original_span: span,
+                ty: ty.clone(),
+                is_const,
+                initialized: decl.initializer.is_some(),
+            };
+            match scope.vars.declare(decl.ident.data.clone(), item) {
+                Ok(id) => AggregateResult::new_ok(LvalueExprNode {
+                    span: decl.ident.span,
+                    ty,
+                    is_const,
+                    expr: LvalueExpr::Ident(id),
+                }),
+                Err(id) => {
+                    let original_span = scope.vars.root_table().get(id).original_span;
+                    AggregateResult::new_err(
+                        DiagnosticBuilder::new(decl.ident.span)
+                            .build_already_defined(&decl.ident.data, original_span),
+                    )
+                }
+            }
+        })
+        .zip(init_expr)
+        .and_then(|(mut to, init_expr)| {
+            // This is the initializing assignment whitch is allowed to const values
+            to.is_const = false;
+            let init_expr =
+                init_expr.map(|(op_span, init_expr)| expr::assign(to, init_expr, span, *op_span));
 
-        let mut res = AggregateResult::new_ok(declare_stmt);
-        if let Some(expr) = init_expr {
-            expr.add_to(&mut res, |res, expr| res.push(Stmt::Expr(expr)));
-        }
-        res
-    })
+            let mut res = AggregateResult::new_ok(Vec::new());
+            if let Some(expr) = init_expr {
+                expr.add_to(&mut res, |res, expr| res.push(Stmt::Expr(expr)));
+            }
+            res
+        })
 }
 
-fn declaration(
+pub fn declaration_type(
     type_name: &ast::QualifiedTypeNode,
-    ident: &ast::IdentNode,
     array_parts: &[ast::ArrayDeclarationNode],
-    will_init: bool,
-    scope: &mut ScopedHandle<'_>,
-) -> AggregateResult<(LvalueExprNode, Vec<Stmt>)> {
+) -> AggregateResult<DeclarationType> {
     let ty = CType::from_ast_type(&type_name.data.inner.data);
     let is_const = type_name.data.is_const.is_some();
 
@@ -382,32 +378,5 @@ fn declaration(
         }
     }
 
-    let item = ty.map(|ty| Item {
-        ty,
-        is_const,
-        original_span: ident.span,
-        initialized: will_init,
-    });
-
-    item.and_then(|item| {
-        let ty = item.ty.clone();
-        match scope.declare(ident.data.clone(), item) {
-            Ok(id) => AggregateResult::new_ok((
-                LvalueExprNode {
-                    span: ident.span,
-                    is_const,
-                    ty,
-                    expr: LvalueExpr::Ident(id),
-                },
-                Vec::new(),
-            )),
-            Err(id) => {
-                let original_span = scope.root_table().get(id).original_span;
-                AggregateResult::new_err(
-                    DiagnosticBuilder::new(ident.span)
-                        .build_already_defined(&ident.data, original_span),
-                )
-            }
-        }
-    })
+    ty.map(|ty| DeclarationType { ty, is_const })
 }

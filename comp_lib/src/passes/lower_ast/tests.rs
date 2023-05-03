@@ -1,6 +1,8 @@
 use std::fmt::Debug;
 
-use super::{expr::build_ir_expr, expr::build_ir_lvalue, symbol_table::ScopedTable, util::Scope};
+use super::{
+    expr::build_ir_expr, expr::build_ir_lvalue, symbol_table::ScopedTable, util::FunctionScope,
+};
 use crate::{
     ast::*,
     diagnostic::{AggregateResult, Code},
@@ -77,11 +79,11 @@ fn aggr_res_eq<T: PartialEq + Debug>(res: AggregateResult<T>, exp: T) {
     }
 }
 
-fn create_scope(table: &mut ScopedTable) -> Scope {
+fn create_scope(table: &mut ScopedTable) -> FunctionScope {
     static RETURN_TYPE: ctype::CType =
         ctype::CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::SignedInt));
 
-    Scope {
+    FunctionScope {
         vars: table.get_scoped_handle(),
         func_return_type: &RETURN_TYPE,
         in_switch: false,
@@ -247,7 +249,7 @@ fn cast() {
     fn build_ir(
         to_ty: QualifiedType,
         from_ty: ctype::CType,
-        scope: &mut Scope,
+        scope: &mut FunctionScope,
     ) -> (AggregateResult<ExprNode>, LvalueExprNode) {
         let mut scope = scope.new_scope();
         let from_id = scope
@@ -1024,7 +1026,11 @@ fn logical() {
 
 #[test]
 fn assign() {
-    fn build_ir(to: Expression, from: Expression, scope: &mut Scope) -> AggregateResult<ExprNode> {
+    fn build_ir(
+        to: Expression,
+        from: Expression,
+        scope: &mut FunctionScope,
+    ) -> AggregateResult<ExprNode> {
         let ast_lit = {
             ExpressionNode {
                 span: (0..0).into(),
@@ -1049,7 +1055,7 @@ fn assign() {
         to_ty: ctype::CType,
         to_const: bool,
         from_ty: ctype::CType,
-        scope: &mut Scope,
+        scope: &mut FunctionScope,
     ) -> (AggregateResult<ExprNode>, LvalueExprNode, LvalueExprNode) {
         let mut scope = scope.new_scope();
         let to_id = scope

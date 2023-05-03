@@ -3,15 +3,17 @@
 //0
 //2
 
+#include <stdio.h>
+
 int main() {
     int a = 3;
-    printf(a);
+    printf("%i\n", a);
 
     (a = 0) && (a = 255);
 
-    printf(a);
+    printf("%i\n", a);
 
     (a = 2) || (a = 255);
 
-    printf(a);
+    printf("%i\n", a);
 }

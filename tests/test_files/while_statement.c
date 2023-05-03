@@ -16,16 +16,18 @@
 //-1
 //10
 
+#include <stdio.h>
+
 int main() {
     int boolean = 1;
     int a = 0;
     while (boolean) {
-        printf(a++);
+        printf("%i\n", a++);
         if (a > 10) {
             break;
         } else if (a < 6) {
             continue;
         }
-        printf(-1);
+        printf("%i\n", -1);
     }
 }

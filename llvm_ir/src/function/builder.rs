@@ -409,7 +409,7 @@ impl FunctionDefinitionBuilder {
         {
             Ok(self.function)
         } else {
-            Err("cannot build function definiton: function body contains unfinished basic blocks")?
+            Err("cannot build function definition: function body contains unfinished basic blocks")?
         }
     }
 

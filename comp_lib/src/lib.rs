@@ -1,5 +1,6 @@
 mod generated;
 mod structures;
+mod util;
 
 pub mod codegen;
 pub mod compile;

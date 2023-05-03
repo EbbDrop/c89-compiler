@@ -1,19 +1,28 @@
-use std::ops::Deref;
-
 use crate::diagnostic::Span;
-
-use super::ctype::CType;
+use crate::ir::ctype::CType;
+use std::ops::Deref;
 
 /// A single item in a symbol table
 #[derive(Debug, Clone)]
-pub struct Item {
+pub struct VariableItem {
+    /// The span where this item was defined
+    pub original_span: Span,
     /// The type
     pub ty: CType,
     /// Defined as const
     pub is_const: bool,
-    /// The span where this item was defined
-    pub original_span: Span,
     pub initialized: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionItem {
+    /// Original span of the first declaration or definition of this function.
+    pub original_span: Span,
+    pub return_type: CType,
+    pub param_types: Vec<CType>,
+    pub is_vararg: bool,
+    /// `true` if this function is defined somewhere in the translation unit.
+    pub is_defined: bool,
 }
 
 /// A reference into a [`Table`]
@@ -25,7 +34,7 @@ pub struct ItemId(usize);
 
 /// A table from id to item, without names or scopes
 #[derive(Debug, Clone)]
-pub struct Table<I = Item>(Vec<I>);
+pub struct Table<I>(Vec<I>);
 
 impl<I> Deref for Table<I> {
     type Target = [I];
@@ -84,3 +93,72 @@ impl<I> Table<I> {
         self.0.iter()
     }
 }
+
+// /// A table from id to item, without names or scopes
+// #[derive(Debug, Clone)]
+// pub struct GlobalTable<I>(HashMap<String, I>);
+
+// impl<I> Default for GlobalTable<I> {
+//     fn default() -> Self {
+//         Self(HashMap::default())
+//     }
+// }
+
+// impl<I> GlobalTable<I> {
+//     /// Adds `item` to this table with `ident` as its identifier. If the table already contains an
+//     /// item with this identifier, the existing item will be returned in an `Err(_)`, and the passed
+//     /// item will be dropped. Otherwise, a reference to the ident is return in an `Ok(_)`.
+//     pub fn add_item(&mut self, ident: String, item: I) -> Result<&str, &I> {
+//         match self.0.get(&ident) {
+//             Some(existing) => Err(existing),
+//             None => {
+//                 self.0.insert(ident, item);
+//                 Ok(&ident)
+//             }
+//         }
+//     }
+
+//     /// Same as [`add_item`], except that a mutable reference is returned to the existing item.
+//     pub fn add_item_mut(&mut self, ident: String, item: I) -> Result<&str, &mut I> {
+//         match self.0.get_mut(&ident) {
+//             Some(existing) => Err(existing),
+//             None => {
+//                 self.0.insert(ident, item);
+//                 Ok(&ident)
+//             }
+//         }
+//     }
+
+//     /// Returns `true` if the specified ident is part of this table.
+//     pub fn has(&self, ident: &str) -> bool {
+//         self.0.contains_key(ident)
+//     }
+
+//     /// Returns a reference to the item correspondig to the ident, if such an item exists in this
+//     /// table.
+//     pub fn get(&self, ident: &str) -> Option<&I> {
+//         self.0.get(ident)
+//     }
+
+//     /// Returns a mutable reference to the item correspondig to the ident, if such an item exists in
+//     /// this table.
+//     pub fn get_mut(&mut self, ident: &str) -> Option<&mut I> {
+//         self.0.get_mut(ident)
+//     }
+
+//     /// An iterator visiting elements of type `(&str, &I)` where the second element is the item
+//     /// with the first element as ident. The order is unspecified.
+//     pub fn iter(&self) -> impl Iterator<Item = (&str, &I)> {
+//         self.0.iter().map(|(k, v)| (k.as_str(), v))
+//     }
+
+//     /// An iterator visiting all item identifier names in an unspecified order.
+//     pub fn idents(&self) -> impl Iterator<Item = &str> {
+//         self.0.keys().map(AsRef::as_ref)
+//     }
+
+//     /// An iterator visiting all item's in an unspecified order.
+//     pub fn items(&self) -> impl Iterator<Item = &I> {
+//         self.0.values()
+//     }
+// }

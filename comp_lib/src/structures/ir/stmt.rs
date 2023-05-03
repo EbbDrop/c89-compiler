@@ -1,11 +1,59 @@
+use super::{
+    ctype::CType,
+    expr::{Constant, ExprNode},
+    table::{ItemId, Table, VariableItem},
+};
 use crate::diagnostic::Span;
-
-use super::{expr::ExprNode, table::Table};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Root {
-    pub global: BlockNode,
-    pub table: Table,
+    pub vars: HashMap<String, GlobalVarNode>,
+    pub functions: HashMap<String, FunctionNode>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GlobalVarNode {
+    /// The span where this global variable was declared/defined.
+    pub original_span: Span,
+    pub comments: Option<String>,
+    /// The type.
+    pub ty: CType,
+    /// Defined as const.
+    pub is_const: bool,
+    /// `Some(<constant value>)` if the global was initialized.
+    pub value: Option<Constant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionNode {
+    /// The span where this function was first declared or defined.
+    pub original_span: Span,
+    pub comments: Option<String>,
+    pub return_type: CType,
+    pub params: Vec<FunctionParamNode>,
+    pub is_vararg: bool,
+    pub body: Option<BlockNode>,
+    pub table: Table<VariableItem>,
+}
+
+impl FunctionNode {
+    pub fn is_declaration(&self) -> bool {
+        self.body.is_none()
+    }
+}
+
+// One might think a single `ItemId` would be sufficient for this, since the type and other metadata
+// can be retrieved from the symbol table. However, it is valid to declare params without an
+// identifier, only with a type. These params are still important since they affect the signature of
+// the function. Therefore the type (and other data that can also be found in `LvalueExprNode`s) are
+// stored here as well, with the `ident` made optional.
+#[derive(Debug, Clone)]
+pub struct FunctionParamNode {
+    pub span: Span,
+    pub is_const: bool,
+    pub ty: CType,
+    pub ident: Option<ItemId>,
 }
 
 #[derive(Debug, Clone)]
@@ -27,7 +75,6 @@ pub enum Stmt {
     IfStmt(IfStmtNode),
     SwitchStmt(SwitchStmtNode),
     LoopStmt(LoopStmtNode),
-    Printf(ExprNode),
     Break,
     Continue,
     Return(Option<ExprNode>),

@@ -1,11 +1,13 @@
 //warn:
 //UsingUninit
 
+#include <stdio.h>
+
 int main() {
     int a;
     a = 3;
-    printf(a);
+    printf("%i\n", a);
 
     float b;
-    printf(b);
+    printf("%i\n", b);
 }

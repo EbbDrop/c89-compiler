@@ -6,6 +6,8 @@
 //4
 //5
 
+#include <stdio.h>
+
 int main() {
     // array of 3 element where every element is a array of two ints
     int arr[3][2];
@@ -16,10 +18,10 @@ int main() {
     arr[2][0] = 4;
     arr[2][1] = 5;
     int* ptr = (int*)arr;
-    printf(*(ptr++));
-    printf(*(ptr++));
-    printf(*(ptr++));
-    printf(*(ptr++));
-    printf(*(ptr++));
-    printf(*(ptr++));
+    printf("%i\n", *(ptr++));
+    printf("%i\n", *(ptr++));
+    printf("%i\n", *(ptr++));
+    printf("%i\n", *(ptr++));
+    printf("%i\n", *(ptr++));
+    printf("%i\n", *(ptr++));
 }
