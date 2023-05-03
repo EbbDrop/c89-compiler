@@ -47,7 +47,8 @@ pub enum Expr {
     //
     /// 3.3.3.2
     /// Inner expr will be any non bit-field, non register class type, The out type will be a
-    /// Pointer version of that type
+    /// Pointer version of that type. This also means that if the inner type is a array, The out
+    /// type will be a pointer to the array type. Like specified here: 3.2.2.1 paragraph 3
     Reference(Box<LvalueExprNode>),
 
     /// 3.3.3.3

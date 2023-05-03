@@ -36,9 +36,9 @@ pub fn build_ir_expr(e: &ast::ExpressionNode, scope: &mut Scope) -> AggregateRes
         ast::Expression::Binary(left, op, right) => {
             build_binary_op_ir_expr(op, left, right, span, scope)
         }
-        ast::Expression::ArraySubscript(_lhs, _rhs) => AggregateResult::new_err(
-            DiagnosticBuilder::new(span).build_unimplemented("array subscription"),
-        ),
+        ast::Expression::ArraySubscript(left, right) => {
+            arrays_subscript(left, right, span, scope).map(lvalue_dereference)
+        }
         ast::Expression::Unary(op, inner) => build_unary_op_ir_expr(op, inner, span, scope),
         ast::Expression::Cast(type_name, inner) => build_ir_expr(inner, scope).and_then(|inner| {
             cast(
@@ -52,7 +52,7 @@ pub fn build_ir_expr(e: &ast::ExpressionNode, scope: &mut Scope) -> AggregateRes
             DiagnosticBuilder::new(span).build_unimplemented("function call"),
         ),
         ast::Expression::Literal(lit) => literal(lit),
-        ast::Expression::Ident(idt) => ident(idt, false, scope).and_then(lvalue_dereference),
+        ast::Expression::Ident(idt) => ident(idt, false, scope).map(lvalue_dereference),
     }
 }
 
@@ -126,7 +126,7 @@ fn build_unary_op_ir_expr(
         Star => builder
             .value()
             .and_then(|v| v.dereference())
-            .and_then(lvalue_dereference),
+            .map(lvalue_dereference),
     }
 }
 
@@ -152,6 +152,9 @@ pub fn build_ir_lvalue(
                 _ => None,
             }
         }
+        ast::Expression::ArraySubscript(left, right) => {
+            Some(arrays_subscript(right, left, e.span, scope))
+        }
         ast::Expression::Ident(idt) => Some(ident(idt, will_init, scope)),
         _ => None,
     };
@@ -162,12 +165,49 @@ pub fn build_ir_lvalue(
     })
 }
 
-fn lvalue_dereference(inner: LvalueExprNode) -> AggregateResult<ExprNode> {
-    AggregateResult::new_ok(ExprNode {
-        span: inner.span,
-        ty: inner.ty.clone(),
-        expr: Expr::LvalueDeref(Box::new(inner)),
-    })
+fn arrays_subscript(
+    left: &ast::ExpressionNode,
+    right: &ast::ExpressionNode,
+    span: Span,
+    scope: &mut Scope,
+) -> AggregateResult<LvalueExprNode> {
+    build_ir_expr(left, scope)
+        .zip(build_ir_expr(right, scope))
+        .and_then(|(left, right)| {
+            let builder = BinaryBuilder {
+                full_span: span,
+                op_span: span,
+                left,
+                right,
+            };
+            builder.add()
+        })
+        .and_then(|add| {
+            ValueUnaryBuilder {
+                full_span: span,
+                op_span: span,
+                inner: add,
+            }
+            .dereference()
+        })
+}
+
+fn lvalue_dereference(inner: LvalueExprNode) -> ExprNode {
+    match &inner.ty {
+        CType::Aggregate(ctype::Aggregate::Array(arr)) => ExprNode {
+            span: inner.span,
+            ty: CType::Scalar(ctype::Scalar::Pointer(ctype::Pointer {
+                inner: arr.inner.clone(),
+                inner_const: false,
+            })),
+            expr: Expr::LvalueDeref(Box::new(inner)),
+        },
+        _ => ExprNode {
+            span: inner.span,
+            ty: inner.ty.clone(),
+            expr: Expr::LvalueDeref(Box::new(inner)),
+        },
+    }
 }
 
 fn ident(
@@ -180,7 +220,11 @@ fn ident(
     };
 
     let mut res = AggregateResult::new_ok(());
-    if !will_init && !ty.initialized {
+    // init checks are disabled for arrays since we can't check element by element (yet)
+    if !will_init
+        && !ty.initialized
+        && !matches!(ty.ty, CType::Aggregate(ctype::Aggregate::Array(_)))
+    {
         res.add_rec_diagnostic(DiagnosticBuilder::new(idt.span).build_usign_uninit(&idt.data));
     } else if will_init {
         ty.initialized = true;
@@ -218,11 +262,10 @@ fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
         ast::Literal::String(s) => {
             return AggregateResult::new_ok(ExprNode {
                 span: lit.span,
-                // TODO: once pointers have an `is_array` field, set it to true here
-                ty: CType::Scalar(ctype::Scalar::Pointer(
-                    Box::new(CType::Scalar(ctype::Scalar::Arithmetic(Char))),
-                    true,
-                )),
+                ty: CType::Aggregate(ctype::Aggregate::Array(ctype::Array {
+                    inner: Box::new(CType::Scalar(ctype::Scalar::Arithmetic(Char))),
+                    length: s.len() as u128 + 1,
+                })),
                 expr: Expr::Constant(ir::expr::Constant::String(s.clone())),
             });
         }
@@ -246,13 +289,14 @@ fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
 /// a pointer.
 fn cast(inner: ExprNode, to_ty: CType, span: Span, op_span: Span) -> AggregateResult<ExprNode> {
     use ctype::Scalar;
+
     let reason = match (&to_ty, &inner.ty) {
-        (CType::Scalar(Scalar::Pointer(_, _)), CType::Scalar(Scalar::Arithmetic(a)))
+        (CType::Scalar(Scalar::Pointer(_)), CType::Scalar(Scalar::Arithmetic(a)))
             if a.is_floating() =>
         {
             InvalidCastReason::PointerFromFloat(&inner)
         }
-        (CType::Scalar(Scalar::Arithmetic(a)), CType::Scalar(Scalar::Pointer(_, _)))
+        (CType::Scalar(Scalar::Arithmetic(a)), CType::Scalar(Scalar::Pointer(_)))
             if a.is_floating() =>
         {
             InvalidCastReason::FloatFromPointer(&inner)
@@ -264,11 +308,9 @@ fn cast(inner: ExprNode, to_ty: CType, span: Span, op_span: Span) -> AggregateRe
                 expr: Expr::Cast(Box::new(inner)),
             })
         }
-        // TODO: This will become reachable when non scalar types exists
-        #[allow(unreachable_patterns)]
         (CType::Scalar(_), _) => InvalidCastReason::FromNonScaler(&inner),
-        #[allow(unreachable_patterns)]
         (_, CType::Scalar(_)) => InvalidCastReason::IntoNonScalar,
+        (_, _) => InvalidCastReason::BothNonScalar(&inner),
     };
     AggregateResult::new_err(DiagnosticBuilder::new(op_span).build_invalid_cast(reason))
 }
@@ -283,7 +325,8 @@ pub fn assign(
     if to.is_const {
         res.add_err(DiagnosticBuilder::new(op_span).build_cant_be_const("assign to", to.span));
     }
-    use ctype::Scalar;
+
+    use ctype::{Pointer, Scalar};
     match (&to.ty, &from.ty) {
         (CType::Scalar(Scalar::Arithmetic(to_ty)), CType::Scalar(Scalar::Arithmetic(from_ty))) => {
             match from_ty.conversion_lossynes_into(to_ty) {
@@ -299,8 +342,14 @@ pub fn assign(
             }
         }
         (
-            CType::Scalar(Scalar::Pointer(to_ty, to_is_const)),
-            CType::Scalar(Scalar::Pointer(from_ty, from_is_const)),
+            CType::Scalar(Scalar::Pointer(Pointer {
+                inner: to_ty,
+                inner_const: to_is_const,
+            })),
+            CType::Scalar(Scalar::Pointer(Pointer {
+                inner: from_ty,
+                inner_const: from_is_const,
+            })),
         ) => {
             if to_ty.compatible_with(from_ty).is_err() {
                 res.add_rec_diagnostic(
@@ -314,14 +363,20 @@ pub fn assign(
                 )
             }
         }
-        (CType::Scalar(Scalar::Arithmetic(a)), CType::Scalar(Scalar::Pointer(_, _)))
-        | (CType::Scalar(Scalar::Pointer(_, _)), CType::Scalar(Scalar::Arithmetic(a))) => {
+        (CType::Scalar(Scalar::Arithmetic(a)), CType::Scalar(Scalar::Pointer(_)))
+        | (CType::Scalar(Scalar::Pointer(_)), CType::Scalar(Scalar::Arithmetic(a))) => {
             let diagnostic = DiagnosticBuilder::new(op_span).build_incompatible_assign(&from, &to);
             if a.is_floating() {
                 res.add_err(diagnostic);
             } else {
                 res.add_rec_diagnostic(diagnostic);
             }
+        }
+        (CType::Aggregate(ctype::Aggregate::Array(_)), _) => {
+            res.add_err(DiagnosticBuilder::new(op_span).build_assign_to_array(&to))
+        }
+        (CType::Scalar(_), CType::Aggregate(ctype::Aggregate::Array(_))) => {
+            unreachable!("ICE: arrays should have been converted to pointers")
         }
     };
 
@@ -349,7 +404,7 @@ struct ValueUnaryBuilder {
 enum LvalueBuildErr {
     NoConst,
     // Would be used if non scalar types are suported.
-    _WrongType(TypeCat),
+    WrongType(TypeCat),
 }
 
 impl<'a, 'b> UnaryBuilder<'a, 'b> {
@@ -370,7 +425,7 @@ impl<'a, 'b> UnaryBuilder<'a, 'b> {
                 let builder = DiagnosticBuilder::new(self.op_span);
                 let diag = match err {
                     LvalueBuildErr::NoConst => builder.build_cant_be_const(name, inner.span),
-                    LvalueBuildErr::_WrongType(type_cat) => {
+                    LvalueBuildErr::WrongType(type_cat) => {
                         builder.build_unexpected_type_lvalue(name, type_cat, &inner)
                     }
                 };
@@ -390,6 +445,7 @@ impl<'a, 'b> UnaryBuilder<'a, 'b> {
                 }
                 match ty {
                     CType::Scalar(_) => Ok(ty.clone()),
+                    CType::Aggregate(_) => Err(LvalueBuildErr::WrongType(TypeCat::Scalar)),
                 }
             },
             name,
@@ -421,16 +477,17 @@ impl<'a, 'b> UnaryBuilder<'a, 'b> {
     fn reference(self) -> AggregateResult<ExprNode> {
         self.lvalue_build(
             |ty, is_const| {
-                Ok(CType::Scalar(ctype::Scalar::Pointer(
-                    Box::new(ty.clone()),
-                    is_const,
-                )))
+                Ok(CType::Scalar(ctype::Scalar::Pointer(ctype::Pointer {
+                    inner: Box::new(ty.clone()),
+                    inner_const: is_const,
+                })))
             },
-            "refrence",
+            "reference",
             Expr::Reference,
         )
     }
 
+    // Also turn arrays into ptrs
     fn value(self) -> AggregateResult<ValueUnaryBuilder> {
         let res = build_ir_expr(self.inner, self.scope);
         res.map(|inner| ValueUnaryBuilder {
@@ -501,7 +558,10 @@ impl ValueUnaryBuilder {
     /// See [`LvalueExpr::Dereference`]
     fn dereference(self) -> AggregateResult<LvalueExprNode> {
         match &self.inner.ty {
-            CType::Scalar(ctype::Scalar::Pointer(ref pointed_to_ty, is_const)) => {
+            CType::Scalar(ctype::Scalar::Pointer(ctype::Pointer {
+                inner: ref pointed_to_ty,
+                inner_const: is_const,
+            })) => {
                 let ty = pointed_to_ty.as_ref().clone();
                 let res = LvalueExprNode {
                     span: self.full_span,

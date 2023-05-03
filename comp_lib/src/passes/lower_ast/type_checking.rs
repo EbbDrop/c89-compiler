@@ -1,6 +1,6 @@
 use crate::{
     diagnostic::builder::TypeCat,
-    ir::ctype::{Arithmetic, CType, Scalar},
+    ir::ctype::{Arithmetic, CType, Pointer, Scalar},
 };
 
 /// The result of a binary type rule check.
@@ -165,19 +165,21 @@ impl TypeRuleBin for UsualArithConversions {
     }
 }
 
-/// Checks for two pointers with compatible inner type ignoring the constness of this level but not the inner levels.
+/// Checks for two pointers with compatible inner type ignoring the constness of this level but
+/// not the inner levels.
 pub struct CompatPointer;
 
 impl TypeRuleBin for CompatPointer {
     fn check(self, left: &CType, right: &CType) -> Result<CheckBinOk, CheckBinErr> {
         let (left, right) = match (left, right) {
-            (CType::Scalar(Scalar::Pointer(left, _)), CType::Scalar(Scalar::Pointer(right, _))) => {
-                (left, right)
-            }
-            (CType::Scalar(Scalar::Pointer(_, _)), _) => {
+            (
+                CType::Scalar(Scalar::Pointer(Pointer { inner: left, .. })),
+                CType::Scalar(Scalar::Pointer(Pointer { inner: right, .. })),
+            ) => (left, right),
+            (CType::Scalar(Scalar::Pointer(_)), _) => {
                 return Err(CheckBinErr::Right(TypeCat::Pointer))
             }
-            (_, CType::Scalar(Scalar::Pointer(_, _))) => {
+            (_, CType::Scalar(Scalar::Pointer(_))) => {
                 return Err(CheckBinErr::Left(TypeCat::Pointer))
             }
             _ => return Err(CheckBinErr::Both(TypeCat::Pointer)),
@@ -219,7 +221,7 @@ impl TypeRuleBin for PointerInteger {
         let pointer_size = CType::Scalar(Scalar::Arithmetic(Arithmetic::UnsignedLongInt));
 
         match (left, right) {
-            (CType::Scalar(Scalar::Pointer(_, _)), CType::Scalar(Scalar::Arithmetic(other))) => {
+            (CType::Scalar(Scalar::Pointer(_)), CType::Scalar(Scalar::Arithmetic(other))) => {
                 if other.is_integral() {
                     Ok(CheckBinOk {
                         left_ty: None,
@@ -230,7 +232,7 @@ impl TypeRuleBin for PointerInteger {
                     Err(CheckBinErr::Right(TypeCat::Integral))
                 }
             }
-            (CType::Scalar(Scalar::Arithmetic(other)), CType::Scalar(Scalar::Pointer(_, _))) => {
+            (CType::Scalar(Scalar::Arithmetic(other)), CType::Scalar(Scalar::Pointer(_))) => {
                 if self.only_ptr_first {
                     return Err(CheckBinErr::Unknown);
                 }
@@ -261,6 +263,9 @@ impl TypeRuleBin for AnyScaler {
                 right_ty: None,
                 out_ty: left.clone(),
             }),
+            (CType::Scalar(_), _) => Err(CheckBinErr::Left(TypeCat::Scalar)),
+            (_, CType::Scalar(_)) => Err(CheckBinErr::Left(TypeCat::Scalar)),
+            _ => Err(CheckBinErr::Both(TypeCat::Scalar)),
         }
     }
 }
@@ -272,6 +277,7 @@ impl TypeRuleUn for AnyScaler {
                 inner_ty: None,
                 out_ty: inner.clone(),
             }),
+            _ => Err(CheckUnErr::Expected(TypeCat::Scalar)),
         }
     }
 }

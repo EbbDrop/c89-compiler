@@ -189,6 +189,10 @@ impl DiagnosticBuilder {
                 self.add_ir_expr_type(expr);
                 "can only cast from a scalar type"
             }
+            InvalidCastReason::BothNonScalar(expr) => {
+                self.add_ir_expr_type(expr);
+                "can only cast from and to scalar types"
+            }
             InvalidCastReason::IntoNonScalar => "can only cast to scalar types",
         };
         self.build_custom(Code::InvalidCast, message.to_owned())
@@ -235,6 +239,14 @@ impl DiagnosticBuilder {
                 "assign from `{}` to the incompatible type `{}`",
                 from_expr.ty, to_expr.ty
             ),
+        )
+    }
+
+    pub fn build_assign_to_array(mut self, to: &ir::LvalueExprNode) -> Diagnostic {
+        self.add_additional_span(to.span, Some(format!("this has type: `{}`", to.ty)));
+        self.build_custom(
+            Code::IncompatibleAssign,
+            "can't assign to an array".to_owned(),
         )
     }
 
@@ -320,6 +332,16 @@ impl DiagnosticBuilder {
             "was not able to fold switch case".to_owned(),
         )
     }
+
+    pub fn build_invalid_array_size(self, reason: InvalidArraySize) -> Diagnostic {
+        let message = match reason {
+            InvalidArraySize::NegativeSized => "size of array is negative",
+            InvalidArraySize::ZeroSized => "size of array is zero",
+            InvalidArraySize::NonInt => "size of array needs to be an interger",
+        };
+
+        self.build_custom(Code::InvalidArraySize, message.to_owned())
+    }
 }
 
 pub struct DiagnosticBuilder {
@@ -340,6 +362,7 @@ pub enum InvalidCastReason<'a> {
     PointerFromFloat(&'a ir::expr::ExprNode),
     FloatFromPointer(&'a ir::expr::ExprNode),
     FromNonScaler(&'a ir::expr::ExprNode),
+    BothNonScalar(&'a ir::expr::ExprNode),
     IntoNonScalar,
 }
 
@@ -361,4 +384,10 @@ impl TypeCat {
             TypeCat::Pointer => "pointer types",
         }
     }
+}
+
+pub enum InvalidArraySize {
+    NegativeSized,
+    ZeroSized,
+    NonInt,
 }

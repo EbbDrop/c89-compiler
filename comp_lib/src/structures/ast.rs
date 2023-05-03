@@ -65,7 +65,7 @@ pub enum Declaration {
 pub struct VariableDeclaration {
     pub type_name: QualifiedTypeNode,
     pub ident: IdentNode,
-    pub is_array: Option<ArrayDeclarationNode>,
+    pub array_parts: Vec<ArrayDeclarationNode>,
     pub initializer: Option<(Span, ExpressionNode)>,
 }
 

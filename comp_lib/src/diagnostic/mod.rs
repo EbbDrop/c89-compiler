@@ -91,6 +91,7 @@ pub enum Code {
     InvalidJumpStmt,
     SwitchCaseNotFolded,
     SwitchCaseNotInt,
+    InvalidArraySize,
 }
 
 impl Code {

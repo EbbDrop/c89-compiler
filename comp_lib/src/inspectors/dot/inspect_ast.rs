@@ -53,7 +53,7 @@ impl ToDot for ast::VariableDeclaration {
             ]
             .into_iter()
             .chain(
-                self.is_array
+                self.array_parts
                     .iter()
                     .map(|array| ("array", array.data.to_dot())),
             )

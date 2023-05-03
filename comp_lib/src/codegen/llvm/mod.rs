@@ -396,9 +396,19 @@ mod llvm_ir_builder {
             &mut self,
             lvalue_node: &ir::LvalueExprNode,
         ) -> Result<lir::value::Element> {
-            let ty = self.ctype_to_llvm_type(&lvalue_node.ty);
+            let is_array = matches!(
+                &lvalue_node.ty,
+                ctype::CType::Aggregate(ctype::Aggregate::Array(_))
+            );
+
             let pointer = self.add_reference_lvalue_node(lvalue_node)?;
-            self.add_load_from_ptr(pointer, ty).map(Into::into)
+
+            if !is_array {
+                let ty = self.ctype_to_llvm_type(&lvalue_node.ty);
+                self.add_load_from_ptr(pointer, ty).map(Into::into)
+            } else {
+                Ok(pointer.into())
+            }
         }
 
         ////////////////////////////////////////////////////////////////////////////////////////////
@@ -457,7 +467,8 @@ mod llvm_ir_builder {
                         ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
                             lir::ty::Integer::new_literal(a.size_in_bits())?
                         }
-                        ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => unreachable!(),
+                        ctype::CType::Scalar(ctype::Scalar::Pointer(_)) => unreachable!(),
+                        ctype::CType::Aggregate(_) => unreachable!(),
                     },
                     *v,
                 )
@@ -473,7 +484,8 @@ mod llvm_ir_builder {
                         }
                         _ => unreachable!(),
                     },
-                    ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => unreachable!(),
+                    ctype::CType::Scalar(ctype::Scalar::Pointer(_)) => unreachable!(),
+                    ctype::CType::Aggregate(_) => unreachable!(),
                 }
                 .into(),
                 ir::Constant::String(string) => {
@@ -500,8 +512,6 @@ mod llvm_ir_builder {
             inner_node: &ir::ExprNode,
         ) -> Result<lir::value::Element> {
             let to_ty = self.ctype_to_llvm_type(&outer_node.ty);
-            let is_to_type_signed = self.is_ctype_signed(&outer_node.ty)?;
-            let is_from_type_signed = self.is_ctype_signed(&inner_node.ty)?;
             let inner = self.add_expr_node(inner_node)?;
 
             use lir::ty;
@@ -509,6 +519,9 @@ mod llvm_ir_builder {
             let cast_instruction: lir::instruction::YieldingInstruction = match inner {
                 Element::Single(Single::Primitive(from)) => {
                     let ty::Element::Single(ty::Single::Primitive(to)) = to_ty else { unreachable!("primitive's should only be casted to other primitive's") };
+
+                    let is_to_type_signed = self.is_ctype_signed(&outer_node.ty)?;
+                    let is_from_type_signed = self.is_ctype_signed(&inner_node.ty)?;
                     match (from, to) {
                         (Primitive::Integer(value), ty::Primitive::Integer(to_ty)) => {
                             return self
@@ -564,7 +577,7 @@ mod llvm_ir_builder {
                     }
                 }
                 Element::Single(Single::Vector(_)) => unreachable!(),
-                Element::Aggregate(_) => todo!(),
+                Element::Aggregate(_) => unreachable!(),
             };
             Ok(self
                 .function
@@ -1245,7 +1258,8 @@ mod llvm_ir_builder {
                             .map(Into::into);
                     }
                 }
-                ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => unreachable!(),
+                ctype::CType::Scalar(ctype::Scalar::Pointer(_)) => unreachable!(),
+                ctype::CType::Aggregate(_) => unreachable!(),
             }
             Ok(boolean.into())
         }
@@ -1383,6 +1397,7 @@ mod llvm_ir_builder {
                 .add_instruction(lir::instruction::Load { ty, pointer })
         }
 
+        #[allow(clippy::only_used_in_recursion)]
         fn ctype_to_llvm_type(&self, ctype: &ctype::CType) -> lir::ty::Element {
             match ctype {
                 ctype::CType::Scalar(scalar) => match scalar {
@@ -1404,8 +1419,16 @@ mod llvm_ir_builder {
                         .expect("all c integer bit sizes should be valid llvm integer bit sizes")
                         .into(),
                     },
-                    ctype::Scalar::Pointer(_, _) => lir::ty::Pointer::new_literal().build().into(),
+                    ctype::Scalar::Pointer(_) => lir::ty::Pointer::new_literal().build().into(),
                 },
+                ctype::CType::Aggregate(ctype::Aggregate::Array(arr)) => {
+                    // TODO `as usize` is sad :(
+                    lir::ty::Array::new_literal(self.ctype_to_llvm_type(&arr.inner))
+                        .unwrap()
+                        .with_size(arr.length as usize)
+                        .build()
+                        .into()
+                }
             }
         }
 
@@ -1417,8 +1440,13 @@ mod llvm_ir_builder {
                     ctype::Scalar::Arithmetic(_) => {
                         Err("cannot retrieve inner type of non-pointer type")?
                     }
-                    ctype::Scalar::Pointer(inner, _) => Ok(self.ctype_to_llvm_type(inner)),
+                    ctype::Scalar::Pointer(ctype::Pointer { inner, .. }) => {
+                        Ok(self.ctype_to_llvm_type(inner))
+                    }
                 },
+                ctype::CType::Aggregate(_) => {
+                    Err("cannot retrieve inner type of non-pointer type")?
+                }
             }
         }
 
@@ -1426,7 +1454,8 @@ mod llvm_ir_builder {
         fn is_ctype_signed(&self, ctype: &ir::ctype::CType) -> Result<bool> {
             match ctype {
                 ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => Ok(a.is_signed()),
-                ctype::CType::Scalar(ctype::Scalar::Pointer(_, _)) => Ok(false),
+                ctype::CType::Scalar(ctype::Scalar::Pointer(_)) => Ok(false),
+                ctype::CType::Aggregate(_) => Err("arrays have no signedness")?,
             }
         }
     }

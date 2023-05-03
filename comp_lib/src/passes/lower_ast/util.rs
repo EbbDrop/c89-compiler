@@ -1,7 +1,10 @@
-use crate::ir::{
-    ctype::{self, CType},
-    expr::{Expr, ExprNode},
-    table::Item,
+use crate::{
+    ast,
+    ir::{
+        ctype::{self, CType},
+        expr::{Expr, ExprNode},
+        table::Item,
+    },
 };
 
 use super::symbol_table::ScopedHandle;
@@ -68,6 +71,22 @@ pub fn find_first_fit(value: i128, opts: &[ctype::Arithmetic]) -> Option<ctype::
         }
     }
     None
+}
+
+pub enum LiteralExtractErr {
+    NotALiteral,
+    NotAnInt,
+}
+
+pub fn extract_literal_int(expr: &ast::Expression) -> Result<i128, LiteralExtractErr> {
+    match expr {
+        ast::Expression::Literal(ast::LiteralNode { data, .. }) => match data {
+            ast::Literal::Dec(v) | ast::Literal::Hex(v) | ast::Literal::Octal(v) => Ok(*v),
+            ast::Literal::Char(v) => Ok(*v as i128),
+            _ => Err(LiteralExtractErr::NotAnInt),
+        },
+        _ => Err(LiteralExtractErr::NotALiteral),
+    }
 }
 
 #[cfg(test)]

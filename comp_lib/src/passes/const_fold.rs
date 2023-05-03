@@ -47,16 +47,18 @@ impl Folder {
             Declaration::Variable(VariableDeclaration {
                 ident,
                 initializer,
-                is_array,
+                array_parts,
                 ..
             }) => {
                 let res = initializer.as_mut().and_then(|initializer| {
                     self.fold_expr_node(&mut initializer.1, last_assign)
                         .map(|v| (ident.data.as_str(), v))
                 });
-                if let Some(array) = is_array {
-                    if let ArrayDeclaration::Known(expr) = &mut array.data {
-                        self.fold_expr_node(expr, last_assign);
+                if !array_parts.is_empty() {
+                    for array_part in array_parts {
+                        if let ArrayDeclaration::Known(expr) = &mut array_part.data {
+                            self.fold_expr_node(expr, last_assign);
+                        }
                     }
                     return None;
                 }

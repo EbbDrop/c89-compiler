@@ -323,7 +323,10 @@ fn cast() {
         ir,
         ExprNode {
             span: (0..0).into(),
-            ty: Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            ty: Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             expr: expr::Expr::Cast(Box::new(ExprNode {
                 span: (3..3).into(),
                 ty: Scalar(Arithmetic(SignedInt)),
@@ -475,7 +478,10 @@ fn refrence() {
             ir,
             ExprNode {
                 span: (0..0).into(),
-                ty: Scalar(Pointer(Box::new(ty.clone()), is_const)),
+                ty: Scalar(Pointer(ctype::Pointer {
+                    inner: Box::new(ty.clone()),
+                    inner_const: is_const,
+                })),
                 expr: expr::Expr::Reference(Box::new(expr::LvalueExprNode {
                     span: (3..3).into(),
                     is_const,
@@ -508,7 +514,10 @@ fn derefrence() {
     for is_const in [true, false] {
         let mut scope = scope.new_scope();
 
-        let ty_with_ptr = Scalar(Pointer(Box::new(ty.clone()), is_const));
+        let ty_with_ptr = Scalar(Pointer(ctype::Pointer {
+            inner: Box::new(ty.clone()),
+            inner_const: is_const,
+        }));
 
         let id_a = scope
             .vars
@@ -564,7 +573,10 @@ fn derefrence() {
 fn un_plus_min() {
     let tests = [
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
@@ -589,7 +601,10 @@ fn un_plus_min() {
 fn un_bit_not() {
     let tests = [
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
@@ -613,7 +628,10 @@ fn un_bit_not() {
 fn un_not() {
     let tests = [
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             Some(Scalar(Arithmetic(SignedInt))),
         ),
         (
@@ -640,8 +658,14 @@ fn un_not() {
 fn times_div() {
     let tests = [
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
@@ -673,8 +697,14 @@ fn times_div() {
 fn times_mod() {
     let tests = [
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
@@ -706,25 +736,37 @@ fn times_mod() {
 fn add() {
     let tests = [
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             Scalar(Arithmetic(Char)),
-            Some(Scalar(Pointer(
-                Box::new(Scalar(Arithmetic(SignedInt))),
-                false,
-            ))),
+            Some(Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            }))),
         ),
         (
             Scalar(Arithmetic(Char)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
-            Some(Scalar(Pointer(
-                Box::new(Scalar(Arithmetic(SignedInt))),
-                false,
-            ))),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
+            Some(Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            }))),
         ),
         (
             Scalar(Arithmetic(UnsignedLongInt)),
@@ -749,21 +791,33 @@ fn add() {
 fn sub() {
     let tests = [
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             Some(Scalar(Arithmetic(SignedLongInt))),
         ),
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             Scalar(Arithmetic(Char)),
-            Some(Scalar(Pointer(
-                Box::new(Scalar(Arithmetic(SignedInt))),
-                false,
-            ))),
+            Some(Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            }))),
         ),
         (
             Scalar(Arithmetic(Char)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
@@ -789,34 +843,52 @@ fn sub() {
 fn relations() {
     let tests = [
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             Some(Scalar(Arithmetic(SignedInt))),
         ),
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
-            Scalar(Pointer(
-                Box::new(Scalar(Arithmetic(UnsignedLongInt))),
-                false,
-            )),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(UnsignedLongInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(Float))), false)),
-            Scalar(Pointer(
-                Box::new(Scalar(Arithmetic(UnsignedLongInt))),
-                false,
-            )),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(Float))),
+                inner_const: false,
+            })),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(UnsignedLongInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             Scalar(Arithmetic(Char)),
             None,
         ),
         (
             Scalar(Arithmetic(Char)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
@@ -847,18 +919,30 @@ fn relations() {
 fn bitwise() {
     let tests = [
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             Scalar(Arithmetic(Char)),
             None,
         ),
         (
             Scalar(Arithmetic(Char)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             None,
         ),
         (
@@ -887,18 +971,30 @@ fn bitwise() {
 fn logical() {
     let tests = [
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             Some(Scalar(Arithmetic(SignedInt))),
         ),
         (
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             Scalar(Arithmetic(Char)),
             Some(Scalar(Arithmetic(SignedInt))),
         ),
         (
             Scalar(Arithmetic(Char)),
-            Scalar(Pointer(Box::new(Scalar(Arithmetic(SignedInt))), false)),
+            Scalar(Pointer(ctype::Pointer {
+                inner: Box::new(Scalar(Arithmetic(SignedInt))),
+                inner_const: false,
+            })),
             Some(Scalar(Arithmetic(SignedInt))),
         ),
         (

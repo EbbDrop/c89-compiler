@@ -10,6 +10,7 @@ pub enum CType {
     // Struct(Struct),
     // Union(Union),
     Scalar(Scalar),
+    Aggregate(Aggregate),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,15 +19,16 @@ pub enum IncompatibilityReason {
     DifferentType,
     /// use for a difference like `const int*` and `int*`
     DifferentConstness,
+    DifferentLength,
 }
 
 impl CType {
     pub fn from_ast_type(type_name: &ast::UnqualifiedType) -> Self {
         match &type_name {
-            ast::UnqualifiedType::PointerType(ty) => Self::Scalar(Scalar::Pointer(
-                Box::new(Self::from_ast_type(&ty.data.inner.data)),
-                ty.data.is_const.is_some(),
-            )),
+            ast::UnqualifiedType::PointerType(ty) => Self::Scalar(Scalar::Pointer(Pointer {
+                inner: Box::new(Self::from_ast_type(&ty.data.inner.data)),
+                inner_const: ty.data.is_const.is_some(),
+            })),
             ast::UnqualifiedType::PlainType(ty) => match ty {
                 ast::PlainType::Primitive(p) => Self::Scalar(Scalar::Arithmetic(match p {
                     ast::PrimitiveType::Char => Arithmetic::Char,
@@ -44,6 +46,8 @@ impl CType {
     pub fn compatible_with(&self, ty: &CType) -> Result<(), IncompatibilityReason> {
         match (self, ty) {
             (CType::Scalar(s1), CType::Scalar(s2)) => s1.compatible_with(s2),
+            (CType::Aggregate(a1), CType::Aggregate(a2)) => a1.compatible_with(a2),
+            _ => Err(IncompatibilityReason::DifferentType),
         }
     }
 }
@@ -53,35 +57,56 @@ impl Display for CType {
         match &self {
             CType::Scalar(s) => match s {
                 Scalar::Arithmetic(ref a) => write!(f, "{a}"),
-                Scalar::Pointer(ref p, false) => {
-                    write!(f, "{p} *")
-                }
-                Scalar::Pointer(ref p, true) => {
-                    let inner_is_pointer = matches!(**p, CType::Scalar(Scalar::Pointer(_, _)));
-                    if inner_is_pointer {
-                        write!(f, "{p}const *")
+                Scalar::Pointer(Pointer {
+                    inner,
+                    inner_const: is_const,
+                }) => {
+                    let inner_is_pointer = matches!(**inner, CType::Scalar(Scalar::Pointer(_)));
+
+                    if *is_const {
+                        if inner_is_pointer {
+                            write!(f, "{inner}const *")
+                        } else {
+                            write!(f, "const {inner} *")
+                        }
                     } else {
-                        write!(f, "const {p} *")
+                        write!(f, "{inner} *")
                     }
                 }
             },
+            CType::Aggregate(ref a) => write!(f, "{a}"),
         }
     }
+}
+
+/// The bool indicates whether or not the type being pointed to is const
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pointer {
+    pub inner: Box<CType>,
+    pub inner_const: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scalar {
     Arithmetic(Arithmetic),
-    /// The bool indicates whether or not the type being pointed to is const
-    Pointer(Box<CType>, bool),
+    Pointer(Pointer),
 }
 
 impl Scalar {
     pub fn compatible_with(&self, other: &Scalar) -> Result<(), IncompatibilityReason> {
         match (self, other) {
             (Scalar::Arithmetic(a1), Scalar::Arithmetic(a2)) => a1.compatible_with(a2),
-            (Scalar::Pointer(i1, is_const1), Scalar::Pointer(i2, is_const2)) => {
-                i1.compatible_with(i2)?;
+            (
+                Scalar::Pointer(Pointer {
+                    inner: inner1,
+                    inner_const: is_const1,
+                }),
+                Scalar::Pointer(Pointer {
+                    inner: inner2,
+                    inner_const: is_const2,
+                }),
+            ) => {
+                inner1.compatible_with(inner2)?;
                 if is_const1 != is_const2 {
                     Err(IncompatibilityReason::DifferentType)
                 } else {
@@ -275,6 +300,61 @@ impl Display for Arithmetic {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Aggregate {
+    Array(Array),
+}
+
+impl std::fmt::Display for Aggregate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Aggregate::Array(a) => write!(f, "{a}"),
+        }
+    }
+}
+
+impl Aggregate {
+    fn compatible_with(&self, other: &Aggregate) -> Result<(), IncompatibilityReason> {
+        match (self, other) {
+            (Aggregate::Array(a1), Aggregate::Array(a2)) => {
+                match a1.inner.compatible_with(&a2.inner) {
+                    Ok(_) => match a1.length == a2.length {
+                        true => Ok(()),
+                        false => Err(IncompatibilityReason::DifferentLength),
+                    },
+                    Err(err) => Err(err),
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Array {
+    pub inner: Box<CType>,
+    pub length: u128,
+}
+
+impl std::fmt::Display for Array {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (most_inner, array_parts) = self.to_string_parts();
+        write!(f, "{most_inner}{array_parts}")
+    }
+}
+
+impl Array {
+    fn to_string_parts(&self) -> (String, String) {
+        let array_part = format!("[{}]", self.length);
+        match &*self.inner {
+            CType::Aggregate(Aggregate::Array(a)) => {
+                let (inner, inner_array_part) = a.to_string_parts();
+                (inner, array_part + &inner_array_part)
+            }
+            other => (other.to_string(), array_part),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -305,21 +385,41 @@ mod test {
         }
 
         for (ct, s) in &test {
-            let ty = CType::Scalar(Scalar::Pointer(Box::new(ct.clone()), false));
+            let ty = CType::Scalar(Scalar::Pointer(Pointer {
+                inner: Box::new(ct.clone()),
+                inner_const: false,
+            }));
             assert_eq!(ty.to_string(), format!("{s} *"));
         }
 
         for (ct, s) in &test {
-            let ty = CType::Scalar(Scalar::Pointer(Box::new(ct.clone()), true));
+            let ty = CType::Scalar(Scalar::Pointer(Pointer {
+                inner: Box::new(ct.clone()),
+                inner_const: true,
+            }));
             assert_eq!(ty.to_string(), format!("const {s} *"));
         }
 
         for (ct, s) in &test {
-            let ty = CType::Scalar(Scalar::Pointer(
-                Box::new(CType::Scalar(Scalar::Pointer(Box::new(ct.clone()), false))),
-                true,
-            ));
+            let ty = CType::Scalar(Scalar::Pointer(Pointer {
+                inner: Box::new(CType::Scalar(Scalar::Pointer(Pointer {
+                    inner: Box::new(ct.clone()),
+                    inner_const: false,
+                }))),
+                inner_const: true,
+            }));
             assert_eq!(ty.to_string(), format!("{s} *const *"));
+        }
+
+        for (ct, s) in &test {
+            let ty = CType::Aggregate(Aggregate::Array(Array {
+                inner: Box::new(CType::Aggregate(Aggregate::Array(Array {
+                    inner: Box::new(ct.clone()),
+                    length: 2,
+                }))),
+                length: 4,
+            }));
+            assert_eq!(ty.to_string(), format!("{s}[4][2]"));
         }
     }
 

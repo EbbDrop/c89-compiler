@@ -13,9 +13,9 @@ statement
 
 declarationStatement
     : type_name=typeName ident=identifier
-      array=arrayDeclaration? SEMICOLON                         # DeclarationStatementWithoutInitializer
+      (array+=arrayDeclaration)* SEMICOLON                      # DeclarationStatementWithoutInitializer
     | type_name=typeName ident=identifier
-      array=arrayDeclaration? op=EQUALS rhs=expr SEMICOLON      # DeclarationStatementWithInitializer
+      (array+=arrayDeclaration)* op=EQUALS rhs=expr SEMICOLON   # DeclarationStatementWithInitializer
     | value=functionDeclaration                                 # DeclarationStatementFunctionDeclaration
     ;
 

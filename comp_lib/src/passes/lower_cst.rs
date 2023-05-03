@@ -474,32 +474,26 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
             DeclarationStatement::DeclarationStatementWithoutInitializerContext(decl) => self
                 .build_from_type_name(decl.type_name.as_deref().unwrap())
                 .zip(self.build_from_identifier(decl.ident.as_deref().unwrap()))
-                .zip(match decl.array.as_deref() {
-                    Some(array) => self.build_from_array_declaration(array).map(Some),
-                    None => AggregateResult::new_ok(None),
-                })
+                .zip(self.build_from_array_declarations(&decl.array))
                 .map(|((type_name, ident), is_array)| {
                     ast::Declaration::Variable(ast::VariableDeclaration {
                         type_name,
                         ident,
-                        is_array,
+                        array_parts: is_array,
                         initializer: None,
                     })
                 }),
             DeclarationStatement::DeclarationStatementWithInitializerContext(decl) => self
                 .build_from_type_name(decl.type_name.as_deref().unwrap())
                 .zip(self.build_from_identifier(decl.ident.as_deref().unwrap()))
-                .zip(match decl.array.as_deref() {
-                    Some(array) => self.build_from_array_declaration(array).map(Some),
-                    None => AggregateResult::new_ok(None),
-                })
+                .zip(self.build_from_array_declarations(&decl.array))
                 .zip(self.build_from_expr(decl.rhs.as_deref().unwrap()))
                 .map(|(((type_name, ident), is_array), initializer)| {
                     let op_span = extract_span_from_token(decl.op.as_deref().unwrap());
                     ast::Declaration::Variable(ast::VariableDeclaration {
                         type_name,
                         ident,
-                        is_array,
+                        array_parts: is_array,
                         initializer: Some((op_span, initializer)),
                     })
                 }),
@@ -510,25 +504,32 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         }
     }
 
-    fn build_from_array_declaration(
+    fn build_from_array_declarations(
         &self,
-        ctx: &cst::ArrayDeclaration,
-    ) -> AggregateResult<ast::ArrayDeclarationNode> {
+        ctxs: &Vec<Rc<cst::ArrayDeclaration>>,
+    ) -> AggregateResult<Vec<ast::ArrayDeclarationNode>> {
         use cst::ArrayDeclaration;
-        let data = match ctx {
-            ArrayDeclaration::ArrayDeclarationPlainContext(_) => {
-                AggregateResult::new_ok(ast::ArrayDeclaration::Unknown)
-            }
-            ArrayDeclaration::ArrayDeclarationExprContext(ctx) => self
-                .build_from_cond_expr(ctx.value.as_deref().unwrap())
-                .map(ast::ArrayDeclaration::Known),
-            ArrayDeclaration::Error(ectx) => tree_error(ectx),
-        };
 
-        data.map(|data| ast::ArrayDeclarationNode {
-            span: extract_span(ctx),
-            data,
-        })
+        let mut res = AggregateResult::new_ok(Vec::new());
+
+        for ctx in ctxs {
+            let ctx = ctx.deref();
+            let part = match ctx {
+                ArrayDeclaration::ArrayDeclarationPlainContext(_) => {
+                    AggregateResult::new_ok(ast::ArrayDeclaration::Unknown)
+                }
+                ArrayDeclaration::ArrayDeclarationExprContext(ctx) => self
+                    .build_from_cond_expr(ctx.value.as_deref().unwrap())
+                    .map(ast::ArrayDeclaration::Known),
+                ArrayDeclaration::Error(ectx) => tree_error(ectx),
+            };
+            part.map(|part| ast::ArrayDeclarationNode {
+                span: extract_span(ctx),
+                data: part,
+            })
+            .add_to(&mut res, |res, p| res.push(p));
+        }
+        res
     }
 
     fn build_from_function_declaration(

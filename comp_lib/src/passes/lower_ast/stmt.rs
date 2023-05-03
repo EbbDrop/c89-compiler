@@ -1,6 +1,6 @@
 use crate::{
     ast,
-    diagnostic::{AggregateResult, DiagnosticBuilder, Span},
+    diagnostic::{builder::InvalidArraySize, AggregateResult, DiagnosticBuilder, Span},
     ir::{
         ctype::{self, CType},
         table::Item,
@@ -11,11 +11,12 @@ use crate::{
 
 use super::{
     expr,
+    symbol_table::ScopedHandle,
     type_checking::{AnyScaler, CheckUnErr, PromoteArith, TypeRuleUn},
-    util::{self, Scope},
+    util::{self, extract_literal_int, LiteralExtractErr, Scope},
 };
 
-/// WARNNG! Does not create its own new scope!
+/// WARNING! Does not create its own new scope!
 pub fn build_ir_from_block(
     block: &ast::BlockStatementNode,
     scope: &mut Scope,
@@ -56,56 +57,24 @@ pub fn build_ir_from_statement(
     let expr = match &statement.data {
         ast::Statement::Declaration(ast::Declaration::FunctionDeclaration(_)) => {
             AggregateResult::new_rec(
-                None,
+                Vec::new(),
                 DiagnosticBuilder::new(statement.span).build_unimplemented("forward declarations"),
             )
         }
-        ast::Statement::Declaration(ast::Declaration::Variable(ast::VariableDeclaration {
-            type_name,
-            ident,
-            is_array,
-            initializer,
-        })) => {
-            if let Some(array) = is_array {
-                return AggregateResult::new_err(
-                    DiagnosticBuilder::new(array.span).build_unimplemented("array declarations"),
-                );
-            }
-            // This has to be done first, so that the ident is not declared yet.
-            let init_expr = match initializer.as_ref() {
-                Some((op_span, init)) => {
-                    expr::build_ir_expr(init, scope).map(|init_expr| Some((op_span, init_expr)))
-                }
-                None => AggregateResult::new_ok(None),
-            };
-
-            // Most of the complecity here comes from needing to make shure all diagnostic are
-            // alloways reported
-            declaration(type_name, ident, initializer.is_some(), scope)
-                .zip(init_expr)
-                .and_then(|(mut to, init_expr)| {
-                    // This is the initializing assignment whitch is allowed to const values
-                    to.is_const = false;
-                    let init_expr = init_expr.map(|(op_span, init_expr)| {
-                        expr::assign(to, init_expr, statement.span, *op_span)
-                    });
-                    match init_expr {
-                        Some(expr) => expr.map(|expr| Some(Stmt::Expr(expr))),
-                        None => AggregateResult::new_ok(None),
-                    }
-                })
+        ast::Statement::Declaration(ast::Declaration::Variable(decl)) => {
+            variable_declaration(decl, statement.span, scope)
         }
         ast::Statement::Expression(e) => {
-            expr::build_ir_expr(e, scope).map(|expr| Some(Stmt::Expr(expr)))
+            expr::build_ir_expr(e, scope).map(|expr| vec![Stmt::Expr(expr)])
         }
         ast::Statement::If(stmt) => {
-            if_statement(stmt, statement.span, scope).map(|stmt| Some(Stmt::IfStmt(stmt)))
+            if_statement(stmt, statement.span, scope).map(|stmt| vec![Stmt::IfStmt(stmt)])
         }
         ast::Statement::Switch(stmt) => {
-            switch_statement(stmt, statement.span, scope).map(|stmt| Some(Stmt::SwitchStmt(stmt)))
+            switch_statement(stmt, statement.span, scope).map(|stmt| vec![Stmt::SwitchStmt(stmt)])
         }
         ast::Statement::While(stmt) => {
-            while_statement(stmt, statement.span, scope).map(|stmt| Some(Stmt::LoopStmt(stmt)))
+            while_statement(stmt, statement.span, scope).map(|stmt| vec![Stmt::LoopStmt(stmt)])
         }
         ast::Statement::For(stmt) => {
             return for_statement(stmt, statement.span, scope).map(|(mut init, loop_stmt)| {
@@ -119,7 +88,7 @@ pub fn build_ir_from_statement(
         }
         ast::Statement::Break => {
             if scope.in_switch || scope.in_loop {
-                AggregateResult::new_ok(Some(Stmt::Break))
+                AggregateResult::new_ok(vec![Stmt::Break])
             } else {
                 AggregateResult::new_err(
                     DiagnosticBuilder::new(statement.span).build_invalid_break(),
@@ -128,7 +97,7 @@ pub fn build_ir_from_statement(
         }
         ast::Statement::Continue => {
             if scope.in_loop {
-                AggregateResult::new_ok(Some(Stmt::Continue))
+                AggregateResult::new_ok(vec![Stmt::Continue])
             } else {
                 AggregateResult::new_err(
                     DiagnosticBuilder::new(statement.span).build_invalid_continue(),
@@ -155,29 +124,35 @@ pub fn build_ir_from_statement(
                 }
                 _ => expr,
             })
-            .map(|expr| Some(Stmt::Printf(expr)))
+            .map(|expr| vec![Stmt::Printf(expr)])
         }
     };
 
-    expr.map(|expr| match expr {
-        Some(stmt) => vec![StmtNode {
-            span: statement.span,
-            stmt,
-            comments: statement.comments.clone(),
-        }],
-        None => Vec::new(),
+    expr.map(|stmts| {
+        let mut stmts: Vec<StmtNode> = stmts
+            .into_iter()
+            .map(|stmt| StmtNode {
+                comments: None,
+                span: statement.span,
+                stmt,
+            })
+            .collect();
+        if let Some(stmt) = stmts.first_mut() {
+            stmt.comments = statement.comments.clone();
+        }
+        stmts
     })
 }
 
 fn return_statement(
     e: Option<&ast::ExpressionNode>,
     _scope: &mut Scope,
-) -> AggregateResult<Option<Stmt>> {
+) -> AggregateResult<Vec<Stmt>> {
     match e {
         Some(_e) => AggregateResult::new_err(
             DiagnosticBuilder::new(_e.span).build_unimplemented("value return"),
         ),
-        None => AggregateResult::new_ok(Some(Stmt::Return(None))),
+        None => AggregateResult::new_ok(vec![Stmt::Return(None)]),
     }
 }
 
@@ -222,21 +197,16 @@ fn switch_statement(
     for case in &stmt.cases {
         match case {
             ast::SwitchCase::Expr(case) => {
-                let value = match &case.expr.data {
-                    ast::Expression::Literal(ast::LiteralNode { data, .. }) => match data {
-                        ast::Literal::Dec(v) | ast::Literal::Hex(v) | ast::Literal::Octal(v) => {
-                            Ok(*v)
-                        }
-                        ast::Literal::Char(v) => Ok(*v as i128),
-                        _ => Err(DiagnosticBuilder::new(case.expr.span).build_case_not_int()),
-                    },
-                    _ => Err(DiagnosticBuilder::new(case.expr.span).build_case_not_folded()),
+                let value = match extract_literal_int(&case.expr.data) {
+                    Ok(v) => AggregateResult::new_ok(v),
+                    Err(LiteralExtractErr::NotALiteral) => AggregateResult::new_err(
+                        DiagnosticBuilder::new(case.expr.span).build_case_not_folded(),
+                    ),
+                    Err(LiteralExtractErr::NotAnInt) => AggregateResult::new_err(
+                        DiagnosticBuilder::new(case.expr.span).build_case_not_int(),
+                    ),
                 };
 
-                let value = match value {
-                    Ok(v) => AggregateResult::new_ok(v),
-                    Err(d) => AggregateResult::new_err(d),
-                };
                 value
                     .zip(build_ir_from_block(&case.body, &mut inner_scope))
                     .map(|(v, block)| SwitchStmtCaseNode {
@@ -326,35 +296,118 @@ fn for_statement(
     init.zip(loop_stmt)
 }
 
+pub fn variable_declaration(
+    decl: &ast::VariableDeclaration,
+    span: Span,
+    scope: &mut Scope,
+) -> AggregateResult<Vec<Stmt>> {
+    // This has to be done first, so that the ident is not declared yet.
+    let init_expr = match decl.initializer.as_ref() {
+        Some((op_span, init)) => {
+            expr::build_ir_expr(init, scope).map(|init_expr| Some((op_span, init_expr)))
+        }
+        None => AggregateResult::new_ok(None),
+    };
+
+    declaration(
+        &decl.type_name,
+        &decl.ident,
+        &decl.array_parts,
+        decl.initializer.is_some(),
+        &mut scope.vars,
+    )
+    .zip(init_expr)
+    .and_then(|((mut to, declare_stmt), init_expr)| {
+        // This is the initializing assignment whitch is allowed to const values
+        to.is_const = false;
+        let init_expr =
+            init_expr.map(|(op_span, init_expr)| expr::assign(to, init_expr, span, *op_span));
+
+        let mut res = AggregateResult::new_ok(declare_stmt);
+        if let Some(expr) = init_expr {
+            expr.add_to(&mut res, |res, expr| res.push(Stmt::Expr(expr)));
+        }
+        res
+    })
+}
+
 fn declaration(
     type_name: &ast::QualifiedTypeNode,
     ident: &ast::IdentNode,
+    array_parts: &[ast::ArrayDeclarationNode],
     will_init: bool,
-    scope: &mut Scope,
-) -> AggregateResult<LvalueExprNode> {
+    scope: &mut ScopedHandle<'_>,
+) -> AggregateResult<(LvalueExprNode, Vec<Stmt>)> {
     let ty = CType::from_ast_type(&type_name.data.inner.data);
     let is_const = type_name.data.is_const.is_some();
 
-    let item = Item {
-        ty: ty.clone(),
+    let mut ty = AggregateResult::new_ok(ty);
+    for array_part in array_parts.iter().rev() {
+        match &array_part.data {
+            ast::ArrayDeclaration::Unknown => {
+                ty.add_err(
+                    DiagnosticBuilder::new(array_part.span)
+                        .build_unimplemented("implicitly sized arrays"),
+                );
+            }
+            ast::ArrayDeclaration::Known(expr) => {
+                let length = match extract_literal_int(&expr.data) {
+                    Ok(value) => match value {
+                        ..=-1 => AggregateResult::new_err(
+                            DiagnosticBuilder::new(array_part.span)
+                                .build_invalid_array_size(InvalidArraySize::NegativeSized),
+                        ),
+                        0 => AggregateResult::new_err(
+                            DiagnosticBuilder::new(array_part.span)
+                                .build_invalid_array_size(InvalidArraySize::ZeroSized),
+                        ),
+                        value => AggregateResult::new_ok(value as u128),
+                    },
+                    Err(LiteralExtractErr::NotALiteral) => AggregateResult::new_err(
+                        DiagnosticBuilder::new(array_part.span)
+                            .build_unimplemented("dynamically sized arrays"),
+                    ),
+                    Err(LiteralExtractErr::NotAnInt) => AggregateResult::new_err(
+                        DiagnosticBuilder::new(array_part.span)
+                            .build_invalid_array_size(InvalidArraySize::NonInt),
+                    ),
+                };
+                ty = ty.zip(length).map(|(ty, length)| {
+                    CType::Aggregate(ctype::Aggregate::Array(ctype::Array {
+                        inner: Box::new(ty),
+                        length,
+                    }))
+                });
+            }
+        }
+    }
+
+    let item = ty.map(|ty| Item {
+        ty,
         is_const,
         original_span: ident.span,
         initialized: will_init,
-    };
+    });
 
-    match scope.vars.declare(ident.data.clone(), item) {
-        Ok(id) => AggregateResult::new_ok(LvalueExprNode {
-            span: ident.span,
-            is_const,
-            ty,
-            expr: LvalueExpr::Ident(id),
-        }),
-        Err(id) => {
-            let original_span = scope.vars.root_table().get(id).original_span;
-            AggregateResult::new_err(
-                DiagnosticBuilder::new(ident.span)
-                    .build_already_defined(&ident.data, original_span),
-            )
+    item.and_then(|item| {
+        let ty = item.ty.clone();
+        match scope.declare(ident.data.clone(), item) {
+            Ok(id) => AggregateResult::new_ok((
+                LvalueExprNode {
+                    span: ident.span,
+                    is_const,
+                    ty,
+                    expr: LvalueExpr::Ident(id),
+                },
+                Vec::new(),
+            )),
+            Err(id) => {
+                let original_span = scope.root_table().get(id).original_span;
+                AggregateResult::new_err(
+                    DiagnosticBuilder::new(ident.span)
+                        .build_already_defined(&ident.data, original_span),
+                )
+            }
         }
-    }
+    })
 }
