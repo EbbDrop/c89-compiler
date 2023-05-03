@@ -37,6 +37,21 @@ impl DiagnosticBuilder {
         );
     }
 
+    pub fn add_ir_return_type(&mut self, span: Span, ty: &ir::ctype::CType) {
+        self.add_additional_span(
+            span,
+            Some(format!("return type specified to be `{}` here", ty)),
+        );
+    }
+
+    fn add_function_def(&mut self, span: Span) {
+        self.add_additional_span(span, Some("function defined here".to_owned()));
+    }
+
+    fn add_ir_param_type(&mut self, param: &ir::FunctionParamNode) {
+        self.add_additional_span(param.span, Some("parameter defined here".to_owned()));
+    }
+
     fn build_custom(self, code: Code, message: String) -> Diagnostic {
         Diagnostic {
             code,
@@ -198,7 +213,7 @@ impl DiagnosticBuilder {
         self.build_custom(Code::InvalidCast, message.to_owned())
     }
 
-    pub fn build_implicit_lossy_conversion(
+    pub fn build_implicit_lossy_assign(
         mut self,
         from_expr: &ir::expr::ExprNode,
         to_expr: &ir::expr::LvalueExprNode,
@@ -220,7 +235,7 @@ impl DiagnosticBuilder {
             to_expr.span,
             Some(format!("while this has type: `{}`", to_expr.ty)),
         );
-        self.build_custom(Code::LossyImplicitConversion, message)
+        self.build_custom(Code::LossyImplicitAssign, message)
     }
 
     pub fn build_incompatible_assign(
@@ -254,8 +269,113 @@ impl DiagnosticBuilder {
         self.add_additional_span(with_const, Some("this points to a const value".to_owned()));
         self.add_additional_span(without_const, Some("while this doesn't".to_owned()));
         self.build_custom(
-            Code::IncompatibleAssign,
+            Code::AssignConstLoss,
             "assign loses const qualifier".to_owned(),
+        )
+    }
+
+    pub fn build_implicit_lossy_return(
+        mut self,
+        from_expr: &ir::expr::ExprNode,
+        to_span: Span,
+        to_type: &ir::ctype::CType,
+        only_sign: bool,
+    ) -> Diagnostic {
+        let message = if only_sign {
+            format!(
+                "implicit conversion from `{}` to `{}` could change sign",
+                from_expr.ty, to_type,
+            )
+        } else {
+            format!(
+                "implicit conversion from `{}` to `{}` could lose information",
+                from_expr.ty, to_type,
+            )
+        };
+        self.add_ir_expr_type(from_expr);
+        self.add_ir_return_type(to_span, to_type);
+        self.build_custom(Code::LossyImplicitReturn, message)
+    }
+
+    pub fn build_incompatible_return(
+        mut self,
+        from_expr: &ir::expr::ExprNode,
+        to_span: Span,
+        to_type: &ir::ctype::CType,
+    ) -> Diagnostic {
+        self.add_ir_expr_type(from_expr);
+        self.add_ir_return_type(to_span, to_type);
+        self.build_custom(
+            Code::IncompatibleReturn,
+            format!(
+                "return of type `{}` in function with incompatible type `{}`",
+                from_expr.ty, to_type
+            ),
+        )
+    }
+
+    pub fn build_return_const_loss(mut self, with_const: Span, return_span: Span) -> Diagnostic {
+        self.add_additional_span(
+            with_const,
+            Some("but this points to a const value".to_owned()),
+        );
+        self.add_additional_span(
+            return_span,
+            Some("function returns a non const pointer".to_owned()),
+        );
+        self.build_custom(
+            Code::ReturnConstLoss,
+            "return loses const qualifier".to_owned(),
+        )
+    }
+
+    pub fn build_implicit_lossy_arg(
+        mut self,
+        from_expr: &ir::expr::ExprNode,
+        param: &ir::stmt::FunctionParamNode,
+        only_sign: bool,
+    ) -> Diagnostic {
+        let message = if only_sign {
+            format!(
+                "implicit conversion from `{}` to parameter type `{}` could change sign",
+                from_expr.ty, param.ty,
+            )
+        } else {
+            format!(
+                "implicit conversion from `{}` to parameter type `{}` could lose information",
+                from_expr.ty, param.ty,
+            )
+        };
+        self.add_ir_expr_type(from_expr);
+        self.add_ir_param_type(param);
+        self.build_custom(Code::LossyImplicitArg, message)
+    }
+
+    pub fn build_incompatible_arg(
+        mut self,
+        from_expr: &ir::expr::ExprNode,
+        param: &ir::stmt::FunctionParamNode,
+    ) -> Diagnostic {
+        self.add_ir_expr_type(from_expr);
+        self.add_ir_param_type(param);
+        self.build_custom(
+            Code::IncompatibleArg,
+            format!(
+                "argument has type `{}` with is not compatible with parameter type `{}`",
+                from_expr.ty, param.ty
+            ),
+        )
+    }
+
+    pub fn build_arg_const_loss(mut self, with_const: Span, param_span: Span) -> Diagnostic {
+        self.add_additional_span(with_const, Some("this points to a const value".to_owned()));
+        self.add_additional_span(
+            param_span,
+            Some("parameter is a non const pointer".to_owned()),
+        );
+        self.build_custom(
+            Code::ArgConstLoss,
+            "argument loses const qualifier in function".to_owned(),
         )
     }
 
@@ -282,15 +402,22 @@ impl DiagnosticBuilder {
     }
 
     pub fn build_undeclared_ident(self, name: &str) -> Diagnostic {
-        // TODO give possible alternative names that are close
+        // IDEA: give possible alternative names that are close
         self.build_custom(
             Code::UndeclaredIdent,
             format!("identifier `{name}` isn't declared in this scope"),
         )
     }
 
+    pub fn build_undeclared_function(self, name: &str) -> Diagnostic {
+        // IDEA: give possible alternative names that are close
+        self.build_custom(
+            Code::UndeclaredFunction,
+            format!("function with name `{name}` not found"),
+        )
+    }
+
     pub fn build_already_defined(mut self, name: &str, original_span: Span) -> Diagnostic {
-        // TODO give span of definition
         self.add_additional_span(original_span, Some("originally defined here".to_owned()));
         self.build_custom(
             Code::AlreadyDefined,
@@ -347,6 +474,26 @@ impl DiagnosticBuilder {
         self.build_custom(
             Code::NonConstGlobalInitializer,
             "global variables can only be initialized by constant expressions".to_owned(),
+        )
+    }
+
+    pub fn build_wrong_amount_of_args(
+        mut self,
+        got: usize,
+        expected: usize,
+        original_span: Span,
+        to_many: bool,
+    ) -> Diagnostic {
+        self.add_function_def(original_span);
+
+        let problem = match to_many {
+            true => "many",
+            false => "little",
+        };
+
+        self.build_custom(
+            Code::WrongAmountOfArgs,
+            format!("to {problem} arguments. got {got} but expected {expected}"),
         )
     }
 }

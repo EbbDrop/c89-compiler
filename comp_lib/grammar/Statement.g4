@@ -66,7 +66,7 @@ forStatement
 jumpStatement
     : KW_CONTINUE SEMICOLON                                     # JumpStatementContinue
     | KW_BREAK SEMICOLON                                        # JumpStatementBreak
-    | KW_RETURN value=expr? SEMICOLON                           # JumpStatementReturn
+    | op=KW_RETURN value=expr? SEMICOLON                        # JumpStatementReturn
     ;
 
 blockItem

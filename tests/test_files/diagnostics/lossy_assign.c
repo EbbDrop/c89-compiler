@@ -1,6 +1,6 @@
 //warn:
-//LossyImplicitConversion
-//LossyImplicitConversion
+//LossyImplicitAssign
+//LossyImplicitAssign
 
 int main() {
     int a = 4;

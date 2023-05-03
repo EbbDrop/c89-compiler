@@ -1,15 +1,21 @@
+use crate::{
+    ast,
+    diagnostic::Span,
+    ir::{
+        self,
+        ctype::{self, CType},
+        expr::{Expr, ExprNode},
+        table::VariableItem,
+    },
+};
+
 use super::symbol_table::ScopedHandle;
-use crate::ast;
-use crate::ir;
-use crate::ir::ctype::{self, CType};
-use crate::ir::expr::{Expr, ExprNode};
-use crate::ir::table::VariableItem;
 
 #[derive(Debug)]
 pub struct FunctionScope<'a, 'g> {
     pub global: &'g ir::Root,
     pub vars: ScopedHandle<'a, VariableItem>,
-    pub func_return_type: &'a CType,
+    pub func_return_type: (Span, &'a CType),
     pub in_switch: bool,
     pub in_loop: bool,
 }

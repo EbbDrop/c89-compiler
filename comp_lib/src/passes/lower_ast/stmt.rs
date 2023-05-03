@@ -7,11 +7,12 @@ use crate::{
         BlockNode, ExprNode, IfStmtNode, LoopStmtNode, LvalueExpr, LvalueExprNode, Stmt, StmtNode,
         SwitchStmtCase, SwitchStmtCaseNode, SwitchStmtNode,
     },
+    passes::lower_ast::util::maybe_cast,
 };
 
 use super::{
     expr,
-    type_checking::{AnyScaler, CheckUnErr, PromoteArith, TypeRuleUn},
+    type_checking::{check_assign, AnyScaler, CheckUnErr, PromoteArith, TypeRuleUn},
     util::{extract_literal_int, DeclarationType, FunctionScope, LiteralExtractErr},
 };
 
@@ -104,7 +105,7 @@ pub fn build_ir_from_statement(
                 )
             }
         }
-        ast::Statement::Return(e) => return_statement(e.as_ref(), scope),
+        ast::Statement::Return(span, e) => return_statement(e.as_ref(), *span, scope),
         ast::Statement::BlockStatement(block) => {
             return build_ir_from_block(block, &mut scope.new_scope()).map(|block| block.stmts);
         }
@@ -128,12 +129,50 @@ pub fn build_ir_from_statement(
 
 fn return_statement(
     e: Option<&ast::ExpressionNode>,
-    _scope: &mut FunctionScope,
+    span: Span,
+    scope: &mut FunctionScope,
 ) -> AggregateResult<Vec<Stmt>> {
     match e {
-        Some(_e) => AggregateResult::new_err(
-            DiagnosticBuilder::new(_e.span).build_unimplemented("value return"),
-        ),
+        Some(e) => expr::build_ir_expr(e, scope).and_then(|expr| {
+            let (return_type_span, return_type) = scope.func_return_type;
+
+            let mut res = AggregateResult::new_ok(());
+
+            let builder = DiagnosticBuilder::new(span);
+            use super::type_checking::AssignCheckResult::*;
+            match check_assign(return_type, &expr.ty) {
+                Ok => {}
+                Lossy => res.add_rec_diagnostic(builder.build_implicit_lossy_return(
+                    &expr,
+                    return_type_span,
+                    return_type,
+                    false,
+                )),
+                SignChange => res.add_rec_diagnostic(builder.build_implicit_lossy_return(
+                    &expr,
+                    return_type_span,
+                    return_type,
+                    true,
+                )),
+                LossOfConst => res.add_rec_diagnostic(
+                    builder.build_return_const_loss(expr.span, return_type_span),
+                ),
+                Incompatible | PointerAndInt => res.add_rec_diagnostic(
+                    builder.build_incompatible_return(&expr, return_type_span, return_type),
+                ),
+                PointerAndFloat => res.add_err(builder.build_incompatible_return(
+                    &expr,
+                    return_type_span,
+                    return_type,
+                )),
+                ToArray => unreachable!("ICE: Arrays aren't a valid return type for functions"),
+                FromArray => {
+                    unreachable!("ICE: Array should have been converted to a pointer by now")
+                }
+            }
+
+            res.map(|()| vec![Stmt::Return(Some(maybe_cast(expr, return_type.clone())))])
+        }),
         None => AggregateResult::new_ok(vec![Stmt::Return(None)]),
     }
 }

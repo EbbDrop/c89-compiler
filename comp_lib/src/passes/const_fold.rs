@@ -114,7 +114,10 @@ impl Folder {
             }
             Statement::Break => {}
             Statement::Continue => {}
-            Statement::Return(_) => {}
+            Statement::Return(_, Some(expr_node)) => {
+                self.fold_expr_node(expr_node, &last_assign);
+            }
+            Statement::Return(_, None) => {}
             Statement::BlockStatement(bs) => {
                 self.fold_block_statement(bs);
             }

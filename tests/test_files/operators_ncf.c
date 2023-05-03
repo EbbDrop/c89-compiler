@@ -1,4 +1,3 @@
-//ignore
 //output:
 //8
 //2
@@ -14,8 +13,6 @@
 //1.368421
 //3.800000
 //-3.800000
-
-// TODO: stop ignoring once varargs with floats are fixed
 
 #include <stdio.h>
 

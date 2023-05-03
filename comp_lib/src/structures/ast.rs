@@ -95,7 +95,7 @@ pub enum Statement {
     For(ForStatement),
     Break,
     Continue,
-    Return(Option<ExpressionNode>),
+    Return(Span, Option<ExpressionNode>),
     BlockStatement(BlockStatementNode),
 }
 

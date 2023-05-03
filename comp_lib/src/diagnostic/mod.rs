@@ -81,7 +81,7 @@ pub enum Code {
     UnexpectedType,
     NeedLvalue,
     InvalidCast,
-    LossyImplicitConversion,
+    LossyImplicitAssign,
     IncompatibleAssign,
     TooBigConstant,
     UndeclaredIdent,
@@ -93,6 +93,15 @@ pub enum Code {
     SwitchCaseNotInt,
     InvalidArraySize,
     NonConstGlobalInitializer,
+    AssignConstLoss,
+    LossyImplicitReturn,
+    IncompatibleReturn,
+    ReturnConstLoss,
+    UndeclaredFunction,
+    WrongAmountOfArgs,
+    LossyImplicitArg,
+    IncompatibleArg,
+    ArgConstLoss,
 }
 
 impl Code {

@@ -120,7 +120,7 @@ fn add_function(function: AstFunction, global: &mut ir::Root) -> AggregateResult
     let mut function_scope = FunctionScope {
         global,
         vars: function_table.get_scoped_handle(),
-        func_return_type: &return_type,
+        func_return_type: (function.return_type.span, &return_type),
         in_switch: false,
         in_loop: false,
     };

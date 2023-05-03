@@ -1,3 +1,5 @@
+use std::iter::repeat;
+
 use crate::{
     ast,
     diagnostic::{
@@ -13,7 +15,7 @@ use crate::{
     },
     passes::lower_ast::{
         type_checking::{
-            AnyScaler, CheckBinErr, CheckBinOk, CheckUnErr, CheckUnOk, CompatPointer,
+            check_assign, AnyScaler, CheckBinErr, CheckBinOk, CheckUnErr, CheckUnOk, CompatPointer,
             PointerInteger, PromoteArith, TypeRuleBin, TypeRuleUn, UsualArithConversions,
         },
         util::{find_first_fit, maybe_cast, FunctionScope},
@@ -49,19 +51,7 @@ pub fn build_ir_expr(
                 type_name.span,
             )
         }),
-        ast::Expression::FunctionCall(fcall) => {
-            let mut args_res = AggregateResult::new_ok(Vec::new());
-            for arg in &fcall.args {
-                build_ir_expr(arg, scope).add_to(&mut args_res, |res, a| res.push(a));
-            }
-            args_res.combine(function_ident(&fcall.ident, scope), |args, (id, func)| {
-                ir::ExprNode {
-                    span,
-                    ty: func.return_type.clone(),
-                    expr: ir::Expr::FunctionCall(String::from(id), args),
-                }
-            })
-        }
+        ast::Expression::FunctionCall(fcall) => function_call(fcall, span, scope),
         ast::Expression::Literal(lit) => literal(lit),
         ast::Expression::Ident(idt) => variable_ident(idt, false, scope).map(lvalue_dereference),
     }
@@ -203,6 +193,123 @@ fn arrays_subscript(
         })
 }
 
+fn function_call(
+    fcall: &ast::FunctionCall,
+    span: Span,
+    scope: &mut FunctionScope,
+) -> AggregateResult<ExprNode> {
+    let Some(func) = scope.global.functions.get(&fcall.ident.data) else {
+        return  AggregateResult::new_err(DiagnosticBuilder::new(fcall.ident.span).build_undeclared_function(&fcall.ident.data));
+    };
+
+    match fcall.args.len().cmp(&func.params.len()) {
+        std::cmp::Ordering::Greater => {
+            //check vararg
+            if !func.is_vararg {
+                return AggregateResult::new_err(
+                    DiagnosticBuilder::new(span).build_wrong_amount_of_args(
+                        fcall.args.len(),
+                        func.params.len(),
+                        func.original_span,
+                        true,
+                    ),
+                );
+            }
+        }
+        std::cmp::Ordering::Equal => {}
+        std::cmp::Ordering::Less => {
+            return AggregateResult::new_err(
+                DiagnosticBuilder::new(span).build_wrong_amount_of_args(
+                    fcall.args.len(),
+                    func.params.len(),
+                    func.original_span,
+                    false,
+                ),
+            )
+        }
+    }
+
+    let mut args_res = AggregateResult::new_ok(Vec::new());
+
+    for (arg, param) in fcall
+        .args
+        .iter()
+        .zip(func.params.iter().map(Some).chain(repeat(None)))
+    {
+        let arg = build_ir_expr(arg, scope);
+
+        arg.and_then(|arg| {
+            let to_type = match param {
+                Some(param) => {
+                    // Parameters can be arrays be completely work like ptr's so do the conversion now
+                    let out_ty = match &param.ty {
+                        CType::Aggregate(ctype::Aggregate::Array(arr)) => {
+                            CType::Scalar(ctype::Scalar::Pointer(ctype::Pointer {
+                                inner: arr.inner.clone(),
+                                inner_const: false,
+                            }))
+                        }
+                        ty => ty.clone(),
+                    };
+
+                    let builder = DiagnosticBuilder::new(arg.span);
+                    use super::type_checking::AssignCheckResult::*;
+                    match check_assign(&out_ty, &arg.ty) {
+                        Ok => AggregateResult::new_ok(out_ty),
+                        Lossy => AggregateResult::new_rec(
+                            out_ty,
+                            builder.build_implicit_lossy_arg(&arg, param, false),
+                        ),
+                        SignChange => AggregateResult::new_rec(
+                            out_ty,
+                            builder.build_implicit_lossy_arg(&arg, param, true),
+                        ),
+                        Incompatible | PointerAndInt => AggregateResult::new_rec(
+                            out_ty,
+                            builder.build_incompatible_arg(&arg, param),
+                        ),
+                        LossOfConst => AggregateResult::new_rec(
+                            out_ty,
+                            builder.build_arg_const_loss(arg.span, param.span),
+                        ),
+                        PointerAndFloat => {
+                            AggregateResult::new_err(builder.build_incompatible_arg(&arg, param))
+                        }
+                        ToArray | FromArray => unreachable!(
+                            "ICE: Array should have been converted to a pointer by now"
+                        ),
+                    }
+                }
+                None => {
+                    // This is a vararg
+                    let out_ty = match &arg.ty {
+                        CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
+                            if a.is_integral() {
+                                let p = a.promote().0;
+                                CType::Scalar(ctype::Scalar::Arithmetic(p))
+                            } else {
+                                CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::Double))
+                            }
+                        }
+                        other => other.clone(),
+                    };
+                    AggregateResult::new_ok(out_ty)
+                }
+            };
+            to_type.map(|to_type| (arg, to_type))
+        })
+        .map(|(arg, to_type)| maybe_cast(arg, to_type))
+        .add_to(&mut args_res, |res, a| res.push(a));
+    }
+    args_res.combine(function_ident(&fcall.ident, scope), |args, (id, func)| {
+        ir::ExprNode {
+            span,
+            ty: func.return_type.clone(),
+            expr: ir::Expr::FunctionCall(String::from(id), args),
+        }
+    })
+}
+
 fn lvalue_dereference(inner: LvalueExprNode) -> ExprNode {
     match &inner.ty {
         CType::Aggregate(ctype::Aggregate::Array(arr)) => ExprNode {
@@ -300,9 +407,9 @@ pub fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
         ast::Literal::String(s) => {
             return AggregateResult::new_ok(ExprNode {
                 span: lit.span,
-                ty: CType::Aggregate(ctype::Aggregate::Array(ctype::Array {
+                ty: CType::Scalar(ctype::Scalar::Pointer(ctype::Pointer {
                     inner: Box::new(CType::Scalar(ctype::Scalar::Arithmetic(Char))),
-                    length: s.len() as u128 + 1,
+                    inner_const: true,
                 })),
                 expr: Expr::Constant(ir::expr::Constant::String(s.clone())),
             });
@@ -364,59 +471,19 @@ pub fn assign(
         res.add_err(DiagnosticBuilder::new(op_span).build_cant_be_const("assign to", to.span));
     }
 
-    use ctype::{Pointer, Scalar};
-    match (&to.ty, &from.ty) {
-        (CType::Scalar(Scalar::Arithmetic(to_ty)), CType::Scalar(Scalar::Arithmetic(from_ty))) => {
-            match from_ty.conversion_lossynes_into(to_ty) {
-                ctype::ConversionLossyness::Lossless => {}
-                ctype::ConversionLossyness::SignChange => res.add_rec_diagnostic(
-                    DiagnosticBuilder::new(op_span)
-                        .build_implicit_lossy_conversion(&from, &to, true),
-                ),
-                ctype::ConversionLossyness::Lossy => res.add_rec_diagnostic(
-                    DiagnosticBuilder::new(op_span)
-                        .build_implicit_lossy_conversion(&from, &to, false),
-                ),
-            }
-        }
-        (
-            CType::Scalar(Scalar::Pointer(Pointer {
-                inner: to_ty,
-                inner_const: to_is_const,
-            })),
-            CType::Scalar(Scalar::Pointer(Pointer {
-                inner: from_ty,
-                inner_const: from_is_const,
-            })),
-        ) => {
-            if to_ty.compatible_with(from_ty).is_err() {
-                res.add_rec_diagnostic(
-                    DiagnosticBuilder::new(op_span).build_incompatible_assign(&from, &to),
-                )
-            }
-            // IDEA: this could brake the standard and use a smarter algo
-            if *from_is_const && !to_is_const {
-                res.add_rec_diagnostic(
-                    DiagnosticBuilder::new(op_span).build_assign_const_loss(from.span, to.span),
-                )
-            }
-        }
-        (CType::Scalar(Scalar::Arithmetic(a)), CType::Scalar(Scalar::Pointer(_)))
-        | (CType::Scalar(Scalar::Pointer(_)), CType::Scalar(Scalar::Arithmetic(a))) => {
-            let diagnostic = DiagnosticBuilder::new(op_span).build_incompatible_assign(&from, &to);
-            if a.is_floating() {
-                res.add_err(diagnostic);
-            } else {
-                res.add_rec_diagnostic(diagnostic);
-            }
-        }
-        (CType::Aggregate(ctype::Aggregate::Array(_)), _) => {
-            res.add_err(DiagnosticBuilder::new(op_span).build_assign_to_array(&to))
-        }
-        (CType::Scalar(_), CType::Aggregate(ctype::Aggregate::Array(_))) => {
-            unreachable!("ICE: arrays should have been converted to pointers")
-        }
-    };
+    use super::type_checking::AssignCheckResult::*;
+    let builder = DiagnosticBuilder::new(op_span);
+    match check_assign(&to.ty, &from.ty) {
+        Ok => {}
+        Lossy => res.add_rec_diagnostic(builder.build_implicit_lossy_assign(&from, &to, false)),
+        SignChange => res.add_rec_diagnostic(builder.build_implicit_lossy_assign(&from, &to, true)),
+        Incompatible => res.add_rec_diagnostic(builder.build_incompatible_assign(&from, &to)),
+        LossOfConst => res.add_rec_diagnostic(builder.build_assign_const_loss(from.span, to.span)),
+        PointerAndInt => res.add_rec_diagnostic(builder.build_incompatible_assign(&from, &to)),
+        PointerAndFloat => res.add_err(builder.build_incompatible_assign(&from, &to)),
+        ToArray => res.add_err(builder.build_assign_to_array(&to)),
+        FromArray => unreachable!("ICE: Array should have been converted to a pointer by now"),
+    }
 
     let to_type = to.ty.clone();
     res.map(|()| ExprNode {

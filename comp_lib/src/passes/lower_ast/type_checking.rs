@@ -1,6 +1,6 @@
 use crate::{
     diagnostic::builder::TypeCat,
-    ir::ctype::{Arithmetic, CType, Pointer, Scalar},
+    ir::ctype::{Aggregate, Arithmetic, CType, ConversionLossyness, Pointer, Scalar},
 };
 
 /// The result of a binary type rule check.
@@ -318,5 +318,58 @@ impl TypeRuleUn for PromoteArith {
                 false => TypeCat::Arithmetic,
             })),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum AssignCheckResult {
+    Ok,
+    Lossy,
+    SignChange,
+    Incompatible,
+    LossOfConst,
+    PointerAndInt,
+    PointerAndFloat,
+    ToArray,
+    FromArray,
+}
+
+pub fn check_assign(to: &CType, from: &CType) -> AssignCheckResult {
+    match (to, from) {
+        (CType::Scalar(Scalar::Arithmetic(to_ty)), CType::Scalar(Scalar::Arithmetic(from_ty))) => {
+            match from_ty.conversion_lossynes_into(to_ty) {
+                ConversionLossyness::Lossless => AssignCheckResult::Ok,
+                ConversionLossyness::SignChange => AssignCheckResult::SignChange,
+                ConversionLossyness::Lossy => AssignCheckResult::Lossy,
+            }
+        }
+        (
+            CType::Scalar(Scalar::Pointer(Pointer {
+                inner: to_ty,
+                inner_const: to_is_const,
+            })),
+            CType::Scalar(Scalar::Pointer(Pointer {
+                inner: from_ty,
+                inner_const: from_is_const,
+            })),
+        ) => {
+            if to_ty.compatible_with(from_ty).is_err() {
+                return AssignCheckResult::Incompatible;
+            }
+            // IDEA: this could brake the standard and use a smarter algo
+            if *from_is_const && !to_is_const {
+                return AssignCheckResult::LossOfConst;
+            }
+            AssignCheckResult::Ok
+        }
+        (CType::Scalar(Scalar::Arithmetic(a)), CType::Scalar(Scalar::Pointer(_)))
+        | (CType::Scalar(Scalar::Pointer(_)), CType::Scalar(Scalar::Arithmetic(a))) => {
+            match a.is_floating() {
+                true => AssignCheckResult::PointerAndFloat,
+                false => AssignCheckResult::PointerAndInt,
+            }
+        }
+        (CType::Aggregate(Aggregate::Array(_)), _) => AssignCheckResult::ToArray,
+        (CType::Scalar(_), CType::Aggregate(Aggregate::Array(_))) => AssignCheckResult::FromArray,
     }
 }

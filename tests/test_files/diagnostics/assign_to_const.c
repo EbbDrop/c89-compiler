@@ -1,6 +1,6 @@
 //fail:
 //NeedConst
-//IncompatibleAssign
+//AssignConstLoss
 //NeedConst
 
 int main() {

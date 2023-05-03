@@ -1,10 +1,7 @@
-//ignore
 //output:
 //7.000000
 //3.000000
 //4.000000
-
-// TODO: stop ignoring once varargs with floats are fixed
 
 #include <stdio.h>
 

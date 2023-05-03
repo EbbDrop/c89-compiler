@@ -145,7 +145,7 @@ impl ToDot for ast::Statement {
             ast::Statement::For(i) => i.to_dot(),
             ast::Statement::Break => DotTree::new_leaf("break".to_owned()),
             ast::Statement::Continue => DotTree::new_leaf("continue".to_owned()),
-            ast::Statement::Return(expr) => DotTree::new(
+            ast::Statement::Return(_, expr) => DotTree::new(
                 "return".to_owned(),
                 expr.iter()
                     .map(|expr| ("expr", expr.data.to_dot()))

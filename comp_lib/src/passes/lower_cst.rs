@@ -453,12 +453,15 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
             JumpStatement::JumpStatementContinueContext(_) => {
                 AggregateResult::new_ok(ast::Statement::Continue)
             }
-            JumpStatement::JumpStatementReturnContext(ctx) => match ctx.value.as_deref() {
-                Some(expr) => self
-                    .build_from_expr(expr)
-                    .map(|expr| ast::Statement::Return(Some(expr))),
-                None => AggregateResult::new_ok(ast::Statement::Return(None)),
-            },
+            JumpStatement::JumpStatementReturnContext(ctx) => {
+                let op_span = extract_span_from_token(ctx.op.as_deref().unwrap());
+                match ctx.value.as_deref() {
+                    Some(expr) => self
+                        .build_from_expr(expr)
+                        .map(|expr| ast::Statement::Return(op_span, Some(expr))),
+                    None => AggregateResult::new_ok(ast::Statement::Return(op_span, None)),
+                }
+            }
             JumpStatement::Error(ectx) => tree_error(ectx),
         }
     }
