@@ -220,21 +220,52 @@ mod llvm_ir_builder {
 
         fn allocate_items(&mut self) {
             for (item_id, item) in self.ir_function.table.iter() {
-                let comment = format!(
-                    " allocation of: {}",
-                    &self.module_builder.source[std::ops::Range::from(item.original_span)]
-                );
-                self.function.add_comment(comment);
-
-                let ty = ctype_to_llvm_type(&item.ty);
-
-                let ptr = self
-                    .function
-                    .add_instruction(lir::instruction::Alloca { ty, amount: None })
-                    .ice();
-
-                self.symbol_table.insert(item_id, ptr.into_());
+                if let Some(param_index) = self
+                    .ir_function
+                    .params
+                    .iter()
+                    .position(|p| p.ident == Some(item_id))
+                {
+                    let param = self
+                        .function
+                        .as_ref()
+                        .params()
+                        .get(param_index)
+                        .expect("ir function param count doesn't match param count of declared llvm function");
+                    let value: lir::value::Element = param.value().clone().try_into().ice();
+                    let pointer = self.allocate_item(item_id, item, true);
+                    self.function
+                        .add_void_instruction(lir::instruction::Store { value, pointer })
+                        .ice();
+                } else {
+                    self.allocate_item(item_id, item, false);
+                }
             }
+        }
+
+        fn allocate_item(
+            &mut self,
+            item_id: ir::table::ItemId,
+            item: &ir::table::VariableItem,
+            is_param: bool,
+        ) -> lir::value::Pointer {
+            let comment = format!(
+                " allocation of{}: {}",
+                if is_param { " param" } else { "" },
+                &self.module_builder.source[std::ops::Range::from(item.original_span)]
+            );
+            self.function.add_comment(comment);
+
+            let ty = ctype_to_llvm_type(&item.ty);
+
+            let ptr = self
+                .function
+                .add_instruction(lir::instruction::Alloca { ty, amount: None })
+                .ice();
+
+            self.symbol_table.insert(item_id, ptr.clone().into_());
+
+            ptr.into()
         }
 
         fn get_symbol(

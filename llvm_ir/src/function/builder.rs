@@ -18,6 +18,12 @@ pub struct FunctionDefinitionBuilder {
     declared_block_handles: Vec<LocalIdHandle>,
 }
 
+impl AsRef<FunctionDeclaration> for FunctionDefinitionBuilder {
+    fn as_ref(&self) -> &FunctionDeclaration {
+        &self.function.declaration
+    }
+}
+
 impl FunctionDefinitionBuilder {
     pub(super) fn new(declaration: FunctionDeclaration) -> Self {
         Self {
