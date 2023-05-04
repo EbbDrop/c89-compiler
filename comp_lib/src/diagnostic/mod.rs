@@ -27,7 +27,7 @@ impl From<std::ops::RangeInclusive<usize>> for Span {
         let (start, end) = value.into_inner();
         Self {
             start,
-            length: end.saturating_sub(start),
+            length: (end + 1).saturating_sub(start),
         }
     }
 }
