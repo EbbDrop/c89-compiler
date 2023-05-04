@@ -447,6 +447,7 @@ impl<T> AggregateResult<T> {
     /// Aggregates the diagnostics of `other` with `self`, discarding the value of self.
     #[must_use]
     pub fn aggregate<U>(mut self, mut other: AggregateResult<U>) -> AggregateResult<U> {
+        other.value = self.value.and(other.value);
         self.diagnostics.append(&mut other.diagnostics);
         other.diagnostics = self.diagnostics;
         other
