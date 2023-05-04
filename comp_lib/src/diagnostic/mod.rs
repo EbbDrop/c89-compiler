@@ -109,6 +109,7 @@ pub enum Code {
     VoidVariable,
     ValueReturnInVoid,
     NoReturnValue,
+    NotAlwaysReturn,
 }
 
 impl Code {

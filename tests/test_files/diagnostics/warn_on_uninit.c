@@ -10,4 +10,6 @@ int main() {
 
     float b;
     printf("%i\n", b);
+
+    return 0;
 }

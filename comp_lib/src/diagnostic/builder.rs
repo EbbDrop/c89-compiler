@@ -590,6 +590,13 @@ impl DiagnosticBuilder {
             format!("empty return used in function returning `{}`", return_type),
         )
     }
+
+    pub fn build_no_return_in_value_func(self) -> Diagnostic {
+        self.build_custom(
+            Code::NotAlwaysReturn,
+            "non-void function does not return a value in all control paths".to_owned(),
+        )
+    }
 }
 
 pub struct DiagnosticBuilder {

@@ -8,4 +8,6 @@ int main() {
     float c = 4.32;
     int d = c;
     int e = (int)c; // No warning with explicit cast
+
+    return 0;
 }

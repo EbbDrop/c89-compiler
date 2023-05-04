@@ -2,7 +2,10 @@ use std::collections::LinkedList;
 
 use crate::{
     diagnostic::{Diagnostic, DiagnosticBuilder, Span},
-    ir::{BlockNode, ExprNode, IfStmtNode, LoopStmtNode, Root, Stmt, StmtNode, SwitchStmtNode},
+    ir::{
+        ctype::CType, BlockNode, ExprNode, IfStmtNode, LoopStmtNode, Root, Stmt, StmtNode,
+        SwitchStmtNode,
+    },
 };
 
 pub fn remove_dead_code(root: &mut Root) -> LinkedList<Diagnostic> {
@@ -12,7 +15,17 @@ pub fn remove_dead_code(root: &mut Root) -> LinkedList<Diagnostic> {
             let remover = FunctionCodeRemover {
                 diagnostics: &mut diagnostics,
             };
-            remover.remove(body);
+            let res = remover.remove(body);
+            if function.return_type != CType::Void
+                && !matches!(
+                    res,
+                    StmtRes::Returns | StmtRes::Infinite(_) | StmtRes::RetOrInf
+                )
+            {
+                let end = body.span.excl_end() - 1;
+                diagnostics
+                    .push_front(DiagnosticBuilder::new(end..end).build_no_return_in_value_func())
+            }
         }
     }
     diagnostics
@@ -22,8 +35,6 @@ pub fn remove_dead_code(root: &mut Root) -> LinkedList<Diagnostic> {
 enum StmtRes {
     /// The block will never diverge
     Runs,
-    /// The block could diverge
-    Unknown,
     /// The block will always break
     Break,
     /// The block will always continue
@@ -33,6 +44,10 @@ enum StmtRes {
     /// The block will always get stuck in a infinate loop
     /// The span is the span of the loop
     Infinite(Span),
+    /// The block could diverge
+    Unknown,
+    /// The block could return on get in a infinate lop
+    RetOrInf,
 }
 
 enum IfKeep {
@@ -51,8 +66,8 @@ struct FunctionCodeRemover<'a> {
 }
 
 impl<'a> FunctionCodeRemover<'a> {
-    fn remove(mut self, block: &mut BlockNode) {
-        self.block(block);
+    fn remove(mut self, block: &mut BlockNode) -> StmtRes {
+        self.block(block)
     }
 
     fn stmt(&mut self, mut stmt: StmtNode) -> (StmtRes, Vec<StmtNode>) {
@@ -126,27 +141,41 @@ impl<'a> FunctionCodeRemover<'a> {
         if if_res == else_res {
             return (if_res, IfKeep::All);
         }
-        (StmtRes::Unknown, IfKeep::All)
+        let res = match (if_res, else_res) {
+            (
+                StmtRes::Returns | StmtRes::Infinite(_) | StmtRes::RetOrInf,
+                StmtRes::Returns | StmtRes::Infinite(_) | StmtRes::RetOrInf,
+            ) => StmtRes::RetOrInf,
+            _ => StmtRes::Unknown,
+        };
+        (res, IfKeep::All)
     }
 
     fn switch_node(&mut self, stmt: &mut SwitchStmtNode) -> StmtRes {
         let mut common = None;
 
-        for case in stmt.cases.iter_mut() {
+        let len = stmt.cases.len();
+        for (i, case) in stmt.cases.iter_mut().enumerate() {
             let body = match &mut case.data {
                 crate::ir::SwitchStmtCase::Case { body, .. } => body,
                 crate::ir::SwitchStmtCase::Default { body } => body,
             };
 
             let res = self.block(body);
-            if res == StmtRes::Runs {
+            if res == StmtRes::Runs && i + 1 != len {
                 // This case falls through
                 continue;
             }
             match common {
                 Some(ref mut common) => {
                     if res != *common {
-                        *common = StmtRes::Unknown;
+                        *common = match (res, &common) {
+                            (
+                                StmtRes::Returns | StmtRes::Infinite(_) | StmtRes::RetOrInf,
+                                StmtRes::Returns | StmtRes::Infinite(_) | StmtRes::RetOrInf,
+                            ) => StmtRes::RetOrInf,
+                            _ => StmtRes::Unknown,
+                        };
                     }
                 }
                 None => {
@@ -163,6 +192,7 @@ impl<'a> FunctionCodeRemover<'a> {
                 StmtRes::Continue => StmtRes::Continue,
                 StmtRes::Returns => StmtRes::Returns,
                 StmtRes::Infinite(span) => StmtRes::Infinite(span),
+                StmtRes::RetOrInf => StmtRes::RetOrInf,
             },
             None => StmtRes::Runs,
         }
@@ -179,6 +209,7 @@ impl<'a> FunctionCodeRemover<'a> {
                 StmtRes::Continue => StmtRes::Infinite(stmt.span),
                 StmtRes::Returns => StmtRes::Returns,
                 StmtRes::Infinite(span) => StmtRes::Infinite(span),
+                StmtRes::RetOrInf => StmtRes::RetOrInf,
             },
             Some(Const::Falsy) => {
                 self.diagnostics.push_front(
@@ -198,7 +229,8 @@ impl<'a> FunctionCodeRemover<'a> {
                 | StmtRes::Break
                 | StmtRes::Continue
                 | StmtRes::Returns
-                | StmtRes::Infinite(_) => StmtRes::Unknown,
+                | StmtRes::Infinite(_)
+                | StmtRes::RetOrInf => StmtRes::Unknown,
             },
         };
         (res, LoopRes::Keep)
@@ -228,6 +260,7 @@ impl<'a> FunctionCodeRemover<'a> {
                         let infinite = match diverges {
                             StmtRes::Runs
                             | StmtRes::Unknown
+                            | StmtRes::RetOrInf
                             | StmtRes::Break
                             | StmtRes::Continue
                             | StmtRes::Returns => None,
@@ -239,7 +272,7 @@ impl<'a> FunctionCodeRemover<'a> {
                                 .build_unreachable_code(Span::from(from..last_index), infinite),
                         );
                     }
-                    break;
+                    return diverges;
                 }
             }
         }
