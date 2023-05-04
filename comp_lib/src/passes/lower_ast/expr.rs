@@ -75,7 +75,7 @@ fn build_binary_op_ir_expr(
             right,
         };
         match &op.data {
-            Plus => builder.add(),
+            Plus => builder.add(false),
             Minus => builder.sub(),
             Star => builder.bin_op(UsualArithConversions::new(), BinaryOp::Mul),
             Slash => builder.bin_op(UsualArithConversions::new(), BinaryOp::Div),
@@ -126,7 +126,7 @@ fn build_unary_op_ir_expr(
         Ampersand => builder.reference(),
         Star => builder
             .value()
-            .and_then(|v| v.dereference())
+            .and_then(|v| v.dereference(false))
             .map(lvalue_dereference),
     }
 }
@@ -149,7 +149,9 @@ pub fn build_ir_lvalue(
                 scope,
             };
             match op.data {
-                ast::UnaryOperator::Star => Some(builder.value().and_then(|v| v.dereference())),
+                ast::UnaryOperator::Star => {
+                    Some(builder.value().and_then(|v| v.dereference(false)))
+                }
                 _ => None,
             }
         }
@@ -181,7 +183,7 @@ fn arrays_subscript(
                 left,
                 right,
             };
-            builder.add()
+            builder.add(true)
         })
         .and_then(|add| {
             ValueUnaryBuilder {
@@ -189,7 +191,7 @@ fn arrays_subscript(
                 op_span: span,
                 inner: add,
             }
-            .dereference()
+            .dereference(true)
         })
 }
 
@@ -671,7 +673,11 @@ impl ValueUnaryBuilder {
     }
 
     /// See [`LvalueExpr::Dereference`]
-    fn dereference(self) -> AggregateResult<LvalueExprNode> {
+    fn dereference(self, from_array_subscription: bool) -> AggregateResult<LvalueExprNode> {
+        let name = match from_array_subscription {
+            true => "array subscription",
+            false => "dereference",
+        };
         match &self.inner.ty {
             CType::Scalar(ctype::Scalar::Pointer(ctype::Pointer {
                 inner: ref pointed_to_ty,
@@ -689,7 +695,7 @@ impl ValueUnaryBuilder {
             }
             _ => AggregateResult::new_err(
                 DiagnosticBuilder::new(self.op_span).build_unexpected_type(
-                    "dereference",
+                    name,
                     TypeCat::Pointer,
                     &self.inner,
                 ),
@@ -763,9 +769,14 @@ impl BinaryBuilder {
     }
 
     /// See [`BinaryOp::Add`]
-    fn add(self) -> AggregateResult<ExprNode> {
+    fn add(self, from_array_subscript: bool) -> AggregateResult<ExprNode> {
         let rule = UsualArithConversions::new().or(PointerInteger::new());
-        self.bin_op(rule, BinaryOp::Add)
+        let name = match from_array_subscript {
+            true => "array subscription",
+            false => BinaryOp::Add.long_name(),
+        };
+
+        self.build(rule, name, |l, r| Expr::Binary(l, BinaryOp::Add, r))
     }
 
     /// See [`BinaryOp::Sub`]
