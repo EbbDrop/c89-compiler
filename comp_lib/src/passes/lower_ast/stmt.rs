@@ -132,10 +132,9 @@ fn return_statement(
     span: Span,
     scope: &mut FunctionScope,
 ) -> AggregateResult<Vec<Stmt>> {
+    let (return_type_span, return_type) = scope.func_return_type;
     match e {
         Some(e) => expr::build_ir_expr(e, scope).and_then(|expr| {
-            let (return_type_span, return_type) = scope.func_return_type;
-
             let mut res = AggregateResult::new_ok(());
 
             let builder = DiagnosticBuilder::new(span);
@@ -180,7 +179,12 @@ fn return_statement(
 
             res.map(|()| vec![Stmt::Return(Some(maybe_cast(expr, return_type.clone())))])
         }),
-        None => AggregateResult::new_ok(vec![Stmt::Return(None)]),
+        None => match return_type {
+            CType::Void => AggregateResult::new_ok(vec![Stmt::Return(None)]),
+            _ => AggregateResult::new_err(
+                DiagnosticBuilder::new(span).build_no_return_value(return_type_span, return_type),
+            ),
+        },
     }
 }
 

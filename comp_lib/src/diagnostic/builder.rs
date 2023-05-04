@@ -578,6 +578,18 @@ impl DiagnosticBuilder {
             "value return used in void function".to_owned(),
         )
     }
+
+    pub fn build_no_return_value(
+        mut self,
+        return_span: Span,
+        return_type: &ir::ctype::CType,
+    ) -> Diagnostic {
+        self.add_ir_return_type(return_span, return_type);
+        self.build_custom(
+            Code::NoReturnValue,
+            format!("empty return used in function returning `{}`", return_type),
+        )
+    }
 }
 
 pub struct DiagnosticBuilder {
