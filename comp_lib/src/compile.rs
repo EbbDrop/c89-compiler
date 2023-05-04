@@ -63,6 +63,8 @@ impl CompileOptsBuilder {
     pub fn for_assignments(mut self) -> Self {
         self.upgrade_to_err.insert(Code::UnspecifiedType);
         self.upgrade_to_err.insert(Code::IncompatibleAssign);
+        self.upgrade_to_err.insert(Code::IncompatibleReturn);
+        self.upgrade_to_err.insert(Code::IncompatibleArg);
         self.upgrade_to_err.insert(Code::MultiByteChar);
         self
     }
