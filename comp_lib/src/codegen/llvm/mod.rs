@@ -300,13 +300,20 @@ mod llvm_ir_builder {
             // Add if branch
             self.add_block(&if_stmt_node.if_branch);
 
+            self.function
+                .start_declared_block(
+                    lir::instruction::Branch {
+                        dest: label_end.clone(),
+                    },
+                    dest_false,
+                )
+                .ice();
+
             // Add optional else branch
             if let Some(else_branch) = &if_stmt_node.else_branch {
-                self.function.jump_start_declared_block(dest_false).ice();
                 self.add_block(else_branch);
+                self.function.jump_start_declared_block(label_end).ice();
             }
-
-            self.function.jump_start_declared_block(label_end).ice();
         }
 
         fn add_switch_stmt_node(&mut self, switch_stmt_node: &ir::SwitchStmtNode) {
