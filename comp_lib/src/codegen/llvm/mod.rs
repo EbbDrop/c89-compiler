@@ -1166,6 +1166,22 @@ mod llvm_ir_builder {
                             operand2,
                         })
                 }
+                (Primitive::Pointer(operand1), Primitive::Pointer(operand2)) => {
+                    let operator = match relation_op {
+                        ir::RelationOp::Eq => lir::instruction::IcmpCond::Eq,
+                        ir::RelationOp::Ne => lir::instruction::IcmpCond::Ne,
+                        ir::RelationOp::Lt => lir::instruction::IcmpCond::Ult,
+                        ir::RelationOp::Gt => lir::instruction::IcmpCond::Ugt,
+                        ir::RelationOp::Ge => lir::instruction::IcmpCond::Uge,
+                        ir::RelationOp::Le => lir::instruction::IcmpCond::Ule,
+                    };
+                    self.function
+                        .add_instruction(lir::instruction::compare::Ptr {
+                            operator,
+                            operand1,
+                            operand2,
+                        })
+                }
                 _ => unreachable!(),
             };
 
