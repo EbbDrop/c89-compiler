@@ -1,5 +1,5 @@
 //fail:
-//AlreadyDefined
+//MultipleFunctionDef
 
 int main() {
   

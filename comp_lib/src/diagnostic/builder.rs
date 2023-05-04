@@ -597,6 +597,125 @@ impl DiagnosticBuilder {
             "non-void function does not return a value in all control paths".to_owned(),
         )
     }
+
+    pub fn build_func_def_with_name_of_var(mut self, name: &str, var_span: Span) -> Diagnostic {
+        self.add_additional_span(var_span, Some("variable defined here".to_owned()));
+        self.build_custom(
+            Code::ClashingGlobalName,
+            format!("declaration of function `{name}` uses name of global variable"),
+        )
+    }
+
+    pub fn build_var_def_with_name_of_func(mut self, name: &str, func_span: Span) -> Diagnostic {
+        self.add_additional_span(func_span, Some("function defined here".to_owned()));
+        self.build_custom(
+            Code::ClashingGlobalName,
+            format!("declaration of variable `{name}` uses name of function"),
+        )
+    }
+
+    pub fn build_func_redec_with_different_return(
+        mut self,
+        name: &str,
+        new_return_type: &ir::ctype::CType,
+        original_def_span: Span,
+        original_return_type: &ir::ctype::CType,
+    ) -> Diagnostic {
+        self.add_additional_span(
+            original_def_span,
+            Some(format!(
+                "original function declared here returning `{}`",
+                original_return_type
+            )),
+        );
+        self.build_custom(
+            Code::IncompatibleFunctionRedef,
+            format!(
+                "redeclaration of function `{name}` with a different return type `{}`",
+                new_return_type
+            ),
+        )
+    }
+
+    pub fn build_func_redec_with_different_parms(
+        mut self,
+        name: &str,
+        original_def_span: Span,
+    ) -> Diagnostic {
+        self.add_additional_span(
+            original_def_span,
+            Some("original function declared here".to_owned()),
+        );
+        self.build_custom(
+            Code::IncompatibleFunctionRedef,
+            format!("redeclaration of function `{name}` has different parameters"),
+        )
+    }
+
+    pub fn build_function_already_defined(mut self, name: &str, original_span: Span) -> Diagnostic {
+        self.add_additional_span(
+            original_span,
+            Some("original function defined here".to_owned()),
+        );
+        self.build_custom(
+            Code::MultipleFunctionDef,
+            format!("function `{name}` has multiple definitions"),
+        )
+    }
+
+    pub fn build_var_redec_with_different_type(
+        mut self,
+        name: &str,
+        new_type: &ir::ctype::CType,
+        original_def_span: Span,
+        original_def_type: &ir::ctype::CType,
+    ) -> Diagnostic {
+        self.add_additional_span(
+            original_def_span,
+            Some(format!(
+                "original variable declared here with type `{}`",
+                original_def_type
+            )),
+        );
+        self.build_custom(
+            Code::IncompatibleVariableRedef,
+            format!("redeclaration of variable `{name}` has different type `{new_type}`"),
+        )
+    }
+
+    pub fn build_var_redec_with_different_constness(
+        mut self,
+        name: &str,
+        original_def_span: Span,
+        became_const: bool,
+    ) -> Diagnostic {
+        self.add_additional_span(
+            original_def_span,
+            Some("original variable declared here".to_owned()),
+        );
+        let msg = match became_const {
+            true => format!("redeclaration of variable `{name}` is const while original is not"),
+            false => {
+                format!("redeclaration of variable `{name}` is not const while the original was")
+            }
+        };
+        self.build_custom(Code::IncompatibleVariableRedef, msg)
+    }
+
+    pub fn build_global_var_already_defined(
+        mut self,
+        name: &str,
+        original_span: Span,
+    ) -> Diagnostic {
+        self.add_additional_span(
+            original_span,
+            Some("original global variable defined here".to_owned()),
+        );
+        self.build_custom(
+            Code::MultipleVariableDef,
+            format!("variable `{name}` has multiple definitions"),
+        )
+    }
 }
 
 pub struct DiagnosticBuilder {

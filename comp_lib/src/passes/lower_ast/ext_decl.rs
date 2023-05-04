@@ -227,10 +227,9 @@ fn check_function_ident(
     let ident = &function.ident.data;
 
     if let Some(&ir::GlobalVarNode { original_span, .. }) = global.vars.get(ident) {
-        // TODO: customized diagnostic message mentioning a function was expected but a variable
-        // with the same name already existed in the global scope.
         return AggregateResult::new_err(
-            DiagnosticBuilder::new(function.ident.span).build_already_defined(ident, original_span),
+            DiagnosticBuilder::new(function.ident.span)
+                .build_func_def_with_name_of_var(ident, original_span),
         );
     }
 
@@ -241,10 +240,13 @@ fn check_function_ident(
     let mut res = AggregateResult::new_ok(false);
 
     if &original_function.return_type != return_type {
-        // TODO: customize diagnostics message
         res.add_err(
-            DiagnosticBuilder::new(function.ident.span)
-                .build_already_defined(ident, original_function.original_span),
+            DiagnosticBuilder::new(function.ident.span).build_func_redec_with_different_return(
+                ident,
+                return_type,
+                original_function.original_span,
+                &original_function.return_type,
+            ),
         );
     }
 
@@ -253,24 +255,17 @@ fn check_function_ident(
         .iter()
         .map(|p| CType::from_ast_type(&p.type_name.data.inner.data));
 
-    if original_function
-        .params
-        .iter()
-        .zip(param_types)
-        .any(|(p, ty)| p.ty != ty)
+    if original_function.params.len() != param_types.len()
+        || original_function.is_vararg != function.is_vararg
+        || original_function
+            .params
+            .iter()
+            .zip(param_types)
+            .any(|(p, ty)| p.ty != ty)
     {
-        // TODO: customize diagnostics message
         res.add_err(
             DiagnosticBuilder::new(function.ident.span)
-                .build_already_defined(ident, original_function.original_span),
-        );
-    }
-
-    if original_function.is_vararg != function.is_vararg {
-        // TODO: customize diagnostics message
-        res.add_err(
-            DiagnosticBuilder::new(function.ident.span)
-                .build_already_defined(ident, original_function.original_span),
+                .build_func_redec_with_different_parms(ident, original_function.original_span),
         );
     }
 
@@ -284,10 +279,9 @@ fn check_function_ident(
         (false, true) => false,
         // Multiple definitions (even if identical) are not ok.
         (false, false) => {
-            // TODO: customize diagnostic to mention that function may only be _defined_ once.
             res.add_err(
                 DiagnosticBuilder::new(function.ident.span)
-                    .build_already_defined(ident, original_function.original_span),
+                    .build_function_already_defined(ident, original_function.original_span),
             );
             return res;
         }
@@ -327,10 +321,9 @@ fn check_global_var_ident(
     let ident_span = ext_decl.decl.ident.span;
 
     if let Some(&ir::FunctionNode { original_span, .. }) = global.functions.get(ident) {
-        // TODO: customized diagnostic message mentioning a variable was expected but a function
-        // with the same name already existed in the global scope.
         return AggregateResult::new_err(
-            DiagnosticBuilder::new(ident_span).build_already_defined(ident, original_span),
+            DiagnosticBuilder::new(ident_span)
+                .build_var_def_with_name_of_func(ident, original_span),
         );
     }
 
@@ -340,21 +333,22 @@ fn check_global_var_ident(
 
     let mut res = AggregateResult::new_ok(false);
 
-    // TODO: remove this once there are custom diagnostics in the branches
-    #[allow(clippy::if_same_then_else)]
     if original_var.ty != global_var.ty {
-        // TODO: customize diagnostics message (redeclaration/definition of global var with
-        // different types)
         res.add_err(
-            DiagnosticBuilder::new(ident_span)
-                .build_already_defined(ident, original_var.original_span),
+            DiagnosticBuilder::new(ident_span).build_var_redec_with_different_type(
+                ident,
+                &global_var.ty,
+                original_var.original_span,
+                &original_var.ty,
+            ),
         )
     } else if original_var.is_const != global_var.is_const {
-        // Types match, but constness does not
-        // TODO: customize diagnostics message
         res.add_err(
-            DiagnosticBuilder::new(ident_span)
-                .build_already_defined(ident, original_var.original_span),
+            DiagnosticBuilder::new(ident_span).build_var_redec_with_different_constness(
+                ident,
+                original_var.original_span,
+                global_var.is_const,
+            ),
         )
     }
 
@@ -367,10 +361,9 @@ fn check_global_var_ident(
         (false, true) => false,
         // Multiple definitions (even if identical) are not ok.
         (false, false) => {
-            // TODO: customize diagnostic to mention that global vars may only be _defined_ once.
             res.add_err(
                 DiagnosticBuilder::new(ident_span)
-                    .build_already_defined(ident, original_var.original_span),
+                    .build_global_var_already_defined(ident, original_var.original_span),
             );
             return res;
         }
