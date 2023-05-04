@@ -25,6 +25,12 @@ pub struct GlobalVarNode {
     pub value: Option<Constant>,
 }
 
+impl GlobalVarNode {
+    pub fn is_declaration(&self) -> bool {
+        self.value.is_none()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FunctionNode {
     /// The span where this function was first declared or defined.

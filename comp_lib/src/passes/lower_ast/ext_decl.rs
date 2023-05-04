@@ -15,54 +15,12 @@ pub fn build_ir_from_external_declaration(
     let span = external_declaration.span;
     match &external_declaration.data {
         ast::ExternalDeclaration::Declaration(ast::Declaration::Variable(decl)) => {
-            declaration_type(&decl.type_name, &decl.array_parts)
-                .and_then(|ty| {
-                    if matches!(ty.ty, CType::Void) {
-                        return AggregateResult::new_err(
-                            DiagnosticBuilder::new(decl.type_name.span).build_void_vars(),
-                        );
-                    }
-                    AggregateResult::new_ok(ty)
-                })
-                .zip(AggregateResult::transpose_from(
-                    // TODO: use first span of initializer to point to equals sign to provide
-                    // clearer diagnostics (i.e. expected constant to initialize global ...).
-                    decl.initializer
-                        .as_ref()
-                        .map(|(_, expr_node)| extract_global_var_initializer(expr_node)),
-                ))
-                .map(|(DeclarationType { ty, is_const }, constant)| {
-                    // TODO: use expr::assign here
-                    ir::GlobalVarNode {
-                        original_span: external_declaration.span,
-                        comments: external_declaration.comments.clone(),
-                        ty,
-                        is_const,
-                        value: constant,
-                    }
-                })
-                .and_then(|global_var| {
-                    if let Some(&ir::FunctionNode { original_span, .. }) =
-                        global.functions.get(&decl.ident.data)
-                    {
-                        // TODO: customized diagnostic message mentioning a variable was expected but a function
-                        // with the same name already existed in the global scope.
-                        return AggregateResult::new_err(
-                            DiagnosticBuilder::new(decl.ident.span)
-                                .build_already_defined(&decl.ident.data, original_span),
-                        );
-                    }
-                    if let Some(&ir::GlobalVarNode { original_span, .. }) =
-                        global.vars.get(&decl.ident.data)
-                    {
-                        return AggregateResult::new_err(
-                            DiagnosticBuilder::new(decl.ident.span)
-                                .build_already_defined(&decl.ident.data, original_span),
-                        );
-                    }
-                    global.vars.insert(decl.ident.data.clone(), global_var);
-                    AggregateResult::new_ok(())
-                })
+            let var = AstGlobalVar {
+                span,
+                comments: external_declaration.comments.as_deref(),
+                decl,
+            };
+            add_global_var(var, global)
         }
         ast::ExternalDeclaration::Declaration(ast::Declaration::FunctionDeclaration(fd)) => {
             let function = AstFunction {
@@ -89,6 +47,44 @@ pub fn build_ir_from_external_declaration(
             add_function(function, global)
         }
     }
+}
+
+#[derive(Debug)]
+struct AstGlobalVar<'a> {
+    pub span: Span,
+    pub comments: Option<&'a str>,
+    pub decl: &'a ast::VariableDeclaration,
+}
+
+fn add_global_var(ext_decl: AstGlobalVar, global: &mut ir::Root) -> AggregateResult<()> {
+    let decl = &ext_decl.decl;
+    declaration_type(&decl.type_name, &decl.array_parts)
+        .zip(AggregateResult::transpose_from(
+            // TODO: use first span of initializer to point to equals sign to provide
+            // clearer diagnostics (i.e. expected constant to initialize global ...).
+            decl.initializer
+                .as_ref()
+                .map(|(_, expr_node)| extract_global_var_initializer(expr_node)),
+        ))
+        .and_then(|(DeclarationType { ty, is_const }, constant)| match ty {
+            CType::Void => AggregateResult::new_err(
+                DiagnosticBuilder::new(decl.type_name.span).build_void_vars(),
+            ),
+            _ => AggregateResult::new_ok(ir::GlobalVarNode {
+                original_span: ext_decl.span,
+                comments: ext_decl.comments.map(String::from),
+                ty,
+                is_const,
+                value: constant,
+            }),
+        })
+        .and_then(|global_var| {
+            check_global_var_ident(&ext_decl, &global_var, global).map(|should_redefine| {
+                if should_redefine {
+                    global.vars.insert(decl.ident.data.clone(), global_var);
+                }
+            })
+        })
 }
 
 fn extract_global_var_initializer(
@@ -316,4 +312,73 @@ fn merge_comments(original_comments: &mut Option<String>, extra_comments: Option
         // Nothing to do if there're no extra comments
         (_, None) => {}
     }
+}
+
+/// Returns `true` if the global var isn't already declared/defined (or a compatible declaration
+/// already exists). Returns `false` if the function is already declared/defined but this is just an
+/// additional equivalent declaration. Otherwise the appropriate diagnostics will be added to the
+/// returned _err_ result.
+fn check_global_var_ident(
+    ext_decl: &AstGlobalVar,
+    global_var: &ir::GlobalVarNode,
+    global: &mut ir::Root,
+) -> AggregateResult<bool> {
+    let ident = &ext_decl.decl.ident.data;
+    let ident_span = ext_decl.decl.ident.span;
+
+    if let Some(&ir::FunctionNode { original_span, .. }) = global.functions.get(ident) {
+        // TODO: customized diagnostic message mentioning a variable was expected but a function
+        // with the same name already existed in the global scope.
+        return AggregateResult::new_err(
+            DiagnosticBuilder::new(ident_span).build_already_defined(ident, original_span),
+        );
+    }
+
+    let Some(original_var) = global.vars.get_mut(ident) else {
+        return AggregateResult::new_ok(true);
+    };
+
+    let mut res = AggregateResult::new_ok(false);
+
+    // TODO: remove this once there are custom diagnostics in the branches
+    #[allow(clippy::if_same_then_else)]
+    if original_var.ty != global_var.ty {
+        // TODO: customize diagnostics message (redeclaration/definition of global var with
+        // different types)
+        res.add_err(
+            DiagnosticBuilder::new(ident_span)
+                .build_already_defined(ident, original_var.original_span),
+        )
+    } else if original_var.is_const != global_var.is_const {
+        // Types match, but constness does not
+        // TODO: customize diagnostics message
+        res.add_err(
+            DiagnosticBuilder::new(ident_span)
+                .build_already_defined(ident, original_var.original_span),
+        )
+    }
+
+    let should_redefine = match (original_var.is_declaration(), global_var.is_declaration()) {
+        // Multiple equivalent declarations are ok. Preserve the first.
+        (true, true) => false,
+        // Definition of previously declared variable is ok.
+        (true, false) => true,
+        // Redeclaration of already defined variable is ok.
+        (false, true) => false,
+        // Multiple definitions (even if identical) are not ok.
+        (false, false) => {
+            // TODO: customize diagnostic to mention that global vars may only be _defined_ once.
+            res.add_err(
+                DiagnosticBuilder::new(ident_span)
+                    .build_already_defined(ident, original_var.original_span),
+            );
+            return res;
+        }
+    };
+
+    // To limit the loss of information, comments of all the declarations/definition of a
+    // global variable are merged.
+    merge_comments(&mut original_var.comments, global_var.comments.as_deref());
+
+    res.map(|_| should_redefine)
 }
