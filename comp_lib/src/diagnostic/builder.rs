@@ -475,6 +475,44 @@ impl DiagnosticBuilder {
         )
     }
 
+    pub fn build_unreachable_code(
+        mut self,
+        unreachable_span: Span,
+        infinite: Option<Span>,
+    ) -> Diagnostic {
+        self.add_additional_span(
+            unreachable_span,
+            Some("this will never be executed".to_owned()),
+        );
+        if let Some(infinite) = infinite {
+            self.add_additional_span(infinite, Some("this loop will run forever".to_owned()));
+        }
+        self.build_custom(
+            Code::Unreachable,
+            "any code after this statement is not reachable".to_owned(),
+        )
+    }
+
+    pub fn build_always_true_false(
+        mut self,
+        always_true: bool,
+        not_executed: Option<Span>,
+    ) -> Diagnostic {
+        if let Some(not_executed) = not_executed {
+            self.add_additional_span(not_executed, Some("this will never be executed".to_owned()));
+        }
+        self.build_custom(
+            Code::Unreachable,
+            format!(
+                "this expression will always be {}",
+                match always_true {
+                    true => "truthy",
+                    false => "falsy",
+                }
+            ),
+        )
+    }
+
     pub fn build_invalid_array_size(self, reason: InvalidArraySize) -> Diagnostic {
         let message = match reason {
             InvalidArraySize::NegativeSized => "size of array is negative",

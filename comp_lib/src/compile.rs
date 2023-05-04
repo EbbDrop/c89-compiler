@@ -115,13 +115,20 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
         _ => {}
     }
 
-    let ir = ast.and_then(|ast| passes::lower_ast::build_ir_from_ast(&ast));
+    let mut res = ast.and_then(|ast| passes::lower_ast::build_ir_from_ast(&ast));
 
-    if opts.output_format == OutputFormat::IrRustDbg {
-        return ir.map(|ir| format!("{ir:#?}\n").into_bytes());
+    if let Some(ir) = res.value_mut() {
+        let extra_diags = passes::dead_code_removal::remove_dead_code(ir);
+        for diag in extra_diags {
+            res.add_rec_diagnostic(diag);
+        }
     }
 
-    let llvm_ir = ir.and_then(|ir| codegen::llvm::build_from_ir(&ir, source_name, source));
+    if opts.output_format == OutputFormat::IrRustDbg {
+        return res.map(|ir| format!("{ir:#?}\n").into_bytes());
+    }
+
+    let llvm_ir = res.and_then(|ir| codegen::llvm::build_from_ir(&ir, source_name, source));
 
     assert_eq!(opts.output_format, OutputFormat::LlvmIr);
     llvm_ir.map(|s| format!("{s}\n").into_bytes())
