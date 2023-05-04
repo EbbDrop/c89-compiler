@@ -9,6 +9,7 @@ use antlr_rust::{
     parser_rule_context::{BaseParserRuleContext, ParserRuleContext},
     rule_context::CustomRuleContext,
     token::Token,
+    tree::ParseTree,
     TidAble,
 };
 use std::{ops::Deref, rc::Rc, sync::atomic::Ordering};
@@ -168,7 +169,9 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                     })
                     .add_to(&mut res, |r, s| r.push(s)),
                 ExternalDeclaration::ExternalDeclarationIncludeContext(incl) => {
-                    let span = extract_span(incl);
+                    let start = extract_span(incl).start();
+                    let len = incl.get_text().trim_end().len();
+                    let span = (start..(start + len)).into();
                     AggregateResult::new_ok(generate_printf_from_include_stdio(span))
                         .add_to(&mut res, |r, s| r.push(s));
                     AggregateResult::new_ok(generate_scanf_from_include_stdio(span))
