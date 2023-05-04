@@ -87,8 +87,12 @@ mod llvm_ir_builder {
         fn declare_function(&mut self, ident: &str, function_node: &ir::FunctionNode) {
             // TODO:
             // self.module.add_comments(external_declaration.comments)
-            let return_type = ctype_to_llvm_type(&function_node.return_type);
-            let mut fdecl = lir::FunctionDeclaration::new(return_type.into())
+
+            let return_type = match &function_node.return_type {
+                ctype::CType::Void => lir::ReturnType::Void,
+                other => ctype_to_llvm_type(other).into(),
+            };
+            let mut fdecl = lir::FunctionDeclaration::new(return_type)
                 .with_linkage(lir::Linkage::External)
                 .with_address_significance(lir::AddressSignificance::LocalUnnamed)
                 .with_vararg(function_node.is_vararg);
@@ -134,6 +138,7 @@ mod llvm_ir_builder {
                         }
                         ctype::CType::Scalar(ctype::Scalar::Pointer(_)) => unreachable!(),
                         ctype::CType::Aggregate(_) => unreachable!(),
+                        ctype::CType::Void => unreachable!(),
                     },
                     *v,
                 )
@@ -151,6 +156,7 @@ mod llvm_ir_builder {
                     },
                     ctype::CType::Scalar(ctype::Scalar::Pointer(_)) => unreachable!(),
                     ctype::CType::Aggregate(_) => unreachable!(),
+                    ctype::CType::Void => unreachable!(),
                 }
                 .into(),
                 ir::Constant::String(string) => {
@@ -624,8 +630,15 @@ mod llvm_ir_builder {
             outer_node: &ir::ExprNode,
             inner_node: &ir::ExprNode,
         ) -> lir::value::Element {
-            let to_ty = ctype_to_llvm_type(&outer_node.ty);
             let inner = self.add_expr_node(inner_node);
+
+            let to_ty = match &outer_node.ty {
+                ctype::CType::Void => {
+                    // Typechecking will have made shure this value is not used later on.
+                    return lir::constant::Poison(lir::ty::I1.into()).into();
+                }
+                other => ctype_to_llvm_type(other),
+            };
 
             use lir::ty;
             use lir::value::{Element, Primitive, Single};
@@ -1413,6 +1426,7 @@ mod llvm_ir_builder {
                 }
                 ctype::CType::Scalar(ctype::Scalar::Pointer(_)) => unreachable!(),
                 ctype::CType::Aggregate(_) => unreachable!(),
+                ctype::CType::Void => unreachable!(),
             }
             boolean.into()
         }
@@ -1601,6 +1615,7 @@ mod llvm_ir_builder {
                     .build()
                     .into()
             }
+            ctype::CType::Void => panic!("ICE: no void type in llvm"),
         }
     }
 
@@ -1614,7 +1629,7 @@ mod llvm_ir_builder {
                 }
                 ctype::Scalar::Pointer(ctype::Pointer { inner, .. }) => ctype_to_llvm_type(inner),
             },
-            ctype::CType::Aggregate(_) => {
+            ctype::CType::Aggregate(_) | ctype::CType::Void => {
                 panic!("ICE: cannot retrieve inner type of non-pointer type")
             }
         }
@@ -1625,7 +1640,9 @@ mod llvm_ir_builder {
         match ctype {
             ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => a.is_signed(),
             ctype::CType::Scalar(ctype::Scalar::Pointer(_)) => false,
-            ctype::CType::Aggregate(_) => panic!("ICE: arrays have no signedness"),
+            ctype::CType::Aggregate(_) | ctype::CType::Void => {
+                panic!("ICE: {} has no signedness", ctype)
+            }
         }
     }
 }

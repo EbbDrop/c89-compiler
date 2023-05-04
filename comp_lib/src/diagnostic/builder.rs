@@ -75,16 +75,31 @@ impl DiagnosticBuilder {
         self.build_custom(Code::Unimplemented, format!("not implemented: {feature}"))
     }
 
-    pub fn build_double_default(mut self, first_seen: Span) -> Diagnostic {
+    pub fn build_multiple_defaults(mut self, first_seen: Span) -> Diagnostic {
         self.add_additional_span(first_seen, Some("first case here".to_string()));
         let msg = "multiple default cases in switch".to_string();
         self.build_custom(Code::DuplicateDefault, msg)
     }
 
-    pub fn build_duplicate_qualifier(mut self, qualifier: &str, first_seen: Span) -> Diagnostic {
+    pub fn build_multiple_qualifiers(mut self, qualifier: &str, first_seen: Span) -> Diagnostic {
         self.add_additional_span(first_seen, Some("first seen here".to_string()));
-        let msg = format!("duplicate qualifier: {qualifier}");
+        let msg = format!("`{qualifier}` qualifier used multiple times");
         self.build_custom(Code::DuplicateQualifier, msg)
+    }
+
+    pub fn build_incompatible_specifiers(
+        mut self,
+        spec1: &str,
+        spec2: &str,
+        other: Span,
+    ) -> Diagnostic {
+        self.add_additional_span(other, None);
+        let msg = if spec1 == spec2 {
+            format!("`{spec1}` specifier used multiple times")
+        } else {
+            format!("`{spec1}` and `{spec2}` can't be used together")
+        };
+        self.build_custom(Code::IncompatibleSpecifiers, msg)
     }
 
     pub fn build_multi_byte_char(self) -> Diagnostic {
@@ -388,7 +403,7 @@ impl DiagnosticBuilder {
         self.build_custom(
             Code::UnexpectedType,
             format!(
-                "{field_name} needs {}, but got a expresion of type `{got_type}`",
+                "{field_name} needs {}, but got a expression of type `{got_type}`",
                 want_type.long_name()
             ),
         )
@@ -494,6 +509,35 @@ impl DiagnosticBuilder {
         self.build_custom(
             Code::WrongAmountOfArgs,
             format!("to {problem} arguments. got {got} but expected {expected}"),
+        )
+    }
+
+    pub fn build_qualified_void(mut self, qual_span: Span) -> Diagnostic {
+        self.add_additional_span(qual_span, None);
+        self.build_custom(
+            Code::QualifiedVoid,
+            "void type can't be qualified".to_owned(),
+        )
+    }
+
+    pub fn build_void_used(mut self, arg: &ir::ExprNode) -> Diagnostic {
+        self.add_ir_expr_type(arg);
+        self.build_custom(Code::VoidUsed, "expression with type void used".to_owned())
+    }
+
+    pub fn build_void_vars(self) -> Diagnostic {
+        self.build_custom(Code::VoidVariable, "void variable can't exist".to_owned())
+    }
+
+    pub fn build_void_param(self) -> Diagnostic {
+        self.build_custom(Code::VoidVariable, "void parameter can't exist".to_owned())
+    }
+
+    pub fn build_value_return_to_void(mut self, return_span: Span) -> Diagnostic {
+        self.add_ir_return_type(return_span, &ir::ctype::CType::Void);
+        self.build_custom(
+            Code::ValueReturnInVoid,
+            "value return used in void function".to_owned(),
         )
     }
 }

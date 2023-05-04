@@ -16,6 +16,14 @@ pub fn build_ir_from_external_declaration(
     match &external_declaration.data {
         ast::ExternalDeclaration::Declaration(ast::Declaration::Variable(decl)) => {
             declaration_type(&decl.type_name, &decl.array_parts)
+                .and_then(|ty| {
+                    if matches!(ty.ty, CType::Void) {
+                        return AggregateResult::new_err(
+                            DiagnosticBuilder::new(decl.type_name.span).build_void_vars(),
+                        );
+                    }
+                    AggregateResult::new_ok(ty)
+                })
                 .zip(AggregateResult::transpose_from(
                     // TODO: use first span of initializer to point to equals sign to provide
                     // clearer diagnostics (i.e. expected constant to initialize global ...).
@@ -167,6 +175,14 @@ pub fn function_params(
     let mut res = AggregateResult::new_ok(Vec::new());
     for param in params {
         declaration_type(&param.type_name, &param.array_parts)
+            .and_then(|ty| {
+                if matches!(ty.ty, CType::Void) {
+                    return AggregateResult::new_err(
+                        DiagnosticBuilder::new(param.type_name.span).build_void_param(),
+                    );
+                }
+                AggregateResult::new_ok(ty)
+            })
             .and_then(|DeclarationType { ty, is_const }| {
                 param
                     .ident

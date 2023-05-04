@@ -332,6 +332,8 @@ pub enum AssignCheckResult {
     PointerAndFloat,
     ToArray,
     FromArray,
+    FromVoid,
+    ToVoid,
 }
 
 pub fn check_assign(to: &CType, from: &CType) -> AssignCheckResult {
@@ -371,5 +373,7 @@ pub fn check_assign(to: &CType, from: &CType) -> AssignCheckResult {
         }
         (CType::Aggregate(Aggregate::Array(_)), _) => AssignCheckResult::ToArray,
         (CType::Scalar(_), CType::Aggregate(Aggregate::Array(_))) => AssignCheckResult::FromArray,
+        (CType::Void, _) => AssignCheckResult::ToVoid,
+        (_, CType::Void) => AssignCheckResult::FromVoid,
     }
 }

@@ -350,11 +350,22 @@ impl ToDot for ast::PlainType {
 
 impl ToDot for ast::PrimitiveType {
     fn to_dot(&self) -> DotTree {
-        match self {
-            Self::Char => DotTree::new_leaf("char".to_owned()),
-            Self::Int => DotTree::new_leaf("int".to_owned()),
-            Self::Float => DotTree::new_leaf("float".to_owned()),
-        }
+        let name = match self {
+            ast::PrimitiveType::Void => "void",
+            ast::PrimitiveType::Float => "float",
+            ast::PrimitiveType::Double => "double",
+            ast::PrimitiveType::LongDouble => "long double",
+            ast::PrimitiveType::Char => "char",
+            ast::PrimitiveType::SignedChar => "signed char",
+            ast::PrimitiveType::UnsignedChar => "unsigned char",
+            ast::PrimitiveType::SignedShortInt => "short int",
+            ast::PrimitiveType::SignedInt => "int",
+            ast::PrimitiveType::SignedLongInt => "long int",
+            ast::PrimitiveType::UnsignedShortInt => "unsigned short int",
+            ast::PrimitiveType::UnsignedInt => "unsigned int",
+            ast::PrimitiveType::UnsignedLongInt => "unsigned long int",
+        };
+        DotTree::new_leaf(name.to_string())
     }
 }
 

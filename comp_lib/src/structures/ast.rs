@@ -184,9 +184,21 @@ pub enum PlainType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrimitiveType {
-    Char,
-    Int,
+    Void,
+    // Floating types
     Float,
+    Double,
+    LongDouble,
+    // Integer types
+    Char,
+    SignedChar,
+    SignedShortInt,
+    SignedInt,
+    SignedLongInt,
+    UnsignedChar,
+    UnsignedShortInt,
+    UnsignedInt,
+    UnsignedLongInt,
 }
 
 #[derive(Debug, Clone, PartialEq)]

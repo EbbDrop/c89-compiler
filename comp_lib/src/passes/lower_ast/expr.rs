@@ -275,7 +275,11 @@ fn function_call(
                         PointerAndFloat => {
                             AggregateResult::new_err(builder.build_incompatible_arg(&arg, param))
                         }
+                        FromVoid => AggregateResult::new_err(builder.build_void_used(&arg)),
                         ToArray | FromArray => unreachable!(
+                            "ICE: Array should have been converted to a pointer by now"
+                        ),
+                        ToVoid => unreachable!(
                             "ICE: Array should have been converted to a pointer by now"
                         ),
                     }
@@ -446,12 +450,15 @@ fn cast(inner: ExprNode, to_ty: CType, span: Span, op_span: Span) -> AggregateRe
         {
             InvalidCastReason::FloatFromPointer(&inner)
         }
-        (CType::Scalar(_), CType::Scalar(_)) => {
+        (CType::Scalar(_) | CType::Void, CType::Scalar(_)) => {
             return AggregateResult::new_ok(ExprNode {
                 span,
                 ty: to_ty,
                 expr: Expr::Cast(Box::new(inner)),
             })
+        }
+        (CType::Void, CType::Void) => {
+            return AggregateResult::new_ok(inner);
         }
         (CType::Scalar(_), _) => InvalidCastReason::FromNonScaler(&inner),
         (_, CType::Scalar(_)) => InvalidCastReason::IntoNonScalar,
@@ -482,7 +489,9 @@ pub fn assign(
         PointerAndInt => res.add_rec_diagnostic(builder.build_incompatible_assign(&from, &to)),
         PointerAndFloat => res.add_err(builder.build_incompatible_assign(&from, &to)),
         ToArray => res.add_err(builder.build_assign_to_array(&to)),
+        FromVoid => res.add_err(builder.build_void_used(&from)),
         FromArray => unreachable!("ICE: Array should have been converted to a pointer by now"),
+        ToVoid => unreachable!("ICE: Lvalue with void type should not exist"),
     }
 
     let to_type = to.ty.clone();
@@ -551,6 +560,7 @@ impl<'a, 'b, 'g> UnaryBuilder<'a, 'b, 'g> {
                 match ty {
                     CType::Scalar(_) => Ok(ty.clone()),
                     CType::Aggregate(_) => Err(LvalueBuildErr::WrongType(TypeCat::Scalar)),
+                    CType::Void => Err(LvalueBuildErr::WrongType(TypeCat::Scalar)),
                 }
             },
             name,

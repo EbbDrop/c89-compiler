@@ -102,6 +102,11 @@ pub enum Code {
     LossyImplicitArg,
     IncompatibleArg,
     ArgConstLoss,
+    IncompatibleSpecifiers,
+    QualifiedVoid,
+    VoidUsed,
+    VoidVariable,
+    ValueReturnInVoid,
 }
 
 impl Code {

@@ -55,9 +55,14 @@ BRACE_RIGHT: '}';
 
 // keywords
 KW_CONST: 'const';
+KW_SIGNED: 'signed';
+KW_UNSIGNED: 'unsigned';
+KW_LONG: 'long';
+KW_SHORT: 'short';
 KW_CHAR: 'char';
 KW_INT: 'int';
 KW_FLOAT: 'float';
+KW_DOUBLE: 'double';
 KW_VOID: 'void';
 KW_IF: 'if';
 KW_ELSE: 'else';

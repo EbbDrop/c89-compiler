@@ -330,9 +330,9 @@ fn parses_cast_expr() {
                             data: ast::QualifiedType {
                                 is_const: Some((14..19).into()),
                                 inner: ast::UnqualifiedTypeNode {
-                                    span: (20..23).into(),
+                                    span: (14..23).into(),
                                     data: ast::UnqualifiedType::PlainType(
-                                        ast::PlainType::Primitive(ast::PrimitiveType::Int),
+                                        ast::PlainType::Primitive(ast::PrimitiveType::SignedInt),
                                     ),
                                 },
                             },
@@ -411,7 +411,7 @@ fn assert_expr_eq(raw_expr: String, expected_expr: ast::Expression) {
                             inner: ast::UnqualifiedTypeNode {
                                 span: (0..3).into(),
                                 data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                                    ast::PrimitiveType::Int
+                                    ast::PrimitiveType::SignedInt
                                 ))
                             }
                         }

@@ -1,3 +1,5 @@
+mod build_type;
+
 use crate::{
     ast, cst,
     diagnostic::{AggregateResult, DiagnosticBuilder, Span},
@@ -334,7 +336,8 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                     let span = extract_span_from_token(case.label.as_deref().unwrap());
                     if let Some(other_default_span) = default_case {
                         cases.add_err(
-                            DiagnosticBuilder::new(span).build_double_default(other_default_span),
+                            DiagnosticBuilder::new(span)
+                                .build_multiple_defaults(other_default_span),
                         );
                     } else {
                         default_case = Some(span);
@@ -631,36 +634,17 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         })
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn build_from_type_name(&self, ctx: &cst::TypeName) -> AggregateResult<ast::QualifiedTypeNode> {
         use cst::TypeName as TN;
-        use cst::TypeSpecifier as TS;
 
         let span = extract_span(ctx);
 
         let data = match ctx {
             TN::TypeNamePlainContext(plain) => {
-                if plain.specifiers.len() > 1 {
-                    return AggregateResult::new_err(
-                        DiagnosticBuilder::new(span)
-                            .build_unimplemented("types with more than one specifier"),
-                    );
-                }
-                let primitive = match plain.specifiers.get(0) {
-                    Some(s) => match s.as_ref() {
-                        TS::TypeSpecifierPrimitiveContext(primitive_type) => self
-                            .build_from_primitive_type(primitive_type.tp.as_deref().unwrap())
-                            .map(|p| (p, extract_span(primitive_type))),
-                        TS::Error(ectx) => tree_error(ectx),
-                    },
-                    None => AggregateResult::new_rec(
-                        (ast::PrimitiveType::Int, extract_span(plain)),
-                        DiagnosticBuilder::new(span).build_unspecified_type(),
-                    ),
-                };
-
-                primitive.and_then(|(primitive, span)| {
+                build_type::build_from_specifiers(span, &plain.specifiers).and_then(|primitive| {
                     let unqualified_type_node = ast::UnqualifiedTypeNode {
-                        span,
+                        span: extract_span(plain),
                         data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(primitive)),
                     };
                     with_qualifiers(unqualified_type_node, &plain.qualifiers)
@@ -679,19 +663,6 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
         };
 
         data.map(|data| ast::QualifiedTypeNode { span, data })
-    }
-
-    fn build_from_primitive_type(
-        &self,
-        ctx: &cst::PrimitiveType,
-    ) -> AggregateResult<ast::PrimitiveType> {
-        use cst::PrimitiveType;
-        AggregateResult::new_ok(match ctx {
-            PrimitiveType::PrimitiveTypeIntContext(_) => ast::PrimitiveType::Int,
-            PrimitiveType::PrimitiveTypeCharContext(_) => ast::PrimitiveType::Char,
-            PrimitiveType::PrimitiveTypeFloatContext(_) => ast::PrimitiveType::Float,
-            PrimitiveType::Error(ectx) => tree_error(ectx),
-        })
     }
 
     pub fn build_from_expr(&self, ctx: &cst::Expr) -> AggregateResult<ast::ExpressionNode> {
@@ -1126,13 +1097,23 @@ fn with_qualifiers(
                 if let Some(original_span) = &qualified_type.is_const {
                     res.add_rec_diagnostic(
                         DiagnosticBuilder::new(span)
-                            .build_duplicate_qualifier("const", *original_span),
+                            .build_multiple_qualifiers("const", *original_span),
                     )
                 } else {
                     qualified_type.is_const = Some(span);
                 }
             }
             TQ::Error(ectx) => tree_error(ectx),
+        }
+    }
+    if matches!(
+        qualified_type.inner.data,
+        ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(ast::PrimitiveType::Void))
+    ) {
+        if let Some(const_span) = qualified_type.is_const {
+            return AggregateResult::new_err(
+                DiagnosticBuilder::new(qualified_type.inner.span).build_qualified_void(const_span),
+            );
         }
     }
     res.map(|_| qualified_type)
@@ -1331,12 +1312,13 @@ fn generate_io_format_fn_from_include_stdio(
             ast::FunctionDeclaration {
                 return_type: ast::QualifiedTypeNode {
                     span,
+                    // TODO: Should be void for printf
                     data: ast::QualifiedType {
                         is_const: None,
                         inner: ast::UnqualifiedTypeNode {
                             span,
                             data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                                ast::PrimitiveType::Int,
+                                ast::PrimitiveType::SignedInt,
                             )),
                         },
                     },

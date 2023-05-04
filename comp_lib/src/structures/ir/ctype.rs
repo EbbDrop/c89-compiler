@@ -11,6 +11,7 @@ pub enum CType {
     // Union(Union),
     Scalar(Scalar),
     Aggregate(Aggregate),
+    Void,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,11 +30,24 @@ impl CType {
                 inner: Box::new(Self::from_ast_type(&ty.data.inner.data)),
                 inner_const: ty.data.is_const.is_some(),
             })),
+            ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
+                ast::PrimitiveType::Void,
+            )) => Self::Void,
             ast::UnqualifiedType::PlainType(ty) => match ty {
                 ast::PlainType::Primitive(p) => Self::Scalar(Scalar::Arithmetic(match p {
-                    ast::PrimitiveType::Char => Arithmetic::Char,
-                    ast::PrimitiveType::Int => Arithmetic::SignedInt,
+                    ast::PrimitiveType::Void => unreachable!(),
                     ast::PrimitiveType::Float => Arithmetic::Float,
+                    ast::PrimitiveType::Double => Arithmetic::Double,
+                    ast::PrimitiveType::LongDouble => Arithmetic::LongDouble,
+                    ast::PrimitiveType::Char => Arithmetic::Char,
+                    ast::PrimitiveType::SignedChar => Arithmetic::SignedChar,
+                    ast::PrimitiveType::SignedShortInt => Arithmetic::SignedShortInt,
+                    ast::PrimitiveType::SignedInt => Arithmetic::SignedInt,
+                    ast::PrimitiveType::SignedLongInt => Arithmetic::SignedLongInt,
+                    ast::PrimitiveType::UnsignedChar => Arithmetic::UnsignedChar,
+                    ast::PrimitiveType::UnsignedShortInt => Arithmetic::UnsignedShortInt,
+                    ast::PrimitiveType::UnsignedInt => Arithmetic::UnsignedInt,
+                    ast::PrimitiveType::UnsignedLongInt => Arithmetic::UnsignedLongInt,
                 })),
             },
         }
@@ -75,6 +89,7 @@ impl Display for CType {
                 }
             },
             CType::Aggregate(ref a) => write!(f, "{a}"),
+            CType::Void => write!(f, "void"),
         }
     }
 }

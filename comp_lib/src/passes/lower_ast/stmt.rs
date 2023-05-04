@@ -165,6 +165,13 @@ fn return_statement(
                     return_type_span,
                     return_type,
                 )),
+                FromVoid => res.add_err(builder.build_void_used(&expr)),
+                ToVoid => {
+                    res.add_err(
+                        DiagnosticBuilder::new(expr.span)
+                            .build_value_return_to_void(return_type_span),
+                    );
+                }
                 ToArray => unreachable!("ICE: Arrays aren't a valid return type for functions"),
                 FromArray => {
                     unreachable!("ICE: Array should have been converted to a pointer by now")
@@ -331,6 +338,14 @@ fn variable_declaration(
     };
 
     declaration_type(&decl.type_name, &decl.array_parts)
+        .and_then(|ty| {
+            if matches!(ty.ty, CType::Void) {
+                return AggregateResult::new_err(
+                    DiagnosticBuilder::new(decl.type_name.span).build_void_vars(),
+                );
+            }
+            AggregateResult::new_ok(ty)
+        })
         .and_then(|DeclarationType { ty, is_const }| {
             let item = VariableItem {
                 original_span: span,
