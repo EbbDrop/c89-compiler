@@ -21,6 +21,7 @@ pub enum ExternalDeclaration {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDefinition {
+    pub prototype_span: Span,
     pub return_type: QualifiedTypeNode,
     pub ident: IdentNode,
     pub params: Vec<FunctionParamNode>,

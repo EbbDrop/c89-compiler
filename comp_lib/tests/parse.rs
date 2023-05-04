@@ -404,6 +404,7 @@ fn assert_expr_eq(raw_expr: String, expected_expr: ast::Expression) {
                 span: (0..(end + 3)).into(),
                 comments: None,
                 data: ast::ExternalDeclaration::FunctionDefinition(ast::FunctionDefinition {
+                    prototype_span: (0..10).into(),
                     return_type: ast::QualifiedTypeNode {
                         span: (0..3).into(),
                         data: ast::QualifiedType {

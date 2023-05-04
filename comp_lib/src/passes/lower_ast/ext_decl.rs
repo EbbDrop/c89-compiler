@@ -24,7 +24,7 @@ pub fn build_ir_from_external_declaration(
         }
         ast::ExternalDeclaration::Declaration(ast::Declaration::FunctionDeclaration(fd)) => {
             let function = AstFunction {
-                span,
+                prototype_span: span,
                 comments: external_declaration.comments.as_deref(),
                 return_type: &fd.return_type,
                 ident: &fd.ident,
@@ -36,7 +36,7 @@ pub fn build_ir_from_external_declaration(
         }
         ast::ExternalDeclaration::FunctionDefinition(fd) => {
             let function = AstFunction {
-                span,
+                prototype_span: fd.prototype_span,
                 comments: external_declaration.comments.as_deref(),
                 return_type: &fd.return_type,
                 ident: &fd.ident,
@@ -105,7 +105,7 @@ fn extract_global_var_initializer(
 /// Merge of [`ast::FunctionDeclaration`] and [`ast::FunctionDefinition`].
 #[derive(Debug)]
 struct AstFunction<'a> {
-    pub span: Span,
+    pub prototype_span: Span,
     pub comments: Option<&'a str>,
     pub return_type: &'a ast::QualifiedTypeNode,
     pub ident: &'a ast::IdentNode,
@@ -151,7 +151,7 @@ fn add_function(function: AstFunction, global: &mut ir::Root) -> AggregateResult
                         .functions
                         .get(ident)
                         .map(|f| f.original_span)
-                        .unwrap_or(function.span),
+                        .unwrap_or(function.prototype_span),
                     comments: function.comments.map(String::from),
                     return_type,
                     params,

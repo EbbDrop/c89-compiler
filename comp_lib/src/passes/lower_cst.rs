@@ -559,6 +559,7 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
             .zip(self.build_from_block_statement(ctx.body.as_deref().unwrap()))
             .map(
                 |((return_type, ident, params, is_vararg), body)| ast::FunctionDefinition {
+                    prototype_span: extract_span(ctx.prototype.as_deref().unwrap()),
                     return_type,
                     ident,
                     params,
