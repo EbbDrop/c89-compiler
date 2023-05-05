@@ -183,8 +183,9 @@ impl Folder {
             }
             Expression::FunctionCall(fc) => {
                 for arg in &mut fc.args {
-                    let folded = self.fold_expr(&mut arg.data, last_assign)?;
-                    replace_with_literal(arg, folded);
+                    if let Some(folded) = self.fold_expr(&mut arg.data, last_assign) {
+                        replace_with_literal(arg, folded);
+                    }
                 }
                 None // Function call expression itself is not const-folded
             }
