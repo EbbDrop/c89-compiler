@@ -154,6 +154,23 @@ impl<'a> FunctionCodeRemover<'a> {
     fn switch_node(&mut self, stmt: &mut SwitchStmtNode) -> StmtRes {
         let mut common = None;
 
+        let mut add_stmt_res = |res| match common {
+            Some(ref mut common) => {
+                if res != *common {
+                    *common = match (res, &common) {
+                        (
+                            StmtRes::Returns | StmtRes::Infinite(_) | StmtRes::RetOrInf,
+                            StmtRes::Returns | StmtRes::Infinite(_) | StmtRes::RetOrInf,
+                        ) => StmtRes::RetOrInf,
+                        _ => StmtRes::Unknown,
+                    };
+                }
+            }
+            None => {
+                common = Some(res);
+            }
+        };
+
         let len = stmt.cases.len();
         for (i, case) in stmt.cases.iter_mut().enumerate() {
             let body = match &mut case.data {
@@ -166,22 +183,13 @@ impl<'a> FunctionCodeRemover<'a> {
                 // This case falls through
                 continue;
             }
-            match common {
-                Some(ref mut common) => {
-                    if res != *common {
-                        *common = match (res, &common) {
-                            (
-                                StmtRes::Returns | StmtRes::Infinite(_) | StmtRes::RetOrInf,
-                                StmtRes::Returns | StmtRes::Infinite(_) | StmtRes::RetOrInf,
-                            ) => StmtRes::RetOrInf,
-                            _ => StmtRes::Unknown,
-                        };
-                    }
-                }
-                None => {
-                    common = Some(res);
-                }
-            }
+
+            add_stmt_res(res);
+        }
+
+        if !stmt.has_default {
+            // There is no default so asume we can alwys ge to the botom
+            add_stmt_res(StmtRes::Runs);
         }
 
         match common {
