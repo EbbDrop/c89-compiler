@@ -35,15 +35,21 @@ pub fn build_ir_from_external_declaration(
             add_function(function, global)
         }
         ast::ExternalDeclaration::FunctionDefinition(fd) => {
-            let function = AstFunction {
+            let mut function = AstFunction {
                 prototype_span: fd.prototype_span,
-                comments: external_declaration.comments.as_deref(),
+                comments: None,
                 return_type: &fd.return_type,
                 ident: &fd.ident,
                 params: &fd.params,
                 is_vararg: fd.is_vararg,
-                body: Some(&fd.body),
+                body: None,
             };
+            // First forward declare the function, so that is already in scope if it is used within
+            // its own body (i.e. for recursive functions).
+            let _ = add_function(function.clone(), global);
+            // Now add the function definition as a whole.
+            function.comments = external_declaration.comments.as_deref();
+            function.body = Some(&fd.body);
             add_function(function, global)
         }
     }
@@ -173,7 +179,7 @@ fn extract_global_var_initializer(
 }
 
 /// Merge of [`ast::FunctionDeclaration`] and [`ast::FunctionDefinition`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct AstFunction<'a> {
     pub prototype_span: Span,
     pub comments: Option<&'a str>,

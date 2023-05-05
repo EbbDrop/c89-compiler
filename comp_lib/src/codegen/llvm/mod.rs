@@ -112,9 +112,9 @@ mod llvm_ir_builder {
         /// function doesn't have a body;
         fn add_function_definition(&mut self, ident: &str, function_node: &ir::FunctionNode) {
             let Some(body) = function_node.body.as_ref() else { return };
-            let (fdecl_handle, ptr) = self
+            let (fdecl_handle, _) = *self
                 .fdecl_table
-                .remove(ident)
+                .get(ident)
                 .expect("ICE: function should have been declared before adding its definition");
             let fdecl = self.module.get_function_declaration(fdecl_handle).clone();
             let fdef = FunctionBuilder::new(self, fdecl.to_definition_builder(), function_node)
@@ -122,6 +122,7 @@ mod llvm_ir_builder {
             let handle = self
                 .module
                 .map_function_declaration_to_definition(fdecl_handle, |_fdecl| fdef);
+            let (_, ptr) = self.fdecl_table.remove(ident).unwrap();
             self.fdef_table.insert(String::from(ident), (handle, ptr));
         }
 
