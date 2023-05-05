@@ -46,7 +46,7 @@ pub fn build_ir_expr(
         ast::Expression::Cast(type_name, inner) => build_ir_expr(inner, scope).and_then(|inner| {
             cast(
                 inner,
-                CType::from_ast_type(&type_name.data.inner.data),
+                CType::from_ast_type(&type_name.unqualified.data),
                 span,
                 type_name.span,
             )

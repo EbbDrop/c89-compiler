@@ -191,7 +191,7 @@ struct AstFunction<'a> {
 }
 
 fn add_function(function: AstFunction, global: &mut ir::Root) -> AggregateResult<()> {
-    let return_type = CType::from_ast_type(&function.return_type.data.inner.data);
+    let return_type = CType::from_ast_type(&function.return_type.unqualified.data);
     let ident = &function.ident.data;
 
     let res = check_function_ident(&function, &return_type, global);
@@ -329,7 +329,7 @@ fn check_function_ident(
     let param_types = function
         .params
         .iter()
-        .map(|p| CType::from_ast_type(&p.type_name.data.inner.data));
+        .map(|p| CType::from_ast_type(&p.type_name.unqualified.data));
 
     if original_function.params.len() != param_types.len()
         || original_function.is_vararg != function.is_vararg

@@ -60,7 +60,7 @@ impl TypePart for Size {
 pub fn build_from_specifiers(
     span: Span,
     ctx: &[Rc<cst::TypeSpecifier>],
-) -> AggregateResult<ast::PrimitiveType> {
+) -> AggregateResult<ast::UnqualifiedType> {
     use cst::TypeSpecifier;
 
     let mut base: Option<(Span, Base)> = None;
@@ -134,19 +134,20 @@ fn build_from_parts(
     base: Base,
     signedness: Option<(Span, Signedness)>,
     size: Option<(Span, Size)>,
-) -> AggregateResult<ast::PrimitiveType> {
+) -> AggregateResult<ast::UnqualifiedType> {
+    use ast::UnqualifiedType as UT;
     match base {
         Base::Void => {
-            let mut res = AggregateResult::new_ok(ast::PrimitiveType::Void);
+            let mut res = AggregateResult::new_ok(UT::Void);
             disallow_part(signedness, base_span, &base, &mut res);
             disallow_part(size, base_span, &base, &mut res);
             res
         }
         Base::Char => {
             let ty = match signedness {
-                Some((_, Signedness::Signed)) => ast::PrimitiveType::SignedChar,
-                Some((_, Signedness::Unsigend)) => ast::PrimitiveType::UnsignedChar,
-                None => ast::PrimitiveType::Char,
+                Some((_, Signedness::Signed)) => UT::SignedChar,
+                Some((_, Signedness::Unsigend)) => UT::UnsignedChar,
+                None => UT::Char,
             };
             let mut res = AggregateResult::new_ok(ty);
             disallow_part(size, base_span, &base, &mut res);
@@ -157,17 +158,17 @@ fn build_from_parts(
                 signedness.map(|s| s.1).unwrap_or(Signedness::Signed),
                 size.map(|s| s.1),
             ) {
-                (Signedness::Signed, None) => ast::PrimitiveType::SignedInt,
-                (Signedness::Signed, Some(Size::Short)) => ast::PrimitiveType::SignedShortInt,
-                (Signedness::Signed, Some(Size::Long)) => ast::PrimitiveType::SignedLongInt,
-                (Signedness::Unsigend, None) => ast::PrimitiveType::UnsignedInt,
-                (Signedness::Unsigend, Some(Size::Short)) => ast::PrimitiveType::UnsignedShortInt,
-                (Signedness::Unsigend, Some(Size::Long)) => ast::PrimitiveType::UnsignedLongInt,
+                (Signedness::Signed, None) => UT::SignedInt,
+                (Signedness::Signed, Some(Size::Short)) => UT::SignedShortInt,
+                (Signedness::Signed, Some(Size::Long)) => UT::SignedLongInt,
+                (Signedness::Unsigend, None) => UT::UnsignedInt,
+                (Signedness::Unsigend, Some(Size::Short)) => UT::UnsignedShortInt,
+                (Signedness::Unsigend, Some(Size::Long)) => UT::UnsignedLongInt,
             };
             AggregateResult::new_ok(ty)
         }
         Base::Float => {
-            let mut res = AggregateResult::new_ok(ast::PrimitiveType::Float);
+            let mut res = AggregateResult::new_ok(UT::Float);
             disallow_part(signedness, base_span, &base, &mut res);
             disallow_part(size, base_span, &base, &mut res);
             res
@@ -183,8 +184,8 @@ fn build_from_parts(
                         ),
                     )
                 }
-                Some((_, Size::Long)) => AggregateResult::new_ok(ast::PrimitiveType::LongDouble),
-                None => AggregateResult::new_ok(ast::PrimitiveType::Double),
+                Some((_, Size::Long)) => AggregateResult::new_ok(UT::LongDouble),
+                None => AggregateResult::new_ok(UT::Double),
             };
             disallow_part(size, base_span, &base, &mut res);
             res

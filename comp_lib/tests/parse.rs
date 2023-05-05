@@ -321,23 +321,17 @@ fn parses_cast_expr() {
         ast::Expression::Cast(
             ast::QualifiedTypeNode {
                 span: (14..30).into(),
-                data: ast::QualifiedType {
-                    is_const: Some((25..30).into()),
-                    inner: ast::UnqualifiedTypeNode {
-                        span: (14..30).into(),
-                        data: ast::UnqualifiedType::PointerType(Box::new(ast::QualifiedTypeNode {
+                is_const: Some((25..30).into()),
+                unqualified: ast::UnqualifiedTypeNode {
+                    span: (14..30).into(),
+                    data: ast::UnqualifiedType::PointerType(Box::new(ast::QualifiedTypeNode {
+                        span: (14..23).into(),
+                        is_const: Some((14..19).into()),
+                        unqualified: ast::UnqualifiedTypeNode {
                             span: (14..23).into(),
-                            data: ast::QualifiedType {
-                                is_const: Some((14..19).into()),
-                                inner: ast::UnqualifiedTypeNode {
-                                    span: (14..23).into(),
-                                    data: ast::UnqualifiedType::PlainType(
-                                        ast::PlainType::Primitive(ast::PrimitiveType::SignedInt),
-                                    ),
-                                },
-                            },
-                        })),
-                    },
+                            data: ast::UnqualifiedType::SignedInt,
+                        },
+                    })),
                 },
             },
             Box::new(ast::ExpressionNode {
@@ -407,14 +401,10 @@ fn assert_expr_eq(raw_expr: String, expected_expr: ast::Expression) {
                     prototype_span: (0..10).into(),
                     return_type: ast::QualifiedTypeNode {
                         span: (0..3).into(),
-                        data: ast::QualifiedType {
-                            is_const: None,
-                            inner: ast::UnqualifiedTypeNode {
-                                span: (0..3).into(),
-                                data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                                    ast::PrimitiveType::SignedInt
-                                ))
-                            }
+                        is_const: None,
+                        unqualified: ast::UnqualifiedTypeNode {
+                            span: (0..3).into(),
+                            data: ast::UnqualifiedType::SignedInt,
                         }
                     },
                     ident: ast::IdentNode {

@@ -38,7 +38,7 @@ impl ToDot for ast::VariableDeclaration {
         DotTree::new(
             "var decl".to_owned(),
             vec![
-                ("type", self.type_name.data.to_dot()),
+                ("type", self.type_name.to_dot()),
                 ("ident", to_dot_ident(&self.ident.data)),
             ]
             .into_iter()
@@ -73,7 +73,7 @@ impl ToDot for ast::FunctionDeclaration {
         DotTree::new(
             "fn decl".to_owned(),
             vec![
-                ("ret type", self.return_type.data.to_dot()),
+                ("ret type", self.return_type.to_dot()),
                 ("ident", to_dot_ident(&self.ident.data)),
             ]
             .into_iter()
@@ -91,7 +91,7 @@ impl ToDot for ast::FunctionParamNode {
     fn to_dot(&self) -> DotTree {
         DotTree::new(
             "param".to_owned(),
-            iter::once(("type", self.type_name.data.to_dot()))
+            iter::once(("type", self.type_name.to_dot()))
                 .chain(
                     self.ident
                         .iter()
@@ -107,7 +107,7 @@ impl ToDot for ast::FunctionDefinition {
         DotTree::new(
             "fn def".to_owned(),
             vec![
-                ("return type", self.return_type.data.to_dot()),
+                ("return type", self.return_type.to_dot()),
                 ("ident", to_dot_ident(&self.ident.data)),
             ]
             .into_iter()
@@ -284,7 +284,7 @@ impl ToDot for ast::Expression {
             ),
             Self::Cast(t, e) => DotTree::new(
                 "cast".to_owned(),
-                vec![("type", t.data.to_dot()), ("expr", e.data.to_dot())],
+                vec![("type", t.to_dot()), ("expr", e.data.to_dot())],
             ),
             Self::FunctionCall(fc) => fc.to_dot(),
             Self::Ident(i) => to_dot_ident(&i.data),
@@ -318,13 +318,13 @@ impl ToDot for ast::Literal {
     }
 }
 
-impl ToDot for ast::QualifiedType {
+impl ToDot for ast::QualifiedTypeNode {
     fn to_dot(&self) -> DotTree {
         let mut children = Vec::new();
         if self.is_const.is_some() {
             children.push(("", DotTree::new_leaf("const".to_owned())));
         }
-        children.push(("inner", self.inner.data.to_dot()));
+        children.push(("unqualified", self.unqualified.data.to_dot()));
         DotTree::new("q type".to_owned(), children)
     }
 }
@@ -332,40 +332,21 @@ impl ToDot for ast::QualifiedType {
 impl ToDot for ast::UnqualifiedType {
     fn to_dot(&self) -> DotTree {
         match self {
-            Self::PointerType(t) => {
-                DotTree::new("pointer".to_owned(), vec![("type", t.data.to_dot())])
-            }
-            Self::PlainType(t) => DotTree::new("plain".to_owned(), vec![("", t.to_dot())]),
+            Self::PointerType(ty) => DotTree::new("pointer".to_owned(), vec![("to", ty.to_dot())]),
+            Self::Void => DotTree::new_leaf("void".to_owned()),
+            Self::Float => DotTree::new_leaf("float".to_owned()),
+            Self::Double => DotTree::new_leaf("double".to_owned()),
+            Self::LongDouble => DotTree::new_leaf("long double".to_owned()),
+            Self::Char => DotTree::new_leaf("char".to_owned()),
+            Self::SignedChar => DotTree::new_leaf("signed char".to_owned()),
+            Self::UnsignedChar => DotTree::new_leaf("unsigned char".to_owned()),
+            Self::SignedShortInt => DotTree::new_leaf("short int".to_owned()),
+            Self::SignedInt => DotTree::new_leaf("int".to_owned()),
+            Self::SignedLongInt => DotTree::new_leaf("long int".to_owned()),
+            Self::UnsignedShortInt => DotTree::new_leaf("unsigned short int".to_owned()),
+            Self::UnsignedInt => DotTree::new_leaf("unsigned int".to_owned()),
+            Self::UnsignedLongInt => DotTree::new_leaf("unsigned long int".to_owned()),
         }
-    }
-}
-
-impl ToDot for ast::PlainType {
-    fn to_dot(&self) -> DotTree {
-        match self {
-            Self::Primitive(p) => DotTree::new("primitive".to_owned(), vec![("", p.to_dot())]),
-        }
-    }
-}
-
-impl ToDot for ast::PrimitiveType {
-    fn to_dot(&self) -> DotTree {
-        let name = match self {
-            ast::PrimitiveType::Void => "void",
-            ast::PrimitiveType::Float => "float",
-            ast::PrimitiveType::Double => "double",
-            ast::PrimitiveType::LongDouble => "long double",
-            ast::PrimitiveType::Char => "char",
-            ast::PrimitiveType::SignedChar => "signed char",
-            ast::PrimitiveType::UnsignedChar => "unsigned char",
-            ast::PrimitiveType::SignedShortInt => "short int",
-            ast::PrimitiveType::SignedInt => "int",
-            ast::PrimitiveType::SignedLongInt => "long int",
-            ast::PrimitiveType::UnsignedShortInt => "unsigned short int",
-            ast::PrimitiveType::UnsignedInt => "unsigned int",
-            ast::PrimitiveType::UnsignedLongInt => "unsigned long int",
-        };
-        DotTree::new_leaf(name.to_string())
     }
 }
 

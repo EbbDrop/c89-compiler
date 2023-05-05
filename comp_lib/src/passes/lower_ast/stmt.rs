@@ -392,8 +392,8 @@ pub fn declaration_type(
     type_name: &ast::QualifiedTypeNode,
     array_parts: &[ast::ArrayDeclarationNode],
 ) -> AggregateResult<DeclarationType> {
-    let ty = CType::from_ast_type(&type_name.data.inner.data);
-    let is_const = type_name.data.is_const.is_some();
+    let ty = CType::from_ast_type(&type_name.unqualified.data);
+    let is_const = type_name.is_const.is_some();
 
     let mut ty = AggregateResult::new_ok(ty);
     for array_part in array_parts.iter().rev() {

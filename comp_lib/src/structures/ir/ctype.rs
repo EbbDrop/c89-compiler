@@ -25,31 +25,27 @@ pub enum IncompatibilityReason {
 
 impl CType {
     pub fn from_ast_type(type_name: &ast::UnqualifiedType) -> Self {
-        match &type_name {
-            ast::UnqualifiedType::PointerType(ty) => Self::Scalar(Scalar::Pointer(Pointer {
-                inner: Box::new(Self::from_ast_type(&ty.data.inner.data)),
-                inner_const: ty.data.is_const.is_some(),
+        use ast::UnqualifiedType as UT;
+        use Arithmetic as A;
+        use Scalar as S;
+        match type_name {
+            UT::PointerType(inner_ty) => Self::Scalar(Scalar::Pointer(Pointer {
+                inner: Box::new(Self::from_ast_type(&inner_ty.unqualified.data)),
+                inner_const: inner_ty.is_const.is_some(),
             })),
-            ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                ast::PrimitiveType::Void,
-            )) => Self::Void,
-            ast::UnqualifiedType::PlainType(ty) => match ty {
-                ast::PlainType::Primitive(p) => Self::Scalar(Scalar::Arithmetic(match p {
-                    ast::PrimitiveType::Void => unreachable!(),
-                    ast::PrimitiveType::Float => Arithmetic::Float,
-                    ast::PrimitiveType::Double => Arithmetic::Double,
-                    ast::PrimitiveType::LongDouble => Arithmetic::LongDouble,
-                    ast::PrimitiveType::Char => Arithmetic::Char,
-                    ast::PrimitiveType::SignedChar => Arithmetic::SignedChar,
-                    ast::PrimitiveType::SignedShortInt => Arithmetic::SignedShortInt,
-                    ast::PrimitiveType::SignedInt => Arithmetic::SignedInt,
-                    ast::PrimitiveType::SignedLongInt => Arithmetic::SignedLongInt,
-                    ast::PrimitiveType::UnsignedChar => Arithmetic::UnsignedChar,
-                    ast::PrimitiveType::UnsignedShortInt => Arithmetic::UnsignedShortInt,
-                    ast::PrimitiveType::UnsignedInt => Arithmetic::UnsignedInt,
-                    ast::PrimitiveType::UnsignedLongInt => Arithmetic::UnsignedLongInt,
-                })),
-            },
+            UT::Void => Self::Void,
+            UT::Float => Self::Scalar(S::Arithmetic(A::Float)),
+            UT::Double => Self::Scalar(S::Arithmetic(A::Double)),
+            UT::LongDouble => Self::Scalar(S::Arithmetic(A::LongDouble)),
+            UT::Char => Self::Scalar(S::Arithmetic(A::Char)),
+            UT::SignedChar => Self::Scalar(S::Arithmetic(A::SignedChar)),
+            UT::SignedShortInt => Self::Scalar(S::Arithmetic(A::SignedShortInt)),
+            UT::SignedInt => Self::Scalar(S::Arithmetic(A::SignedInt)),
+            UT::SignedLongInt => Self::Scalar(S::Arithmetic(A::SignedLongInt)),
+            UT::UnsignedChar => Self::Scalar(S::Arithmetic(A::UnsignedChar)),
+            UT::UnsignedShortInt => Self::Scalar(S::Arithmetic(A::UnsignedShortInt)),
+            UT::UnsignedInt => Self::Scalar(S::Arithmetic(A::UnsignedInt)),
+            UT::UnsignedLongInt => Self::Scalar(S::Arithmetic(A::UnsignedLongInt)),
         }
     }
 

@@ -648,14 +648,14 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
 
         let span = extract_span(ctx);
 
-        let data = match ctx {
+        match ctx {
             TN::TypeNamePlainContext(plain) => {
-                build_type::build_from_specifiers(span, &plain.specifiers).and_then(|primitive| {
-                    let unqualified_type_node = ast::UnqualifiedTypeNode {
-                        span: extract_span(plain),
-                        data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(primitive)),
-                    };
-                    with_qualifiers(unqualified_type_node, &plain.qualifiers)
+                build_type::build_from_specifiers(span, &plain.specifiers).and_then(|data| {
+                    with_qualifiers(
+                        ast::UnqualifiedTypeNode { span, data },
+                        &plain.qualifiers,
+                        span,
+                    )
                 })
             }
             TN::TypeNamePointerContext(ctx) => self
@@ -665,12 +665,10 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                         span: extract_span(ctx),
                         data: ast::UnqualifiedType::PointerType(Box::new(data)),
                     };
-                    with_qualifiers(unqualified_type_node, &ctx.ptr_qualifiers)
+                    with_qualifiers(unqualified_type_node, &ctx.ptr_qualifiers, span)
                 }),
             TN::Error(ectx) => tree_error(ectx),
-        };
-
-        data.map(|data| ast::QualifiedTypeNode { span, data })
+        }
     }
 
     pub fn build_from_expr(&self, ctx: &cst::Expr) -> AggregateResult<ast::ExpressionNode> {
@@ -1086,45 +1084,40 @@ fn to_block_statements(stmt: Result<ast::StatementNode, Span>) -> ast::BlockStat
 }
 
 fn with_qualifiers(
-    unqualified_type_node: ast::UnqualifiedTypeNode,
+    unqualified: ast::UnqualifiedTypeNode,
     qualifiers: &[Rc<cst::TypeQualifier>],
-) -> AggregateResult<ast::QualifiedType> {
-    use cst::TypeQualifier as TQ;
-    let mut qualified_type = ast::QualifiedType {
-        is_const: None,
-        inner: unqualified_type_node,
-    };
-
+    span: Span,
+) -> AggregateResult<ast::QualifiedTypeNode> {
     let mut res = AggregateResult::new_ok(());
+    let mut is_const = None;
 
-    for qualifier in qualifiers.iter() {
+    for qualifier in qualifiers {
         match qualifier.deref() {
-            TQ::TypeQualifierConstContext(ctx) => {
+            cst::TypeQualifier::TypeQualifierConstContext(ctx) => {
                 let span = extract_span(ctx);
 
-                if let Some(original_span) = &qualified_type.is_const {
+                if let Some(original_span) = &is_const {
                     res.add_rec_diagnostic(
                         DiagnosticBuilder::new(span)
                             .build_multiple_qualifiers("const", *original_span),
                     )
                 } else {
-                    qualified_type.is_const = Some(span);
+                    is_const = Some(span);
                 }
             }
-            TQ::Error(ectx) => tree_error(ectx),
+            cst::TypeQualifier::Error(ectx) => tree_error(ectx),
         }
     }
-    if matches!(
-        qualified_type.inner.data,
-        ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(ast::PrimitiveType::Void))
-    ) {
-        if let Some(const_span) = qualified_type.is_const {
-            return AggregateResult::new_err(
-                DiagnosticBuilder::new(qualified_type.inner.span).build_qualified_void(const_span),
-            );
-        }
+
+    if let (Some(const_span), ast::UnqualifiedType::Void) = (is_const, &unqualified.data) {
+        res.add_err(DiagnosticBuilder::new(unqualified.span).build_qualified_void(const_span));
     }
-    res.map(|_| qualified_type)
+
+    res.map(|_| ast::QualifiedTypeNode {
+        span,
+        is_const,
+        unqualified,
+    })
 }
 
 /// Parses a char literal that may contain escaped characters.
@@ -1320,15 +1313,10 @@ fn generate_io_format_fn_from_include_stdio(
             ast::FunctionDeclaration {
                 return_type: ast::QualifiedTypeNode {
                     span,
-                    // TODO: Should be void for printf
-                    data: ast::QualifiedType {
-                        is_const: None,
-                        inner: ast::UnqualifiedTypeNode {
-                            span,
-                            data: ast::UnqualifiedType::PlainType(ast::PlainType::Primitive(
-                                ast::PrimitiveType::SignedInt,
-                            )),
-                        },
+                    is_const: None,
+                    unqualified: ast::UnqualifiedTypeNode {
+                        span,
+                        data: ast::UnqualifiedType::SignedInt,
                     },
                 },
                 ident: ast::IdentNode { span, data: name },
@@ -1336,27 +1324,19 @@ fn generate_io_format_fn_from_include_stdio(
                     span,
                     type_name: ast::QualifiedTypeNode {
                         span,
-                        data: ast::QualifiedType {
-                            is_const: None,
-                            inner: ast::UnqualifiedTypeNode {
-                                span,
-                                data: ast::UnqualifiedType::PointerType(Box::new(
-                                    ast::QualifiedTypeNode {
+                        is_const: None,
+                        unqualified: ast::UnqualifiedTypeNode {
+                            span,
+                            data: ast::UnqualifiedType::PointerType(Box::new(
+                                ast::QualifiedTypeNode {
+                                    span,
+                                    is_const: Some(span),
+                                    unqualified: ast::UnqualifiedTypeNode {
                                         span,
-                                        data: ast::QualifiedType {
-                                            is_const: Some(span),
-                                            inner: ast::UnqualifiedTypeNode {
-                                                span,
-                                                data: ast::UnqualifiedType::PlainType(
-                                                    ast::PlainType::Primitive(
-                                                        ast::PrimitiveType::Char,
-                                                    ),
-                                                ),
-                                            },
-                                        },
+                                        data: ast::UnqualifiedType::Char,
                                     },
-                                )),
-                            },
+                                },
+                            )),
                         },
                     },
                     ident: None,
