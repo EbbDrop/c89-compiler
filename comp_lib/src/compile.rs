@@ -13,6 +13,7 @@ pub enum OutputFormat {
     AstRustDbg,
     IrDot,
     IrRustDbg,
+    SymbolTableAscii,
     #[default]
     LlvmIr,
 }
@@ -139,6 +140,22 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
     match opts.output_format {
         OutputFormat::IrDot => return res.map(|ir| inspectors::dot::inspect_ir(&ir).into_bytes()),
         OutputFormat::IrRustDbg => return res.map(|ir| format!("{ir:#?}\n").into_bytes()),
+        OutputFormat::SymbolTableAscii => {
+            return res.map(|ir| {
+                let mut s = String::new();
+                for (name, funcion) in ir.functions {
+                    s += &format!("function {}:\n", name);
+                    s += &format!("{:^8}|{:^10}\n", "id", "type");
+                    s += &format!("{:-^8}|{:-^10}\n", "", "");
+                    // TODO: relies on unspecified order
+                    for (i, entry) in funcion.table.items().enumerate() {
+                        s += &format!("{:^8}|{:^10}\n", i, entry.ty);
+                    }
+                    s.push('\n');
+                }
+                s.into_bytes()
+            });
+        }
         _ => {}
     }
 

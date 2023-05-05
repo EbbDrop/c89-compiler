@@ -15,6 +15,7 @@ pub enum OutputFormat {
     AstRustDbg,
     IrDot,
     IrRustDbg,
+    SymbolTableAscii,
     #[default]
     LlvmIr,
 }
@@ -88,6 +89,7 @@ pub fn extract_compile_opts(args: &Args) -> CompileOpts {
         OutputFormat::AstRustDbg => compile::OutputFormat::AstRustDbg,
         OutputFormat::IrDot => compile::OutputFormat::IrDot,
         OutputFormat::IrRustDbg => compile::OutputFormat::IrRustDbg,
+        OutputFormat::SymbolTableAscii => compile::OutputFormat::SymbolTableAscii,
         OutputFormat::LlvmIr => compile::OutputFormat::LlvmIr,
     };
 
