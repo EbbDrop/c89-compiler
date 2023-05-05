@@ -110,6 +110,7 @@ pub enum Code {
     ValueReturnInVoid,
     NoReturnValue,
     NotAlwaysReturn,
+    IncompatibleGlobalDef,
     IncompatibleFunctionRedef,
     ClashingGlobalName,
     IncompatibleVariableRedef,

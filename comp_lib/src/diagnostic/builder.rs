@@ -394,6 +394,20 @@ impl DiagnosticBuilder {
         )
     }
 
+    pub fn build_incompatible_global_def(
+        self,
+        from_ty: &ir::ctype::CType,
+        to_ty: &ir::ctype::CType,
+    ) -> Diagnostic {
+        self.build_custom(
+            Code::IncompatibleGlobalDef,
+            format!(
+                "can't define global with type `{}` using constant of type `{}`",
+                to_ty, from_ty
+            ),
+        )
+    }
+
     pub fn build_wrong_statement_type(
         self,
         field_name: &str,

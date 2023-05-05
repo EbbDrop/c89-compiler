@@ -60,23 +60,26 @@ fn add_global_var(ext_decl: AstGlobalVar, global: &mut ir::Root) -> AggregateRes
     let decl = &ext_decl.decl;
     declaration_type(&decl.type_name, &decl.array_parts)
         .zip(AggregateResult::transpose_from(
-            // TODO: use first span of initializer to point to equals sign to provide
-            // clearer diagnostics (i.e. expected constant to initialize global ...).
-            decl.initializer
-                .as_ref()
-                .map(|(_, expr_node)| extract_global_var_initializer(expr_node)),
+            decl.initializer.as_ref().map(|(span, expr_node)| {
+                extract_global_var_initializer(expr_node).map(|con| (*span, con))
+            }),
         ))
         .and_then(|(DeclarationType { ty, is_const }, constant)| match ty {
             CType::Void => AggregateResult::new_err(
                 DiagnosticBuilder::new(decl.type_name.span).build_void_vars(),
             ),
-            _ => AggregateResult::new_ok(ir::GlobalVarNode {
-                original_span: ext_decl.span,
-                comments: ext_decl.comments.map(String::from),
-                ty,
-                is_const,
-                value: constant,
-            }),
+            _ => {
+                let res = AggregateResult::transpose_from(
+                    constant.map(|(span, constant)| check_constant_init(constant, &ty, span)),
+                );
+                res.map(|constant| ir::GlobalVarNode {
+                    original_span: ext_decl.span,
+                    comments: ext_decl.comments.map(String::from),
+                    ty,
+                    is_const,
+                    value: constant,
+                })
+            }
         })
         .and_then(|global_var| {
             check_global_var_ident(&ext_decl, &global_var, global).map(|should_redefine| {
@@ -85,6 +88,73 @@ fn add_global_var(ext_decl: AstGlobalVar, global: &mut ir::Root) -> AggregateRes
                 }
             })
         })
+}
+
+fn check_constant_init(
+    constant: ir::Constant,
+    to_ty: &CType,
+    span: Span,
+) -> AggregateResult<ir::Constant> {
+    use ir::ctype::{Arithmetic, Pointer, Scalar};
+    match &constant {
+        ir::Constant::Integer(v) => {
+            let int_ty = CType::Scalar(Scalar::Arithmetic(Arithmetic::SignedInt));
+            match &to_ty {
+                CType::Void | CType::Aggregate(_) | CType::Scalar(Scalar::Pointer(_)) => {
+                    AggregateResult::new_err(
+                        DiagnosticBuilder::new(span).build_incompatible_global_def(&int_ty, to_ty),
+                    )
+                }
+                CType::Scalar(Scalar::Arithmetic(a)) => {
+                    if a.is_floating() {
+                        AggregateResult::new_ok(ir::Constant::Float(*v as f64))
+                    } else {
+                        AggregateResult::new_ok(constant)
+                    }
+                }
+            }
+        }
+        ir::Constant::Float(v) => {
+            let int_ty = CType::Scalar(Scalar::Arithmetic(Arithmetic::Double));
+            match &to_ty {
+                CType::Void | CType::Aggregate(_) | CType::Scalar(Scalar::Pointer(_)) => {
+                    AggregateResult::new_err(
+                        DiagnosticBuilder::new(span).build_incompatible_global_def(&int_ty, to_ty),
+                    )
+                }
+                CType::Scalar(Scalar::Arithmetic(a)) => {
+                    if a.is_floating() {
+                        AggregateResult::new_ok(constant)
+                    } else {
+                        AggregateResult::new_ok(ir::Constant::Integer(*v as i128))
+                    }
+                }
+            }
+        }
+        ir::Constant::String(_) => {
+            let int_ty = CType::Scalar(Scalar::Pointer(Pointer {
+                inner: Box::new(CType::Scalar(Scalar::Arithmetic(Arithmetic::Char))),
+                inner_const: true,
+            }));
+            match &to_ty {
+                CType::Void | CType::Aggregate(_) | CType::Scalar(Scalar::Arithmetic(_)) => {
+                    AggregateResult::new_err(
+                        DiagnosticBuilder::new(span).build_incompatible_global_def(&int_ty, to_ty),
+                    )
+                }
+                CType::Scalar(Scalar::Pointer(Pointer { inner_const, .. })) => {
+                    if *inner_const {
+                        AggregateResult::new_ok(constant)
+                    } else {
+                        AggregateResult::new_err(
+                            DiagnosticBuilder::new(span)
+                                .build_incompatible_global_def(&int_ty, to_ty),
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn extract_global_var_initializer(
