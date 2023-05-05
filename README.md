@@ -2,6 +2,9 @@
 
 A C89 compiler written in ~~Python~~ Rust.
 
+## Video
+_[redacted]_
+
 ## Prerequisites
 
 - The Rust compiler, Check [here](https://www.rust-lang.org/tools/install) for
@@ -73,12 +76,12 @@ will not run const folding.
   - `comp_lib/src/passes`: Code to turn one tree into another.
 - `llvm_ir`: Internal library to easily generate llvm.
 
-## Testing
+## Running examples
 
 A python script is provided (`run.py`) which will run the compiler on the files in `examples`.
-A `.llvm`, `.ast.dot`, `.ir.dot`, and `.txt.dot` (compiler output) file will be created in the same
+A `.llvm`, `.ast.dot`, `.ir.dot`, and `.txt` (compiler output) file will be created in the same
 folder for every input with the same file name. If there's a syntax error, none of these files
-will be generated. If there is a semantic error in the ast to ir step, the `.ir.dot` and `.txt.dot`
+will be generated. If there is a semantic error in the ast to ir step, the `.ir.dot` and `.llvm`
 files will not generated, etc.
 
 ## Supported features

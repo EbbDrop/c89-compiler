@@ -1,0 +1,7 @@
+//fail:
+//AlreadyDefined
+
+int main() {
+    int a = 3;
+    int a = 4;
+}
