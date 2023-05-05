@@ -58,14 +58,14 @@ fn output_test(file: &str, expected: &str) {
                 DiagnosticKind::Err => println!("Err: {d:?}"),
             }
         }
-        println!();
+        panic!();
     }
     let llvm = res.into_value().unwrap();
     let output = run_lli(llvm);
 
     pretty_assertions::assert_str_eq!(
-        output,
-        expected,
+        output.trim_end(),
+        expected.trim_end(),
         "The output of lli (left) does not match the expected output (right)",
     );
 }
