@@ -16,6 +16,7 @@ use std::ops::Deref;
 /// The default function declaration returns void and doesn't have any parameters.
 #[derive(Debug, Default, Clone)]
 pub struct FunctionDeclaration {
+    pub comment: Option<String>,
     pub linkage: Linkage,
     pub visibility: Visibility,
     pub address_significance: Option<AddressSignificance>,
@@ -45,6 +46,11 @@ impl FunctionDeclaration {
             .with_params(self.params.iter().map(Value::ty))
             .with_vararg(self.is_vararg)
             .build()
+    }
+
+    pub fn with_comment(mut self, comment: Option<String>) -> Self {
+        self.comment = comment;
+        self
     }
 
     pub fn with_linkage(mut self, linkage: Linkage) -> Self {
@@ -274,6 +280,12 @@ fn fmt_function_as_llvm_asm_with_id(
     function_id: &id::Global,
 ) -> fmt::Result {
     use crate::FmtAsLlvmAsmMC;
+
+    if let Some(comment) = &function.comment {
+        for line in comment.lines() {
+            writeln!(f, ";{line}")?;
+        }
+    }
 
     write!(f, "{declare_or_define} ")?;
 

@@ -63,14 +63,24 @@ mod llvm_ir_builder {
         }
 
         fn add_global_var(&mut self, ident: &str, global_var_node: &ir::GlobalVarNode) {
-            // TODO:
-            // self.module.add_comments(global_var_node.comments)
             let cty = &global_var_node.ty;
             let constant = match &global_var_node.value {
                 Some(constant) => self.add_constant(cty, constant),
                 None => lir::constant::ZeroInitializer(ctype_to_llvm_type(cty)).into(),
             };
+            let comment = global_var_node
+                .comments
+                .clone()
+                .iter()
+                .flat_map(|c| c.lines().map(ToOwned::to_owned))
+                .chain(
+                    self.source[std::ops::Range::from(global_var_node.original_span)]
+                        .lines()
+                        .map(|line| format!(";; {line}")),
+                )
+                .fold(String::new(), |acc, c| acc + &c + "\n");
             let global_var = lir::GlobalVarDefinition::new(constant, global_var_node.is_const)
+                .with_comment(Some(comment))
                 // TODO: check linkage
                 .with_linkage(lir::Linkage::Private)
                 // TODO: check if global vars have significant addresses
@@ -85,14 +95,23 @@ mod llvm_ir_builder {
 
         /// Add the function as a declaration (even if it has a body).
         fn declare_function(&mut self, ident: &str, function_node: &ir::FunctionNode) {
-            // TODO:
-            // self.module.add_comments(external_declaration.comments)
-
             let return_type = match &function_node.return_type {
                 ctype::CType::Void => lir::ReturnType::Void,
                 other => ctype_to_llvm_type(other).into(),
             };
+            let comment = function_node
+                .comments
+                .clone()
+                .iter()
+                .flat_map(|c| c.lines().map(ToOwned::to_owned))
+                .chain(
+                    self.source[std::ops::Range::from(function_node.original_span)]
+                        .lines()
+                        .map(|line| format!(";; {line}")),
+                )
+                .fold(String::new(), |acc, c| acc + &c + "\n");
             let mut fdecl = lir::FunctionDeclaration::new(return_type)
+                .with_comment(Some(comment))
                 .with_linkage(lir::Linkage::External)
                 .with_address_significance(lir::AddressSignificance::LocalUnnamed)
                 .with_vararg(function_node.is_vararg);

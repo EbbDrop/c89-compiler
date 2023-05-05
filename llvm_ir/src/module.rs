@@ -512,6 +512,11 @@ impl crate::FmtAsLlvmAsm for Module {
 
         for (id_handle, gvd) in &self.global_var_declarations {
             writeln!(f)?;
+            if let Some(comment) = &gvd.comment {
+                for line in comment.lines() {
+                    writeln!(f, ";{line}")?;
+                }
+            }
             self.global_id(id_handle).fmt_as_llvm_asm(f, opts)?;
             f.write_str(" = ")?;
             {
@@ -523,6 +528,11 @@ impl crate::FmtAsLlvmAsm for Module {
 
         for (id_handle, gvd) in &self.global_var_definitions {
             writeln!(f)?;
+            if let Some(comment) = &gvd.comment {
+                for line in comment.lines() {
+                    writeln!(f, ";{line}")?;
+                }
+            }
             self.global_id(id_handle).fmt_as_llvm_asm(f, opts)?;
             f.write_str(" = ")?;
             {

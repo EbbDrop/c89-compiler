@@ -5,6 +5,7 @@ use std::fmt::{self, Write};
 
 #[derive(Debug, Clone)]
 pub struct GlobalVarDeclaration {
+    pub comment: Option<String>,
     pub linkage: Linkage,
     pub visibility: Visibility,
     pub address_significance: Option<AddressSignificance>,
@@ -17,6 +18,7 @@ pub struct GlobalVarDeclaration {
 impl GlobalVarDeclaration {
     pub fn new(ty: ty::Element, constant: bool) -> Self {
         Self {
+            comment: None,
             linkage: Default::default(),
             visibility: Default::default(),
             address_significance: Default::default(),
@@ -33,6 +35,11 @@ impl GlobalVarDeclaration {
 
     pub fn new_constant(ty: ty::Element) -> Self {
         Self::new(ty, true)
+    }
+
+    pub fn with_comment(mut self, comments: Option<String>) -> Self {
+        self.comment = comments;
+        self
     }
 
     pub fn with_linkage(mut self, linkage: Linkage) -> Self {
@@ -107,6 +114,7 @@ impl crate::FmtAsLlvmAsmMC for GlobalVarDeclaration {
 
 #[derive(Debug, Clone)]
 pub struct GlobalVarDefinition {
+    pub comment: Option<String>,
     pub linkage: Linkage,
     pub visibility: Visibility,
     pub address_significance: Option<AddressSignificance>,
@@ -119,6 +127,7 @@ pub struct GlobalVarDefinition {
 impl GlobalVarDefinition {
     pub fn new<V: constant::ElementConstant>(value: V, constant: bool) -> Self {
         Self {
+            comment: None,
             linkage: Default::default(),
             visibility: Default::default(),
             address_significance: Default::default(),
@@ -140,6 +149,11 @@ impl GlobalVarDefinition {
 
     pub fn ty(&self) -> ty::Element {
         self.value.ty()
+    }
+
+    pub fn with_comment(mut self, comments: Option<String>) -> Self {
+        self.comment = comments;
+        self
     }
 
     pub fn with_linkage(mut self, linkage: Linkage) -> Self {

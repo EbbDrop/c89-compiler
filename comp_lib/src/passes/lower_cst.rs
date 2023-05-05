@@ -157,7 +157,8 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                     .map(|data| ast::ExternalDeclarationNode {
                         span: extract_span(decl),
                         data: ast::ExternalDeclaration::Declaration(data),
-                        comments: None,
+                        comments: self
+                            .extract_comments(decl.start().token_index.load(Ordering::Relaxed)),
                     })
                     .add_to(&mut res, |r, s| r.push(s)),
                 ExternalDeclaration::ExternalDeclarationFunctionDefinitionContext(func) => self
@@ -165,7 +166,8 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                     .map(|data| ast::ExternalDeclarationNode {
                         span: extract_span(func),
                         data: ast::ExternalDeclaration::FunctionDefinition(data),
-                        comments: None,
+                        comments: self
+                            .extract_comments(func.start().token_index.load(Ordering::Relaxed)),
                     })
                     .add_to(&mut res, |r, s| r.push(s)),
                 ExternalDeclaration::ExternalDeclarationIncludeContext(incl) => {
@@ -414,7 +416,8 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                         .map(|init| ast::StatementNode {
                             span: extract_span(ctx.init.as_deref().unwrap()),
                             data: ast::Statement::Declaration(init),
-                            comments: None,
+                            comments: self
+                                .extract_comments(ctx.start().token_index.load(Ordering::Relaxed)),
                         })
                 }),
                 ctx.cond.as_deref(),
@@ -427,7 +430,8 @@ impl<'a, 'b> AstBuilder<'a, 'b> {
                     self.build_from_expr(init).map(|init| ast::StatementNode {
                         span: extract_span(ctx.init.as_deref().unwrap()),
                         data: ast::Statement::Expression(init),
-                        comments: None,
+                        comments: self
+                            .extract_comments(ctx.start().token_index.load(Ordering::Relaxed)),
                     })
                 }),
                 ctx.cond.as_deref(),
@@ -1361,7 +1365,7 @@ fn generate_io_format_fn_from_include_stdio(
                 is_vararg: true,
             },
         )),
-        comments: Some("included via #include<stdio.h>".to_owned()),
+        comments: Some("; included via #include<stdio.h>".to_owned()),
     }
 }
 
