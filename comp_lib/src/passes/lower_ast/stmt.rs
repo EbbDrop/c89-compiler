@@ -408,7 +408,16 @@ pub fn declaration_type(
     let ty = CType::from_ast_type(&type_name.unqualified.data);
     let is_const = type_name.is_const.is_some();
 
-    let mut ty = AggregateResult::new_ok(ty);
+    let mut ty = match (&ty, array_parts.last()) {
+        (CType::Void, Some(last_part)) => {
+            // special case to disallow void arrays
+            AggregateResult::new_err(
+                DiagnosticBuilder::new(type_name.span).build_void_array(last_part.span),
+            )
+        }
+        _ => AggregateResult::new_ok(ty),
+    };
+
     for array_part in array_parts.iter().rev() {
         match &array_part.data {
             ast::ArrayDeclaration::Unknown => {

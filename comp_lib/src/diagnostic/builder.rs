@@ -737,6 +737,11 @@ impl DiagnosticBuilder {
             "value already used earlier".to_string(),
         )
     }
+
+    pub fn build_void_array(mut self, array_span: Span) -> Diagnostic {
+        self.add_additional_span(array_span, None);
+        self.build_custom(Code::VoidArray, "array of incomplete type void".to_string())
+    }
 }
 
 pub struct DiagnosticBuilder {

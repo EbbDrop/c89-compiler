@@ -117,6 +117,7 @@ pub enum Code {
     MultipleVariableDef,
     MultipleFunctionDef,
     MultipleSameCase,
+    VoidArray,
 }
 
 impl Code {
