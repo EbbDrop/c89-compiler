@@ -156,7 +156,7 @@ pub fn build_ir_lvalue(
             }
         }
         ast::Expression::ArraySubscript(left, right) => {
-            Some(arrays_subscript(right, left, e.span, scope))
+            Some(arrays_subscript(left, right, e.span, scope))
         }
         ast::Expression::Ident(idt) => Some(variable_ident(idt, will_init, scope)),
         _ => None,
