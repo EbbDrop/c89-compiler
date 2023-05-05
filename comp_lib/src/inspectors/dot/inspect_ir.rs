@@ -1,8 +1,9 @@
 use std::iter;
 
 use crate::ir::{
-    ctype::CType, BinaryOp, BitwiseOp, BlockNode, Constant, Expr, IfStmtNode, LoopStmtNode,
-    LvalueExpr, RelationOp, Root, Stmt, SwitchStmtCase, SwitchStmtNode, UnaryOp,
+    ctype::CType, BinaryOp, BitwiseOp, BlockNode, Constant, Expr, ExprNode, IfStmtNode,
+    LoopStmtNode, LvalueExpr, LvalueExprNode, RelationOp, Root, Stmt, SwitchStmtCase,
+    SwitchStmtNode, UnaryOp,
 };
 
 use super::{dot_tree::DotTree, ToDot};
@@ -49,7 +50,7 @@ impl ToDot for BlockNode {
 impl ToDot for Stmt {
     fn to_dot(&self) -> DotTree {
         match self {
-            Stmt::Expr(e) => e.expr.to_dot(),
+            Stmt::Expr(e) => e.to_dot(),
             Stmt::IfStmt(i) => i.to_dot(),
             Stmt::SwitchStmt(i) => i.to_dot(),
             Stmt::LoopStmt(i) => i.to_dot(),
@@ -57,7 +58,7 @@ impl ToDot for Stmt {
             Stmt::Continue => DotTree::new_leaf("continue".to_owned()),
             Stmt::Return(e) => DotTree::new(
                 "return".to_owned(),
-                e.iter().map(|e| ("value", e.expr.to_dot())).collect(),
+                e.iter().map(|e| ("value", e.to_dot())).collect(),
             ),
         }
     }
@@ -68,7 +69,7 @@ impl ToDot for IfStmtNode {
         DotTree::new(
             "if".to_owned(),
             [
-                ("cond", self.condition.expr.to_dot()),
+                ("cond", self.condition.to_dot()),
                 ("if body", self.if_branch.to_dot()),
             ]
             .into_iter()
@@ -117,11 +118,11 @@ impl ToDot for LoopStmtNode {
             "loop".to_owned(),
             self.condition
                 .iter()
-                .map(|cond| ("cond", cond.expr.to_dot()))
+                .map(|cond| ("cond", cond.to_dot()))
                 .chain(
                     self.continuation
                         .as_ref()
-                        .map(|cont| ("continuation", cont.expr.to_dot())),
+                        .map(|cont| ("continuation", cont.to_dot())),
                 )
                 .chain(iter::once(("body", self.body.to_dot())))
                 .collect(),
@@ -129,29 +130,35 @@ impl ToDot for LoopStmtNode {
     }
 }
 
+impl ToDot for ExprNode {
+    fn to_dot(&self) -> DotTree {
+        DotTree::new(
+            "expr".to_owned(),
+            vec![("type", self.ty.to_dot()), ("expr", self.expr.to_dot())],
+        )
+    }
+}
+
 impl ToDot for Expr {
     fn to_dot(&self) -> DotTree {
         let (name, childs) = match self {
-            Expr::LvalueDeref(i) => ("lvalue deref", vec![i.expr.to_dot()]),
+            Expr::LvalueDeref(i) => ("lvalue deref", vec![i.to_dot()]),
             Expr::Constant(c) => return c.to_dot(),
             Expr::FunctionCall(name, arg) => {
-                return DotTree::new(
-                    name.clone(),
-                    arg.iter().map(|a| ("", a.expr.to_dot())).collect(),
-                )
+                return DotTree::new(name.clone(), arg.iter().map(|a| ("", a.to_dot())).collect())
             }
-            Expr::PostfixInc(i) => ("◌++", vec![i.expr.to_dot()]),
-            Expr::PostfixDec(i) => ("◌--", vec![i.expr.to_dot()]),
-            Expr::PrefixInc(i) => ("++◌", vec![i.expr.to_dot()]),
-            Expr::PrefixDec(i) => ("--◌", vec![i.expr.to_dot()]),
-            Expr::Reference(i) => ("&◌", vec![i.expr.to_dot()]),
+            Expr::PostfixInc(i) => ("◌++", vec![i.to_dot()]),
+            Expr::PostfixDec(i) => ("◌--", vec![i.to_dot()]),
+            Expr::PrefixInc(i) => ("++◌", vec![i.to_dot()]),
+            Expr::PrefixDec(i) => ("--◌", vec![i.to_dot()]),
+            Expr::Reference(i) => ("&◌", vec![i.to_dot()]),
             Expr::UnaryArith(un, i) => (
                 match un {
                     UnaryOp::Neg => "-◌",
                     UnaryOp::BitNot => "~◌",
                     UnaryOp::Not => "!◌",
                 },
-                vec![i.expr.to_dot()],
+                vec![i.to_dot()],
             ),
             Expr::Binary(a, op, b) => (
                 match op {
@@ -168,7 +175,7 @@ impl ToDot for Expr {
                         BitwiseOp::Xor => "◌^◌",
                     },
                 },
-                vec![a.expr.to_dot(), b.expr.to_dot()],
+                vec![a.to_dot(), b.to_dot()],
             ),
             Expr::Relation(a, rel, b) => (
                 match rel {
@@ -179,12 +186,12 @@ impl ToDot for Expr {
                     RelationOp::Ge => "◌>=◌",
                     RelationOp::Le => "◌<=◌",
                 },
-                vec![a.expr.to_dot(), b.expr.to_dot()],
+                vec![a.to_dot(), b.to_dot()],
             ),
-            Expr::LogicalAnd(a, b) => ("◌&&◌", vec![a.expr.to_dot(), b.expr.to_dot()]),
-            Expr::LogicalOr(a, b) => ("◌||◌", vec![a.expr.to_dot(), b.expr.to_dot()]),
-            Expr::Assign(a, b) => ("◌=◌", vec![a.expr.to_dot(), b.expr.to_dot()]),
-            Expr::Cast(i) => ("cast", vec![i.expr.to_dot()]),
+            Expr::LogicalAnd(a, b) => ("◌&&◌", vec![a.to_dot(), b.to_dot()]),
+            Expr::LogicalOr(a, b) => ("◌||◌", vec![a.to_dot(), b.to_dot()]),
+            Expr::Assign(a, b) => ("◌=◌", vec![a.to_dot(), b.to_dot()]),
+            Expr::Cast(i) => ("cast", vec![i.to_dot()]),
         };
 
         DotTree::new(
@@ -194,14 +201,21 @@ impl ToDot for Expr {
     }
 }
 
+impl ToDot for LvalueExprNode {
+    fn to_dot(&self) -> DotTree {
+        DotTree::new(
+            "lvalue\nexpr".to_owned(),
+            vec![("type", self.ty.to_dot()), ("expr", self.expr.to_dot())],
+        )
+    }
+}
+
 impl ToDot for LvalueExpr {
     fn to_dot(&self) -> DotTree {
         match self {
             LvalueExpr::Ident(i) => DotTree::new_leaf(format!("ident: {i:?}")),
             LvalueExpr::GlobalIdent(i) => DotTree::new_leaf(format!("global ident: {i}")),
-            LvalueExpr::Dereference(i) => {
-                DotTree::new("*◌".to_owned(), vec![("", i.expr.to_dot())])
-            }
+            LvalueExpr::Dereference(i) => DotTree::new("*◌".to_owned(), vec![("", i.to_dot())]),
         }
     }
 }
@@ -211,7 +225,9 @@ impl ToDot for Constant {
         match self {
             Constant::Integer(i) => DotTree::new_leaf(i.to_string()),
             Constant::Float(i) => DotTree::new_leaf(i.to_string()),
-            Constant::String(i) => DotTree::new_leaf(String::from_utf8_lossy(i).into_owned()),
+            Constant::String(i) => {
+                DotTree::new_leaf(format!(r#""{}""#, String::from_utf8_lossy(i).into_owned()))
+            }
         }
     }
 }
