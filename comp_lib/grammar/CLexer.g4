@@ -8,7 +8,9 @@ MULTILINE_COMMENT: '/*' ( . )*? '*/' -> channel(COMMENTS);
 DECIMAL_LITERAL: '0' | [1-9][0-9]*;
 OCTAL_LITERAL: '0' [0-7]+;
 HEXADECIMAL_LITERAL: ('0x' | '0X') [0-9a-fA-F]+;
-FLOATING_POINT_LITERAL: ( [0-9]* '.' [0-9]+ | [0-9]+ '.' [0-9]* ) ([eE] [+-]? [0-9]+)?;
+FLOATING_POINT_LITERAL
+	: ( [0-9]* '.' [0-9]+ | [0-9]+ '.' [0-9]* )
+	| ( ( [0-9]* '.'? [0-9]+ | [0-9]+ '.'? [0-9]* ) ([eE] [+-]? [0-9]+) );
 
 STRING_LITERAL: '"' ( ~[\n\r\\"] | '\\' ~[\n\r] )* '"';
 CHAR_LITERAL: '\'' ( ~[\n\r\\'] | '\\' ~[\n\r] )+ '\'';
