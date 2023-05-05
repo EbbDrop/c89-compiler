@@ -25,7 +25,7 @@ impl Integer {
         }
     }
 
-    pub(crate) fn value(&self) -> Option<i128> {
+    pub fn value(&self) -> Option<i128> {
         match self.value {
             ConstantInteger::Undef => None,
             ConstantInteger::Poison => None,

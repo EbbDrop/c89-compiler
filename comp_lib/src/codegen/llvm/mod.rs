@@ -1014,13 +1014,14 @@ mod llvm_ir_builder {
                             operand2,
                         })
                         .ice();
-                    let ptr_size = self.retrieve_ptr_size(byte_diff.ty());
+                    let pointee_size =
+                        self.retrieve_ctype_pointee_size(&lhs_node.ty, byte_diff.ty());
                     let element_diff = self
                         .function
                         .add_instruction(lir::instruction::binary_op::Int {
-                            operator: lir::instruction::BinaryIntOp::Sdiv,
+                            operator: lir::instruction::BinaryIntOp::Udiv,
                             operand1: byte_diff.into(),
-                            operand2: ptr_size,
+                            operand2: pointee_size,
                         })
                         .ice();
                     let out_ty: lir::ty::Integer =
@@ -1625,13 +1626,74 @@ mod llvm_ir_builder {
                 .ice()
         }
 
+        fn retrieve_ctype_pointee_size(
+            &mut self,
+            ctype: &ctype::CType,
+            size_ty: lir::ty::Integer,
+        ) -> lir::value::Integer {
+            self.retrieve_element_size(&ctype_ptr_inner_to_llvm_type(ctype), size_ty)
+        }
+
+        fn retrieve_element_size(
+            &mut self,
+            element: &lir::ty::Element,
+            size_ty: lir::ty::Integer,
+        ) -> lir::value::Integer {
+            match element {
+                lir::ty::Element::Single(single) => match single {
+                    lir::ty::Single::Primitive(primitive) => match primitive {
+                        lir::ty::Primitive::Integer(integer) => {
+                            lir::constant::Integer::new(size_ty, integer.bit_size() as i128 / 8)
+                                .into()
+                        }
+                        lir::ty::Primitive::FloatingPoint(fp) => {
+                            lir::constant::Integer::new(size_ty, fp.bit_size() as i128 / 8).into()
+                        }
+                        lir::ty::Primitive::Pointer(_ptr) => self.retrieve_ptr_size(size_ty),
+                    },
+                    lir::ty::Single::Vector(_) => todo!(),
+                },
+                lir::ty::Element::Aggregate(aggregate) => match aggregate {
+                    lir::ty::Aggregate::Array(array) => {
+                        let inner_size = self.retrieve_element_size(array.element_type(), size_ty);
+                        match inner_size {
+                            lir::value::Integer::Constant(constant) => lir::constant::Integer::new(
+                                constant.ty(),
+                                constant
+                                    .value()
+                                    .expect("ICE: array element size should be known")
+                                    * array.size() as i128,
+                            )
+                            .into(),
+                            lir::value::Integer::Register(inner_size) => self
+                                .function
+                                .add_instruction(lir::instruction::binary_op::Int::<
+                                    lir::value::Integer,
+                                > {
+                                    operator: lir::instruction::BinaryIntOp::Mul,
+                                    operand1: lir::constant::Integer::new(
+                                        inner_size.ty(),
+                                        array.size() as i128,
+                                    )
+                                    .into(),
+                                    operand2: inner_size.into(),
+                                })
+                                .ice()
+                                .into(),
+                        }
+                    }
+                    lir::ty::Aggregate::Structure(_) => todo!(),
+                },
+            }
+        }
+
         fn retrieve_ptr_size(&mut self, size_ty: lir::ty::Integer) -> lir::value::Integer {
             let size_as_ptr = self
                 .function
                 .add_instruction(lir::instruction::GetElementPtr {
                     ty: lir::ty::Pointer::new_literal().build(),
                     pointer: lir::constant::Pointer::NULL.into(),
-                    indices: vec![lir::constant::Integer::new(lir::ty::I1, 1).into()],
+                    indices: vec![lir::constant::Integer::new(lir::ty::I8, 1).into()],
                 })
                 .ice();
             self.function
