@@ -22,6 +22,7 @@ pub enum OutputFormat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum SkippablePasses {
     ConstFold,
+    ControlFlowAnalysis,
 }
 
 #[derive(Debug, Parser)]
@@ -93,6 +94,7 @@ pub fn extract_compile_opts(args: &Args) -> CompileOpts {
     CompileOptsBuilder::new()
         .output_format(out_format)
         .const_fold(!args.skips.contains(&SkippablePasses::ConstFold))
+        .analyze_control_flow(!args.skips.contains(&SkippablePasses::ControlFlowAnalysis))
         .for_assignments()
         .build()
 }

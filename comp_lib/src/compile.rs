@@ -20,12 +20,14 @@ pub enum OutputFormat {
 pub struct CompileOpts {
     output_format: OutputFormat,
     const_fold: bool,
+    analyze_control_flow: bool,
     upgrade_to_err: HashSet<Code>,
 }
 
 pub struct CompileOptsBuilder {
     output_format: OutputFormat,
     const_fold: bool,
+    analyze_control_flow: bool,
     upgrade_to_err: HashSet<Code>,
 }
 
@@ -34,6 +36,7 @@ impl Default for CompileOptsBuilder {
         Self {
             output_format: OutputFormat::default(),
             const_fold: true,
+            analyze_control_flow: true,
             upgrade_to_err: HashSet::default(),
         }
     }
@@ -53,6 +56,11 @@ impl CompileOptsBuilder {
     /// Set const folding
     pub fn const_fold(mut self, const_fold: bool) -> Self {
         self.const_fold = const_fold;
+        self
+    }
+
+    pub fn analyze_control_flow(mut self, analyze_control_flow: bool) -> Self {
+        self.analyze_control_flow = analyze_control_flow;
         self
     }
 
@@ -79,6 +87,7 @@ impl CompileOptsBuilder {
         CompileOpts {
             output_format: self.output_format,
             const_fold: self.const_fold,
+            analyze_control_flow: self.analyze_control_flow,
             upgrade_to_err: self.upgrade_to_err,
         }
     }
@@ -118,10 +127,12 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
 
     let mut res = ast.and_then(|ast| passes::lower_ast::build_ir_from_ast(&ast));
 
-    if let Some(ir) = res.value_mut() {
-        let extra_diags = passes::dead_code_removal::remove_dead_code(ir);
-        for diag in extra_diags {
-            res.add_rec_diagnostic(diag);
+    if opts.analyze_control_flow {
+        if let Some(ir) = res.value_mut() {
+            let extra_diags = passes::dead_code_removal::remove_dead_code(ir);
+            for diag in extra_diags {
+                res.add_rec_diagnostic(diag);
+            }
         }
     }
 
