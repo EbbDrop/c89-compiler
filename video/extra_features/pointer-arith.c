@@ -19,8 +19,8 @@ int main() {
     // subtracting raw pointers divides by the size of the pointer, so should be 1
     printf("%li\n", ptrc2 - ptrc);
 
-    int i = 0;
-    int* p = &i;
+    int j = 0;
+    int* p = &j;
     int** ptrp = &p;
     // moves pointer 4/8 place depending on having a 32 or 64 bit proccessor
     int** ptrp2 = ptrp + 1;

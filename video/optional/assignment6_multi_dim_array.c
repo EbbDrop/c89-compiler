@@ -1,6 +1,8 @@
 // * Assignment 6:
 //   - Multi-dimensional arrays
 
+#include <stdio.h>
+
 int main() {
   int a[2][2];
   a[0][0] = 0;
