@@ -11,6 +11,7 @@ pub enum OutputFormat {
     AntlrTree,
     AstDot,
     AstRustDbg,
+    IrDot,
     IrRustDbg,
     #[default]
     LlvmIr,
@@ -124,8 +125,10 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
         }
     }
 
-    if opts.output_format == OutputFormat::IrRustDbg {
-        return res.map(|ir| format!("{ir:#?}\n").into_bytes());
+    match opts.output_format {
+        OutputFormat::IrDot => return res.map(|ir| inspectors::dot::inspect_ir(&ir).into_bytes()),
+        OutputFormat::IrRustDbg => return res.map(|ir| format!("{ir:#?}\n").into_bytes()),
+        _ => {}
     }
 
     let llvm_ir = res.and_then(|ir| codegen::llvm::build_from_ir(&ir, source_name, source));

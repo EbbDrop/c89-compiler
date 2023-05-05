@@ -13,6 +13,7 @@ pub enum OutputFormat {
     AntlrTree,
     AstDot,
     AstRustDbg,
+    IrDot,
     IrRustDbg,
     #[default]
     LlvmIr,
@@ -84,6 +85,7 @@ pub fn extract_compile_opts(args: &Args) -> CompileOpts {
         OutputFormat::AntlrTree => compile::OutputFormat::AntlrTree,
         OutputFormat::AstDot => compile::OutputFormat::AstDot,
         OutputFormat::AstRustDbg => compile::OutputFormat::AstRustDbg,
+        OutputFormat::IrDot => compile::OutputFormat::IrDot,
         OutputFormat::IrRustDbg => compile::OutputFormat::IrRustDbg,
         OutputFormat::LlvmIr => compile::OutputFormat::LlvmIr,
     };
