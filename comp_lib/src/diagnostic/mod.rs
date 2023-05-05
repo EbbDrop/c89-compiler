@@ -116,6 +116,7 @@ pub enum Code {
     IncompatibleVariableRedef,
     MultipleVariableDef,
     MultipleFunctionDef,
+    MultipleSameCase,
 }
 
 impl Code {

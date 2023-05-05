@@ -730,6 +730,13 @@ impl DiagnosticBuilder {
             format!("variable `{name}` has multiple definitions"),
         )
     }
+
+    pub fn build_multiple_same_case_value(self) -> Diagnostic {
+        self.build_custom(
+            Code::MultipleSameCase,
+            "value already used earlier".to_string(),
+        )
+    }
 }
 
 pub struct DiagnosticBuilder {

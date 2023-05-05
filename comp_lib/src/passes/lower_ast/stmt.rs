@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{
     ast,
     diagnostic::{builder::InvalidArraySize, AggregateResult, DiagnosticBuilder, Span},
@@ -226,6 +228,8 @@ fn switch_statement(
     let mut found_default = false;
     let mut cases = AggregateResult::new_ok(Vec::new());
 
+    let mut case_values_used = HashSet::new();
+
     for case in &stmt.cases {
         match case {
             ast::SwitchCase::Expr(case) => {
@@ -238,6 +242,15 @@ fn switch_statement(
                         DiagnosticBuilder::new(case.expr.span).build_case_not_int(),
                     ),
                 };
+
+                let value = value.and_then(|v| {
+                    if !case_values_used.insert(v) {
+                        return AggregateResult::new_err(
+                            DiagnosticBuilder::new(case.expr.span).build_multiple_same_case_value(),
+                        );
+                    }
+                    AggregateResult::new_ok(v)
+                });
 
                 value
                     .zip(build_ir_from_block(&case.body, &mut inner_scope))
