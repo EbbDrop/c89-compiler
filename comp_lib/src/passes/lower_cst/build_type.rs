@@ -187,7 +187,7 @@ fn build_from_parts(
                 Some((_, Size::Long)) => AggregateResult::new_ok(UT::LongDouble),
                 None => AggregateResult::new_ok(UT::Double),
             };
-            disallow_part(size, base_span, &base, &mut res);
+            disallow_part(signedness, base_span, &base, &mut res);
             res
         }
     }

@@ -14,4 +14,5 @@ int main() {
   short int d;
   unsigned long int e;
   long int f;
+  long double h;
 }
