@@ -411,13 +411,15 @@ pub fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
             })
         }
         ast::Literal::String(s) => {
+            let mut s = s.clone();
+            s.push(0u8); // C strings always implicitly end with a NULL byte
             return AggregateResult::new_ok(ExprNode {
                 span: lit.span,
                 ty: CType::Scalar(ctype::Scalar::Pointer(ctype::Pointer {
                     inner: Box::new(CType::Scalar(ctype::Scalar::Arithmetic(Char))),
                     inner_const: true,
                 })),
-                expr: Expr::Constant(ir::expr::Constant::String(s.clone())),
+                expr: Expr::Constant(ir::expr::Constant::String(s)),
             });
         }
     };

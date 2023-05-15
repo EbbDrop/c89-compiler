@@ -6,7 +6,7 @@ use crate::ir::{
     SwitchStmtNode, UnaryOp,
 };
 
-use super::{dot_tree::DotTree, ToDot};
+use super::{dot_tree::DotTree, escape_string_literal, ToDot};
 
 impl ToDot for Root {
     fn to_dot(&self) -> DotTree {
@@ -225,9 +225,7 @@ impl ToDot for Constant {
         match self {
             Constant::Integer(i) => DotTree::new_leaf(i.to_string()),
             Constant::Float(i) => DotTree::new_leaf(i.to_string()),
-            Constant::String(i) => {
-                DotTree::new_leaf(format!(r#""{}""#, String::from_utf8_lossy(i).into_owned()))
-            }
+            Constant::String(i) => DotTree::new_leaf(escape_string_literal(i)),
         }
     }
 }

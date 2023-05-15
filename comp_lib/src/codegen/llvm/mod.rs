@@ -181,9 +181,7 @@ mod llvm_ir_builder {
                 .into(),
                 ir::Constant::String(string) => {
                     // CType of string literals is always a char array pointer
-                    let mut char_array = string.clone();
-                    char_array.push(0u8); // C strings always implicitly end with a NULL byte
-                    let constant = lir::constant::Array::new_char_array(char_array);
+                    let constant = lir::constant::Array::new_char_array(string.clone());
                     // C string literals are constant and identical string literals may be merged.
                     let global_var = lir::GlobalVarDefinition::new_constant(constant)
                         .with_linkage(lir::Linkage::Private)
