@@ -1,10 +1,16 @@
-use crate::{diagnostic::AggregateResult, ir};
+use crate::{diagnostic::AggregateResult, ir, settings::Settings};
 
-pub fn build_from_ir(ir: &ir::Root, filename: &str, source: &str) -> AggregateResult<String> {
-    AggregateResult::new_ok(llvm_ir_builder::build(ir, filename, source))
+pub fn build_from_ir(
+    ir: &ir::Root,
+    settings: &Settings,
+    filename: &str,
+    source: &str,
+) -> AggregateResult<String> {
+    AggregateResult::new_ok(llvm_ir_builder::build(ir, settings, filename, source))
 }
 
 mod llvm_ir_builder {
+    use super::Settings;
     use crate::ir::{self, ctype};
     use crate::util::Ice;
     use lir::ty::BitSize;
@@ -16,25 +22,43 @@ mod llvm_ir_builder {
     };
     use std::collections::HashMap;
 
-    pub fn build(ir: &ir::Root, filename: &str, source: &str) -> String {
-        ModuleBuilder::build_from_ir(ir, filename, source)
+    pub fn build(ir: &ir::Root, settings: &Settings, filename: &str, source: &str) -> String {
+        ModuleBuilder::build_from_ir(ir, settings, filename, source)
     }
 
-    struct ModuleBuilder<'s> {
+    struct ModuleBuilder<'a, 's> {
         module: lir::Module,
+        settings: &'a Settings,
         source: &'s str,
         gvar_def_table: HashMap<String, (lir::GlobalVarDefinitionHandle, lir::constant::Pointer)>,
         fdecl_table: HashMap<String, (lir::FunctionDeclarationHandle, lir::constant::Pointer)>,
         fdef_table: HashMap<String, (lir::FunctionDefinitionHandle, lir::constant::Pointer)>,
     }
 
-    impl<'s> ModuleBuilder<'s> {
-        pub fn build_from_ir(ir: &ir::Root, filename: &str, source: &'s str) -> String {
+    impl<'a, 's> ModuleBuilder<'a, 's> {
+        pub fn build_from_ir(
+            ir: &ir::Root,
+            settings: &'a Settings,
+            filename: &str,
+            source: &'s str,
+        ) -> String {
             let mut module = lir::Module::new("main".to_owned());
             module.set_source_filename(filename.to_owned());
+            match settings.target {
+                crate::compile::Target::X86_64 => {
+                    // Not setting a target on purpose, to let llvm detect the OS
+                }
+                crate::compile::Target::Mips => module.set_target_triple(lir::TargetTriple {
+                    architecture: "mips".to_owned(),
+                    vendor: "unknown".to_owned(),
+                    operating_system: "none".to_owned(),
+                    environment: None,
+                }),
+            }
 
             let mut builder = Self {
                 module,
+                settings,
                 source,
                 gvar_def_table: HashMap::new(),
                 fdecl_table: HashMap::new(),
@@ -66,7 +90,9 @@ mod llvm_ir_builder {
             let cty = &global_var_node.ty;
             let constant = match &global_var_node.value {
                 Some(constant) => self.add_constant(cty, constant),
-                None => lir::constant::ZeroInitializer(ctype_to_llvm_type(cty)).into(),
+                None => {
+                    lir::constant::ZeroInitializer(ctype_to_llvm_type(cty, self.settings)).into()
+                }
             };
             let comment = global_var_node
                 .comments
@@ -97,7 +123,7 @@ mod llvm_ir_builder {
         fn declare_function(&mut self, ident: &str, function_node: &ir::FunctionNode) {
             let return_type = match &function_node.return_type {
                 ctype::CType::Void => lir::ReturnType::Void,
-                other => ctype_to_llvm_type(other).into(),
+                other => ctype_to_llvm_type(other, self.settings).into(),
             };
             let comment = function_node
                 .comments
@@ -116,7 +142,7 @@ mod llvm_ir_builder {
                 .with_address_significance(lir::AddressSignificance::LocalUnnamed)
                 .with_vararg(function_node.is_vararg);
             for param_node in &function_node.params {
-                fdecl.add_param(ctype_to_llvm_type(&param_node.ty));
+                fdecl.add_param(ctype_to_llvm_type(&param_node.ty, self.settings));
             }
             // Add the function as a declaration, even it has a body. It can then later be mapped to
             // a definition using [`add_function_definition`].
@@ -154,7 +180,7 @@ mod llvm_ir_builder {
                 ir::Constant::Integer(v) => lir::constant::Integer::new(
                     match cty {
                         ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
-                            lir::ty::Integer::new_literal(a.size_in_bits()).ice()
+                            lir::ty::Integer::new_literal(a.size_in_bits(self.settings)).ice()
                         }
                         ctype::CType::Scalar(ctype::Scalar::Pointer(_)) => unreachable!(),
                         ctype::CType::Aggregate(_) => unreachable!(),
@@ -204,8 +230,9 @@ mod llvm_ir_builder {
         }
     }
 
-    struct FunctionBuilder<'m, 's, 'i> {
-        module_builder: &'m mut ModuleBuilder<'s>,
+    struct FunctionBuilder<'m, 'a, 's, 'i> {
+        module_builder: &'m mut ModuleBuilder<'a, 's>,
+        settings: &'a Settings,
         function: lir::FunctionDefinitionBuilder,
         ir_function: &'i ir::FunctionNode,
         // Maps ir ItemId to the ptr we got from Alloca
@@ -214,13 +241,14 @@ mod llvm_ir_builder {
         break_label_stack: Vec<lir::constant::Label>,
     }
 
-    impl<'m, 's, 'i> FunctionBuilder<'m, 's, 'i> {
+    impl<'m, 'a, 's, 'i> FunctionBuilder<'m, 'a, 's, 'i> {
         pub fn new(
-            module_builder: &'m mut ModuleBuilder<'s>,
+            module_builder: &'m mut ModuleBuilder<'a, 's>,
             function: lir::FunctionDefinitionBuilder,
             ir_function: &'i ir::FunctionNode,
         ) -> Self {
             Self {
+                settings: module_builder.settings,
                 module_builder,
                 function,
                 ir_function,
@@ -274,7 +302,7 @@ mod llvm_ir_builder {
             );
             self.function.add_comment(comment);
 
-            let ty = ctype_to_llvm_type(&item.ty);
+            let ty = ctype_to_llvm_type(&item.ty, self.settings);
 
             let ptr = self
                 .function
@@ -611,7 +639,7 @@ mod llvm_ir_builder {
             let pointer = self.add_reference_lvalue_node(lvalue_node);
 
             if !is_array {
-                let ty = ctype_to_llvm_type(&lvalue_node.ty);
+                let ty = ctype_to_llvm_type(&lvalue_node.ty, self.settings);
                 self.add_load_from_ptr(pointer, ty).into()
             } else {
                 pointer.into()
@@ -693,7 +721,7 @@ mod llvm_ir_builder {
                     // Typechecking will have made shure this value is not used later on.
                     return lir::constant::Poison(lir::ty::I1.into()).into();
                 }
-                other => ctype_to_llvm_type(other),
+                other => ctype_to_llvm_type(other, self.settings),
             };
 
             use lir::ty;
@@ -924,7 +952,7 @@ mod llvm_ir_builder {
                 (Primitive::Integer(index), Primitive::Pointer(pointer)) => self
                     .function
                     .add_instruction(lir::instruction::GetElementPtr {
-                        ty: ctype_ptr_inner_to_llvm_type(&rhs_node.ty),
+                        ty: ctype_ptr_inner_to_llvm_type(&rhs_node.ty, self.settings),
                         pointer,
                         indices: vec![index],
                     })
@@ -933,7 +961,7 @@ mod llvm_ir_builder {
                 (Primitive::Pointer(pointer), Primitive::Integer(index)) => self
                     .function
                     .add_instruction(lir::instruction::GetElementPtr {
-                        ty: ctype_ptr_inner_to_llvm_type(&lhs_node.ty),
+                        ty: ctype_ptr_inner_to_llvm_type(&lhs_node.ty, self.settings),
                         pointer,
                         indices: vec![index],
                     })
@@ -983,7 +1011,7 @@ mod llvm_ir_builder {
                         .ice();
                     self.function
                         .add_instruction(lir::instruction::GetElementPtr {
-                            ty: ctype_ptr_inner_to_llvm_type(&lhs_node.ty),
+                            ty: ctype_ptr_inner_to_llvm_type(&lhs_node.ty, self.settings),
                             pointer,
                             indices: vec![neg_index.into()],
                         })
@@ -991,8 +1019,9 @@ mod llvm_ir_builder {
                         .into()
                 }
                 (Primitive::Pointer(ptr1), Primitive::Pointer(ptr2)) => {
-                    let to_ty: lir::ty::Integer =
-                        ctype_to_llvm_type(&outer_node.ty).try_into().ice();
+                    let to_ty: lir::ty::Integer = ctype_to_llvm_type(&outer_node.ty, self.settings)
+                        .try_into()
+                        .ice();
                     let operand1 = self
                         .function
                         .add_instruction(lir::instruction::cast::PtrToInt {
@@ -1023,7 +1052,9 @@ mod llvm_ir_builder {
                         })
                         .ice();
                     let out_ty: lir::ty::Integer =
-                        ctype_to_llvm_type(&outer_node.ty).try_into().ice();
+                        ctype_to_llvm_type(&outer_node.ty, self.settings)
+                            .try_into()
+                            .ice();
                     self.add_int_cast(element_diff.into(), out_ty, true).into()
                 }
                 _ => unreachable!(),
@@ -1409,7 +1440,9 @@ mod llvm_ir_builder {
             fp_constant: f32,
             ptr_offset: i128,
         ) -> (lir::value::Primitive, lir::value::Primitive) {
-            let value_ty: lir::ty::Primitive = ctype_to_llvm_type(&lvalue_node.ty).try_into().ice();
+            let value_ty: lir::ty::Primitive = ctype_to_llvm_type(&lvalue_node.ty, self.settings)
+                .try_into()
+                .ice();
             let pointer = self.add_reference_lvalue_node(lvalue_node);
             let value: lir::value::Primitive =
                 self.add_load_from_ptr(pointer.clone(), value_ty).into();
@@ -1449,7 +1482,7 @@ mod llvm_ir_builder {
                 Primitive::Pointer(pointer) => self
                     .function
                     .add_instruction(lir::instruction::GetElementPtr {
-                        ty: ctype_ptr_inner_to_llvm_type(&lvalue_node.ty),
+                        ty: ctype_ptr_inner_to_llvm_type(&lvalue_node.ty, self.settings),
                         pointer,
                         indices: vec![lir::constant::Integer::new(lir::ty::I32, ptr_offset).into()],
                     })
@@ -1485,7 +1518,7 @@ mod llvm_ir_builder {
         ) -> lir::value::Integer {
             match ctype {
                 ctype::CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
-                    let target_bit_size = a.size_in_bits();
+                    let target_bit_size = a.size_in_bits(self.settings);
                     if target_bit_size != 1 {
                         return self
                             .function
@@ -1629,7 +1662,7 @@ mod llvm_ir_builder {
             ctype: &ctype::CType,
             size_ty: lir::ty::Integer,
         ) -> lir::value::Integer {
-            self.retrieve_element_size(&ctype_ptr_inner_to_llvm_type(ctype), size_ty)
+            self.retrieve_element_size(&ctype_ptr_inner_to_llvm_type(ctype, self.settings), size_ty)
         }
 
         fn retrieve_element_size(
@@ -1715,8 +1748,7 @@ mod llvm_ir_builder {
         }
     }
 
-    #[allow(clippy::only_used_in_recursion)]
-    fn ctype_to_llvm_type(ctype: &ctype::CType) -> lir::ty::Element {
+    fn ctype_to_llvm_type(ctype: &ctype::CType, settings: &Settings) -> lir::ty::Element {
         match ctype {
             ctype::CType::Scalar(scalar) => {
                 match scalar {
@@ -1733,7 +1765,7 @@ mod llvm_ir_builder {
                         | ctype::Arithmetic::UnsignedShortInt
                         | ctype::Arithmetic::UnsignedInt
                         | ctype::Arithmetic::UnsignedLongInt => lir::ty::Integer::new_literal(
-                            arithmetic.size_in_bits(),
+                            arithmetic.size_in_bits(settings),
                         )
                         .expect("all c integer bit sizes should be valid llvm integer bit sizes")
                         .into(),
@@ -1743,7 +1775,7 @@ mod llvm_ir_builder {
             }
             ctype::CType::Aggregate(ctype::Aggregate::Array(arr)) => {
                 // TODO `as usize` is sad :(
-                lir::ty::Array::new_literal(ctype_to_llvm_type(&arr.inner))
+                lir::ty::Array::new_literal(ctype_to_llvm_type(&arr.inner, settings))
                     .unwrap()
                     .with_size(arr.length as usize)
                     .build()
@@ -1755,13 +1787,15 @@ mod llvm_ir_builder {
 
     /// Converts a ctype that is known to be a pointer to the llvm equivalent of the type it
     /// points to. Panics if the ctype is not a ptr.
-    fn ctype_ptr_inner_to_llvm_type(ctype: &ctype::CType) -> lir::ty::Element {
+    fn ctype_ptr_inner_to_llvm_type(ctype: &ctype::CType, settings: &Settings) -> lir::ty::Element {
         match ctype {
             ctype::CType::Scalar(scalar) => match scalar {
                 ctype::Scalar::Arithmetic(_) => {
                     panic!("ICE: cannot retrieve inner type of non-pointer type")
                 }
-                ctype::Scalar::Pointer(ctype::Pointer { inner, .. }) => ctype_to_llvm_type(inner),
+                ctype::Scalar::Pointer(ctype::Pointer { inner, .. }) => {
+                    ctype_to_llvm_type(inner, settings)
+                }
             },
             ctype::CType::Aggregate(_) | ctype::CType::Void => {
                 panic!("ICE: cannot retrieve inner type of non-pointer type")

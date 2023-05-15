@@ -10,6 +10,7 @@ use crate::{
         SwitchStmtCase, SwitchStmtCaseNode, SwitchStmtNode,
     },
     passes::lower_ast::util::maybe_cast,
+    settings::Settings,
 };
 
 use super::{
@@ -21,11 +22,12 @@ use super::{
 /// WARNING! Does not create its own new scope!
 pub fn build_ir_from_block(
     block: &ast::BlockStatementNode,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<BlockNode> {
     let mut res = AggregateResult::new_ok(Vec::new());
     for statement in &block.stmts {
-        build_ir_from_statement(statement, scope).add_to(&mut res, |res, s| {
+        build_ir_from_statement(statement, settings, scope).add_to(&mut res, |res, s| {
             res.extend_from_slice(&s);
         });
     }
@@ -40,8 +42,9 @@ fn check_type<R: TypeRuleUn>(
     rule: R,
     expr: ExprNode,
     field_name: &str,
+    settings: &Settings,
 ) -> AggregateResult<ExprNode> {
-    match rule.check(&expr.ty) {
+    match rule.check(&expr.ty, settings) {
         Ok(_) => AggregateResult::new_ok(expr),
         Err(err) => match err {
             CheckUnErr::Expected(type_cat) => AggregateResult::new_err(
@@ -54,6 +57,7 @@ fn check_type<R: TypeRuleUn>(
 
 pub fn build_ir_from_statement(
     statement: &ast::StatementNode,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<Vec<StmtNode>> {
     let expr = match &statement.data {
@@ -65,29 +69,29 @@ pub fn build_ir_from_statement(
             )
         }
         ast::Statement::Declaration(ast::Declaration::Variable(decl)) => {
-            variable_declaration(decl, statement.span, scope)
+            variable_declaration(decl, statement.span, settings, scope)
         }
         ast::Statement::Expression(e) => {
-            expr::build_ir_expr(e, scope).map(|expr| vec![Stmt::Expr(expr)])
+            expr::build_ir_expr(e, settings, scope).map(|expr| vec![Stmt::Expr(expr)])
         }
         ast::Statement::If(stmt) => {
-            if_statement(stmt, statement.span, scope).map(|stmt| vec![Stmt::IfStmt(stmt)])
+            if_statement(stmt, statement.span, settings, scope).map(|stmt| vec![Stmt::IfStmt(stmt)])
         }
-        ast::Statement::Switch(stmt) => {
-            switch_statement(stmt, statement.span, scope).map(|stmt| vec![Stmt::SwitchStmt(stmt)])
-        }
-        ast::Statement::While(stmt) => {
-            while_statement(stmt, statement.span, scope).map(|stmt| vec![Stmt::LoopStmt(stmt)])
-        }
+        ast::Statement::Switch(stmt) => switch_statement(stmt, statement.span, settings, scope)
+            .map(|stmt| vec![Stmt::SwitchStmt(stmt)]),
+        ast::Statement::While(stmt) => while_statement(stmt, statement.span, settings, scope)
+            .map(|stmt| vec![Stmt::LoopStmt(stmt)]),
         ast::Statement::For(stmt) => {
-            return for_statement(stmt, statement.span, scope).map(|(mut init, loop_stmt)| {
-                init.push(StmtNode {
-                    comments: statement.comments.clone(),
-                    span: statement.span,
-                    stmt: Stmt::LoopStmt(loop_stmt),
-                });
-                init
-            });
+            return for_statement(stmt, statement.span, settings, scope).map(
+                |(mut init, loop_stmt)| {
+                    init.push(StmtNode {
+                        comments: statement.comments.clone(),
+                        span: statement.span,
+                        stmt: Stmt::LoopStmt(loop_stmt),
+                    });
+                    init
+                },
+            );
         }
         ast::Statement::Break => {
             if scope.in_switch || scope.in_loop {
@@ -107,9 +111,10 @@ pub fn build_ir_from_statement(
                 )
             }
         }
-        ast::Statement::Return(span, e) => return_statement(e.as_ref(), *span, scope),
+        ast::Statement::Return(span, e) => return_statement(e.as_ref(), *span, settings, scope),
         ast::Statement::BlockStatement(block) => {
-            return build_ir_from_block(block, &mut scope.new_scope()).map(|block| block.stmts);
+            return build_ir_from_block(block, settings, &mut scope.new_scope())
+                .map(|block| block.stmts);
         }
     };
 
@@ -132,16 +137,17 @@ pub fn build_ir_from_statement(
 fn return_statement(
     e: Option<&ast::ExpressionNode>,
     span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<Vec<Stmt>> {
     let (return_type_span, return_type) = scope.func_return_type;
     match e {
-        Some(e) => expr::build_ir_expr(e, scope).and_then(|expr| {
+        Some(e) => expr::build_ir_expr(e, settings, scope).and_then(|expr| {
             let mut res = AggregateResult::new_ok(());
 
             let builder = DiagnosticBuilder::new(span);
             use super::type_checking::AssignCheckResult::*;
-            match check_assign(return_type, &expr.ty) {
+            match check_assign(return_type, &expr.ty, settings) {
                 Ok => {}
                 Lossy => res.add_rec_diagnostic(builder.build_implicit_lossy_return(
                     &expr,
@@ -193,18 +199,21 @@ fn return_statement(
 fn if_statement(
     stmt: &ast::IfStatement,
     span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<IfStmtNode> {
-    let res = expr::build_ir_expr(&stmt.condition, scope);
+    let res = expr::build_ir_expr(&stmt.condition, settings, scope);
 
-    let if_branch = build_ir_from_block(&stmt.if_body, &mut scope.new_scope());
+    let if_branch = build_ir_from_block(&stmt.if_body, settings, &mut scope.new_scope());
 
     let else_branch = match stmt.else_body.as_ref() {
-        Some(else_body) => build_ir_from_block(else_body, &mut scope.new_scope()).map(Some),
+        Some(else_body) => {
+            build_ir_from_block(else_body, settings, &mut scope.new_scope()).map(Some)
+        }
         None => AggregateResult::new_ok(None),
     };
 
-    res.and_then(|expr| check_type(AnyScaler, expr, "if condition"))
+    res.and_then(|expr| check_type(AnyScaler, expr, "if condition", settings))
         .zip(if_branch)
         .zip(else_branch)
         .map(|((condition, if_branch), else_branch)| IfStmtNode {
@@ -218,10 +227,11 @@ fn if_statement(
 fn switch_statement(
     stmt: &ast::SwitchStatement,
     span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<SwitchStmtNode> {
-    let res = expr::build_ir_expr(&stmt.expr, scope)
-        .and_then(|expr| check_type(PromoteArith::only_int(), expr, "switch quantity"));
+    let res = expr::build_ir_expr(&stmt.expr, settings, scope)
+        .and_then(|expr| check_type(PromoteArith::only_int(), expr, "switch quantity", settings));
 
     let mut inner_scope = scope.new_scope().in_switch();
 
@@ -253,7 +263,7 @@ fn switch_statement(
                 });
 
                 value
-                    .zip(build_ir_from_block(&case.body, &mut inner_scope))
+                    .zip(build_ir_from_block(&case.body, settings, &mut inner_scope))
                     .map(|(v, block)| SwitchStmtCaseNode {
                         span: block.span,
                         data: SwitchStmtCase::Case {
@@ -267,7 +277,7 @@ fn switch_statement(
                 assert!(!found_default, "ICE: multiple default cases in ast");
                 found_default = true;
 
-                build_ir_from_block(&case.body, &mut inner_scope)
+                build_ir_from_block(&case.body, settings, &mut inner_scope)
                     .map(|block| SwitchStmtCaseNode {
                         span: block.span,
                         data: SwitchStmtCase::Default { body: block },
@@ -288,12 +298,14 @@ fn switch_statement(
 fn while_statement(
     stmt: &ast::WhileStatement,
     span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<LoopStmtNode> {
-    expr::build_ir_expr(&stmt.condition, scope)
-        .and_then(|expr| check_type(AnyScaler, expr, "while condition"))
+    expr::build_ir_expr(&stmt.condition, settings, scope)
+        .and_then(|expr| check_type(AnyScaler, expr, "while condition", settings))
         .zip(build_ir_from_block(
             &stmt.body,
+            settings,
             &mut scope.new_scope().in_loop(),
         ))
         .map(|(condition, body)| LoopStmtNode {
@@ -307,18 +319,19 @@ fn while_statement(
 fn for_statement(
     stmt: &ast::ForStatement,
     span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<(Vec<StmtNode>, LoopStmtNode)> {
     let mut init_scope = scope.new_scope();
 
     let init = match &stmt.init {
-        Some(init) => build_ir_from_statement(init, &mut init_scope),
+        Some(init) => build_ir_from_statement(init, settings, &mut init_scope),
         None => AggregateResult::new_ok(Vec::new()),
     };
 
     let condition = match stmt.condition.as_ref() {
-        Some(expr) => expr::build_ir_expr(expr, &mut init_scope)
-            .and_then(|expr| check_type(AnyScaler, expr, "for condition"))
+        Some(expr) => expr::build_ir_expr(expr, settings, &mut init_scope)
+            .and_then(|expr| check_type(AnyScaler, expr, "for condition", settings))
             .map(Some),
         None => AggregateResult::new_ok(None),
     };
@@ -327,10 +340,10 @@ fn for_statement(
 
     let loop_stmt = condition
         .zip(match stmt.iter.as_ref() {
-            Some(expr) => expr::build_ir_expr(expr, &mut inner_scope).map(Some),
+            Some(expr) => expr::build_ir_expr(expr, settings, &mut inner_scope).map(Some),
             None => AggregateResult::new_ok(None),
         })
-        .zip(build_ir_from_block(&stmt.body, &mut inner_scope))
+        .zip(build_ir_from_block(&stmt.body, settings, &mut inner_scope))
         .map(|((condition, iter), body)| LoopStmtNode {
             span,
             condition,
@@ -344,12 +357,13 @@ fn for_statement(
 fn variable_declaration(
     decl: &ast::VariableDeclaration,
     span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<Vec<Stmt>> {
     // This has to be done first, so that the ident is not declared yet.
     let init_expr = match decl.initializer.as_ref() {
         Some((op_span, init)) => {
-            expr::build_ir_expr(init, scope).map(|init_expr| Some((op_span, init_expr)))
+            expr::build_ir_expr(init, settings, scope).map(|init_expr| Some((op_span, init_expr)))
         }
         None => AggregateResult::new_ok(None),
     };
@@ -390,8 +404,8 @@ fn variable_declaration(
         .and_then(|(mut to, init_expr)| {
             // This is the initializing assignment whitch is allowed to const values
             to.is_const = false;
-            let init_expr =
-                init_expr.map(|(op_span, init_expr)| expr::assign(to, init_expr, span, *op_span));
+            let init_expr = init_expr
+                .map(|(op_span, init_expr)| expr::assign(to, init_expr, span, *op_span, settings));
 
             let mut res = AggregateResult::new_ok(Vec::new());
             if let Some(expr) = init_expr {

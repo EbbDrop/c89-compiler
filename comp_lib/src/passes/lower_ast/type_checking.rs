@@ -1,6 +1,8 @@
 use crate::{
+    compile::Target,
     diagnostic::builder::TypeCat,
     ir::ctype::{Aggregate, Arithmetic, CType, ConversionLossyness, Pointer, Scalar},
+    settings::Settings,
 };
 
 /// The result of a binary type rule check.
@@ -28,7 +30,12 @@ pub trait TypeRuleBin
 where
     Self: Sized,
 {
-    fn check(self, left: &CType, right: &CType) -> Result<CheckBinOk, CheckBinErr>;
+    fn check(
+        self,
+        left: &CType,
+        right: &CType,
+        settings: &Settings,
+    ) -> Result<CheckBinOk, CheckBinErr>;
 
     /// Creates a new `TypeRuleBin` that tries this type rule first, if that one matches its result
     /// is returned. Otherwise `then` is used. If neither match a [`CheckBinErr::Unknow`] is allways
@@ -54,10 +61,18 @@ where
     F: TypeRuleBin,
     S: TypeRuleBin,
 {
-    fn check(self, left: &CType, right: &CType) -> Result<CheckBinOk, CheckBinErr> {
-        match self.0.check(left, right) {
+    fn check(
+        self,
+        left: &CType,
+        right: &CType,
+        settings: &Settings,
+    ) -> Result<CheckBinOk, CheckBinErr> {
+        match self.0.check(left, right, settings) {
             Ok(res) => Ok(res),
-            Err(_) => self.1.check(left, right).map_err(|_| CheckBinErr::Unknown),
+            Err(_) => self
+                .1
+                .check(left, right, settings)
+                .map_err(|_| CheckBinErr::Unknown),
         }
     }
 }
@@ -69,8 +84,13 @@ pub struct MapOut<T> {
 }
 
 impl<T: TypeRuleBin> TypeRuleBin for MapOut<T> {
-    fn check(self, left: &CType, right: &CType) -> Result<CheckBinOk, CheckBinErr> {
-        self.inner.check(left, right).map(|mut res| {
+    fn check(
+        self,
+        left: &CType,
+        right: &CType,
+        settings: &Settings,
+    ) -> Result<CheckBinOk, CheckBinErr> {
+        self.inner.check(left, right, settings).map(|mut res| {
             res.out_ty = self.ty;
             res
         })
@@ -78,8 +98,8 @@ impl<T: TypeRuleBin> TypeRuleBin for MapOut<T> {
 }
 
 impl<T: TypeRuleUn> TypeRuleUn for MapOut<T> {
-    fn check(self, inner: &CType) -> Result<CheckUnOk, CheckUnErr> {
-        self.inner.check(inner).map(|mut res| {
+    fn check(self, inner: &CType, settings: &Settings) -> Result<CheckUnOk, CheckUnErr> {
+        self.inner.check(inner, settings).map(|mut res| {
             res.out_ty = self.ty;
             res
         })
@@ -105,7 +125,7 @@ pub trait TypeRuleUn
 where
     Self: Sized,
 {
-    fn check(self, inner: &CType) -> Result<CheckUnOk, CheckUnErr>;
+    fn check(self, inner: &CType, settings: &Settings) -> Result<CheckUnOk, CheckUnErr>;
 
     /// Creates a new `TypeRuleUn` that maps the `out_ty` of a successful check to the given `ty`.
     fn map_out_ty_un(self, ty: CType) -> MapOut<Self> {
@@ -133,7 +153,12 @@ impl UsualArithConversions {
 }
 
 impl TypeRuleBin for UsualArithConversions {
-    fn check(self, left: &CType, right: &CType) -> Result<CheckBinOk, CheckBinErr> {
+    fn check(
+        self,
+        left: &CType,
+        right: &CType,
+        settings: &Settings,
+    ) -> Result<CheckBinOk, CheckBinErr> {
         let type_cat = match self.only_integer {
             true => TypeCat::Integral,
             false => TypeCat::Arithmetic,
@@ -155,7 +180,7 @@ impl TypeRuleBin for UsualArithConversions {
             _ => return Err(CheckBinErr::Both(type_cat)),
         };
 
-        let out_arith = Arithmetic::usual_arithmetic_conversions(left, right);
+        let out_arith = Arithmetic::usual_arithmetic_conversions(left, right, settings);
         let out_type = CType::Scalar(Scalar::Arithmetic(out_arith));
         Ok(CheckBinOk {
             left_ty: Some(out_type.clone()),
@@ -170,7 +195,12 @@ impl TypeRuleBin for UsualArithConversions {
 pub struct CompatPointer;
 
 impl TypeRuleBin for CompatPointer {
-    fn check(self, left: &CType, right: &CType) -> Result<CheckBinOk, CheckBinErr> {
+    fn check(
+        self,
+        left: &CType,
+        right: &CType,
+        _settings: &Settings,
+    ) -> Result<CheckBinOk, CheckBinErr> {
         let (left, right) = match (left, right) {
             (
                 CType::Scalar(Scalar::Pointer(Pointer { inner: left, .. })),
@@ -216,9 +246,16 @@ impl PointerInteger {
 }
 
 impl TypeRuleBin for PointerInteger {
-    fn check(self, left: &CType, right: &CType) -> Result<CheckBinOk, CheckBinErr> {
-        // TODO this dependent on the environment
-        let pointer_size = CType::Scalar(Scalar::Arithmetic(Arithmetic::UnsignedLongInt));
+    fn check(
+        self,
+        left: &CType,
+        right: &CType,
+        _settings: &Settings,
+    ) -> Result<CheckBinOk, CheckBinErr> {
+        let pointer_size = match _settings.target {
+            Target::X86_64 => CType::Scalar(Scalar::Arithmetic(Arithmetic::UnsignedLongInt)),
+            Target::Mips => CType::Scalar(Scalar::Arithmetic(Arithmetic::UnsignedInt)),
+        };
 
         match (left, right) {
             (CType::Scalar(Scalar::Pointer(_)), CType::Scalar(Scalar::Arithmetic(other))) => {
@@ -256,7 +293,12 @@ impl TypeRuleBin for PointerInteger {
 pub struct AnyScaler;
 
 impl TypeRuleBin for AnyScaler {
-    fn check(self, left: &CType, right: &CType) -> Result<CheckBinOk, CheckBinErr> {
+    fn check(
+        self,
+        left: &CType,
+        right: &CType,
+        _settings: &Settings,
+    ) -> Result<CheckBinOk, CheckBinErr> {
         match (left, right) {
             (CType::Scalar(_), CType::Scalar(_)) => Ok(CheckBinOk {
                 left_ty: None,
@@ -271,7 +313,7 @@ impl TypeRuleBin for AnyScaler {
 }
 
 impl TypeRuleUn for AnyScaler {
-    fn check(self, inner: &CType) -> Result<CheckUnOk, CheckUnErr> {
+    fn check(self, inner: &CType, _settings: &Settings) -> Result<CheckUnOk, CheckUnErr> {
         match inner {
             CType::Scalar(_) => Ok(CheckUnOk {
                 inner_ty: None,
@@ -301,13 +343,13 @@ impl PromoteArith {
 }
 
 impl TypeRuleUn for PromoteArith {
-    fn check(self, inner: &CType) -> Result<CheckUnOk, CheckUnErr> {
+    fn check(self, inner: &CType, settings: &Settings) -> Result<CheckUnOk, CheckUnErr> {
         match inner {
             CType::Scalar(Scalar::Arithmetic(a)) => {
                 if self.only_integer && !a.is_integral() {
                     return Err(CheckUnErr::Expected(TypeCat::Integral));
                 }
-                let ty = CType::Scalar(Scalar::Arithmetic(a.promote().0));
+                let ty = CType::Scalar(Scalar::Arithmetic(a.promote(settings)));
                 Ok(CheckUnOk {
                     inner_ty: Some(ty.clone()),
                     out_ty: ty,
@@ -336,10 +378,10 @@ pub enum AssignCheckResult {
     ToVoid,
 }
 
-pub fn check_assign(to: &CType, from: &CType) -> AssignCheckResult {
+pub fn check_assign(to: &CType, from: &CType, settings: &Settings) -> AssignCheckResult {
     match (to, from) {
         (CType::Scalar(Scalar::Arithmetic(to_ty)), CType::Scalar(Scalar::Arithmetic(from_ty))) => {
-            match from_ty.conversion_lossynes_into(to_ty) {
+            match from_ty.conversion_lossynes_into(to_ty, settings) {
                 ConversionLossyness::Lossless => AssignCheckResult::Ok,
                 ConversionLossyness::SignChange => AssignCheckResult::SignChange,
                 ConversionLossyness::Lossy => AssignCheckResult::Lossy,

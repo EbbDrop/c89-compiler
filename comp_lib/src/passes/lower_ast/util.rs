@@ -7,6 +7,7 @@ use crate::{
         expr::{Expr, ExprNode},
         table::VariableItem,
     },
+    settings::Settings,
 };
 
 use super::symbol_table::ScopedHandle;
@@ -61,7 +62,11 @@ pub fn maybe_cast(inner: ExprNode, to_ty: CType) -> ExprNode {
 }
 
 /// Returns the first [`ctype::Arithmetic`] that is able to hold the value without any lossyness
-pub fn find_first_fit(value: i128, opts: &[ctype::Arithmetic]) -> Option<ctype::Arithmetic> {
+pub fn find_first_fit(
+    value: i128,
+    opts: &[ctype::Arithmetic],
+    settings: &Settings,
+) -> Option<ctype::Arithmetic> {
     let is_neg = value < 0;
     let needed_bits = if is_neg {
         128 - value.leading_ones()
@@ -69,7 +74,7 @@ pub fn find_first_fit(value: i128, opts: &[ctype::Arithmetic]) -> Option<ctype::
         128 - value.leading_zeros()
     };
     for opt in opts {
-        let bits = opt.size_in_bits() - if opt.is_signed() || is_neg { 1 } else { 0 };
+        let bits = opt.size_in_bits(settings) - if opt.is_signed() || is_neg { 1 } else { 0 };
         if bits >= needed_bits {
             return Some(*opt);
         }
@@ -106,21 +111,28 @@ mod tests {
     #[test]
     fn best_fit() {
         use ctype::Arithmetic::*;
+
+        let settings = Settings {
+            target: crate::settings::Target::X86_64,
+        };
         let order = [SignedInt, SignedLongInt, UnsignedLongInt];
 
-        assert_eq!(find_first_fit(0, &order), Some(SignedInt));
+        assert_eq!(find_first_fit(0, &order, &settings), Some(SignedInt));
         assert_eq!(
-            find_first_fit(9223372036854775807, &order),
+            find_first_fit(9223372036854775807, &order, &settings),
             Some(SignedLongInt)
         );
         assert_eq!(
-            find_first_fit(9223372036854775808, &order),
+            find_first_fit(9223372036854775808, &order, &settings),
             Some(UnsignedLongInt)
         );
         assert_eq!(
-            find_first_fit(-9223372036854775808, &order),
+            find_first_fit(-9223372036854775808, &order, &settings),
             Some(SignedLongInt)
         );
-        assert_eq!(find_first_fit(-9223372036854775809, &order), None);
+        assert_eq!(
+            find_first_fit(-9223372036854775809, &order, &settings),
+            None
+        );
     }
 }

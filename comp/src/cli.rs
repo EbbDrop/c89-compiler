@@ -1,6 +1,6 @@
 use crate::util::PathOrStd;
 
-use comp_lib::compile::{self, CompileOpts, CompileOptsBuilder};
+use comp_lib::compile::{self, CompileOpts, CompileOptsBuilder, CompileOptsErr};
 
 use anyhow::{bail, Context};
 use clap::{Parser, ValueEnum};
@@ -8,7 +8,7 @@ use codespan_reporting::files::SimpleFile;
 
 use std::{fs::File, io::Read};
 
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum OutputFormat {
     AntlrTree,
     AstDot,
@@ -16,8 +16,14 @@ pub enum OutputFormat {
     IrDot,
     IrRustDbg,
     SymbolTableAscii,
-    #[default]
     LlvmIr,
+    MipsAsm,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub enum Target {
+    X86_64,
+    Mips,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -33,9 +39,13 @@ pub struct Args {
     #[arg(default_value = "-")]
     input_path: PathOrStd,
 
-    /// The output format
-    #[arg(short = 'e', long, value_name = "FORMAT", value_enum, default_value_t)]
-    emit: OutputFormat,
+    /// The compile target. Defaults to x86-64
+    #[arg(short = 't', long, value_name = "TARGET", value_enum)]
+    target: Option<Target>,
+
+    /// The output format. Default based on the target, llvm-ir for X86_64 and mips-asm for MIPS.
+    #[arg(short = 'e', long, value_name = "FORMAT", value_enum)]
+    emit: Option<OutputFormat>,
 
     /// Zero or more passes to skip
     #[arg(long = "skip", value_name = "PASS", value_enum)]
@@ -44,12 +54,6 @@ pub struct Args {
     /// The output file, use `-` for std out.
     #[arg(short = 'o', long = "output", default_value = "-")]
     output_path: PathOrStd,
-}
-
-impl Args {
-    pub fn output_format(&self) -> OutputFormat {
-        self.emit
-    }
 }
 
 pub fn open_input_source(args: &Args) -> anyhow::Result<SimpleFile<String, String>> {
@@ -82,22 +86,38 @@ pub fn open_input_source(args: &Args) -> anyhow::Result<SimpleFile<String, Strin
     }
 }
 
-pub fn extract_compile_opts(args: &Args) -> CompileOpts {
-    let out_format = match args.output_format() {
-        OutputFormat::AntlrTree => compile::OutputFormat::AntlrTree,
-        OutputFormat::AstDot => compile::OutputFormat::AstDot,
-        OutputFormat::AstRustDbg => compile::OutputFormat::AstRustDbg,
-        OutputFormat::IrDot => compile::OutputFormat::IrDot,
-        OutputFormat::IrRustDbg => compile::OutputFormat::IrRustDbg,
-        OutputFormat::SymbolTableAscii => compile::OutputFormat::SymbolTableAscii,
-        OutputFormat::LlvmIr => compile::OutputFormat::LlvmIr,
+pub fn extract_compile_opts(args: &Args) -> Result<CompileOpts, CompileOptsErr> {
+    let opts = CompileOptsBuilder::new();
+
+    let opts = if let Some(format) = args.emit {
+        let format = match format {
+            OutputFormat::AntlrTree => compile::OutputFormat::AntlrTree,
+            OutputFormat::AstDot => compile::OutputFormat::AstDot,
+            OutputFormat::AstRustDbg => compile::OutputFormat::AstRustDbg,
+            OutputFormat::IrDot => compile::OutputFormat::IrDot,
+            OutputFormat::IrRustDbg => compile::OutputFormat::IrRustDbg,
+            OutputFormat::SymbolTableAscii => compile::OutputFormat::SymbolTableAscii,
+            OutputFormat::LlvmIr => compile::OutputFormat::LlvmIr,
+            OutputFormat::MipsAsm => compile::OutputFormat::MipsAsm,
+        };
+        opts.output_format(format)
+    } else {
+        opts
     };
 
-    CompileOptsBuilder::new()
-        .output_format(out_format)
+    let opts = if let Some(target) = args.target {
+        let target = match target {
+            Target::X86_64 => compile::Target::X86_64,
+            Target::Mips => compile::Target::Mips,
+        };
+        opts.target(target)
+    } else {
+        opts
+    };
+
+    opts.for_assignments()
         .const_fold(!args.skips.contains(&SkippablePasses::ConstFold))
         .analyze_control_flow(!args.skips.contains(&SkippablePasses::ControlFlowAnalysis))
-        .for_assignments()
         .build()
 }
 

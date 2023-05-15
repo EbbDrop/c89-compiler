@@ -5,14 +5,19 @@ use std::{
 };
 
 use comp_lib::{
-    compile::CompileOptsBuilder,
+    compile::{CompileOptsBuilder, Target},
     diagnostic::{AggregateResult, Code, DiagnosticKind},
 };
 
 include! {concat!(env!("OUT_DIR"), "/tests.rs")}
 
-pub fn compile(file_name: &str, source: &str) -> AggregateResult<Vec<u8>> {
-    let opts = CompileOptsBuilder::new().for_assignments().build();
+pub fn compile(target: Target, file_name: &str, source: &str) -> AggregateResult<Vec<u8>> {
+    let opts = CompileOptsBuilder::new()
+        .target(target)
+        .output_format(comp_lib::compile::OutputFormat::LlvmIr)
+        .for_assignments()
+        .build()
+        .unwrap();
 
     comp_lib::compile::compile(source, file_name, &opts)
 }
@@ -46,7 +51,7 @@ fn run_lli(input_ir: Vec<u8>) -> String {
 fn output_test(file: &str, expected: &str) {
     let source = fs::read(file).unwrap();
     let source = String::from_utf8(source).unwrap();
-    let res = compile(file, &source);
+    let res = compile(Target::X86_64, file, &source);
     if res.is_err() {
         println!(
             "Expected file `{}` to compile successfully but got the following diagnostics:",
@@ -71,53 +76,57 @@ fn output_test(file: &str, expected: &str) {
 }
 
 fn diagnostics_test(file: &str, expected_codes: Vec<Code>, needs_err: bool) {
-    let source = fs::read(file).unwrap();
-    let source = String::from_utf8(source).unwrap();
-    let res = compile(file, &source);
-    if needs_err && !res.is_err() {
-        panic!("Expected compile to fail, but it didn't!");
-    }
-    if !needs_err && res.is_err() {
-        println!("Expected compile to succeed with only warnigs, but it didn't! Here are the error diagnostics:");
-        for (t, d) in res.diagnostics() {
-            if t == DiagnosticKind::Err {
-                println!("Err: {d:?}")
-            }
+    for target in [Target::X86_64, Target::Mips] {
+        let source = fs::read(file).unwrap();
+        let source = String::from_utf8(source).unwrap();
+        let res = compile(target, file, &source);
+        if needs_err && !res.is_err() {
+            panic!("Expected compile to fail, but it didn't!");
         }
-        panic!("");
-    }
+        if !needs_err && res.is_err() {
+            println!("Expected compile to succeed with only warnings, but it didn't! Here are the error diagnostics:");
+            for (t, d) in res.diagnostics() {
+                if t == DiagnosticKind::Err {
+                    println!("Err: {d:?}")
+                }
+            }
+            panic!("");
+        }
 
-    let mut found_code = Vec::new();
-    for (_, d) in res.diagnostics() {
-        found_code.push(*d.code());
-    }
-    if expected_codes != found_code {
-        println!(
-            "Expected to find these diagnostic codes: {:?}
+        let mut found_code = Vec::new();
+        for (_, d) in res.diagnostics() {
+            found_code.push(*d.code());
+        }
+        if expected_codes != found_code {
+            println!(
+                "Expected to find these diagnostic codes: {:?}
                               But found: {:?}",
-            expected_codes, found_code
-        );
-        panic!("Not the same diagnostics");
+                expected_codes, found_code
+            );
+            panic!("Not the same diagnostics");
+        }
     }
 }
 
 fn diagnostics_any_test(file: &str, needs_err: bool) {
-    let source = fs::read(file).unwrap();
-    let source = String::from_utf8(source).unwrap();
-    let res = compile(file, &source);
-    if needs_err {
-        if !res.is_err() {
-            panic!("Expected compile to fail, but it didn't!");
-        }
-    } else if res.is_err() {
-        println!("Expected compile to succeed with only warnigs, but it didn't! Here are the error diagnostics:");
-        for (t, d) in res.diagnostics() {
-            if t == DiagnosticKind::Err {
-                println!("Err: {d:?}")
+    for target in [Target::X86_64, Target::Mips] {
+        let source = fs::read(file).unwrap();
+        let source = String::from_utf8(source).unwrap();
+        let res = compile(target, file, &source);
+        if needs_err {
+            if !res.is_err() {
+                panic!("Expected compile to fail, but it didn't!");
             }
+        } else if res.is_err() {
+            println!("Expected compile to succeed with only warnigs, but it didn't! Here are the error diagnostics:");
+            for (t, d) in res.diagnostics() {
+                if t == DiagnosticKind::Err {
+                    println!("Err: {d:?}")
+                }
+            }
+            panic!("");
+        } else if !res.is_rec() {
+            panic!("Expected to compile with warnigs, but it didn't!");
         }
-        panic!("");
-    } else if !res.is_rec() {
-        panic!("Expected to compile with warnigs, but it didn't!");
     }
 }

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::ast;
+use crate::{ast, settings::Settings};
 
 /// Called a unqualified object in the standard
 ///
@@ -171,7 +171,6 @@ impl Arithmetic {
     /// Returns true if the type can represnt negative numbers.
     /// Always returns true for floating types
     pub fn is_signed(&self) -> bool {
-        // TODO this should be platform specific becous of Char
         use Arithmetic::*;
         match self {
             Float | Double | LongDouble => true,
@@ -186,36 +185,43 @@ impl Arithmetic {
     /// as second value for floating types.
     ///
     /// 3.2.1.1
-    pub fn promote(&self) -> (Self, bool) {
-        //TODO this function will prob have to change for MIPS
+    pub fn promote(&self, settings: &Settings) -> Self {
         use Arithmetic::*;
         match self {
-            Char => (SignedInt, true),
-            SignedChar => (SignedInt, true),
-            SignedShortInt => (SignedInt, true),
-            UnsignedChar => (SignedInt, true),
-            UnsignedShortInt => (SignedInt, true),
-            t => (*t, false),
+            Char | SignedChar | SignedShortInt | UnsignedChar | UnsignedShortInt => {
+                match self
+                    .size_in_bits(settings)
+                    .cmp(&SignedInt.size_in_bits(settings))
+                {
+                    std::cmp::Ordering::Less => SignedInt,
+                    std::cmp::Ordering::Equal => match self.is_signed() {
+                        true => SignedInt,
+                        false => UnsignedInt,
+                    },
+                    std::cmp::Ordering::Greater => *self,
+                }
+            }
+            t => *t,
         }
     }
 
     /// Implements the algorithm from 3.2.1.5
-    pub fn usual_arithmetic_conversions(left: &Self, right: &Self) -> Self {
+    pub fn usual_arithmetic_conversions(left: &Self, right: &Self, settings: &Settings) -> Self {
         use Arithmetic::*;
         for posible in &[LongDouble, Double, Float] {
             if left == posible || right == posible {
                 return *posible;
             }
         }
-        let left = left.promote().0;
-        let right = right.promote().0;
+        let left = left.promote(settings);
+        let right = right.promote(settings);
 
         let either_eq = |test| left == test || right == test;
 
         if either_eq(UnsignedLongInt) {
             UnsignedLongInt
         } else if either_eq(SignedLongInt) && either_eq(UnsignedLongInt) {
-            if SignedLongInt.size_in_bits() > UnsignedLongInt.size_in_bits() {
+            if SignedLongInt.size_in_bits(settings) > UnsignedLongInt.size_in_bits(settings) {
                 SignedLongInt
             } else {
                 UnsignedLongInt
@@ -239,26 +245,45 @@ impl Arithmetic {
         }
     }
 
-    pub fn size_in_bits(&self) -> u32 {
-        // TODO this should be platform specific
-        match self {
-            Arithmetic::Float => 32,
-            Arithmetic::Double => 64,
-            Arithmetic::LongDouble => 64,
-            Arithmetic::Char => 8,
-            Arithmetic::SignedChar => 8,
-            Arithmetic::SignedShortInt => 16,
-            Arithmetic::SignedInt => 32,
-            Arithmetic::SignedLongInt => 64,
-            Arithmetic::UnsignedChar => 8,
-            Arithmetic::UnsignedShortInt => 16,
-            Arithmetic::UnsignedInt => 32,
-            Arithmetic::UnsignedLongInt => 64,
+    pub fn size_in_bits(&self, settings: &Settings) -> u32 {
+        use crate::settings::Target;
+        match settings.target {
+            Target::X86_64 => match self {
+                Arithmetic::Float => 32,
+                Arithmetic::Double => 64,
+                Arithmetic::LongDouble => 64,
+                Arithmetic::Char => 8,
+                Arithmetic::SignedChar => 8,
+                Arithmetic::SignedShortInt => 16,
+                Arithmetic::SignedInt => 32,
+                Arithmetic::SignedLongInt => 64,
+                Arithmetic::UnsignedChar => 8,
+                Arithmetic::UnsignedShortInt => 16,
+                Arithmetic::UnsignedInt => 32,
+                Arithmetic::UnsignedLongInt => 64,
+            },
+            Target::Mips => match self {
+                Arithmetic::Float => 32,
+                Arithmetic::Double => 64,
+                Arithmetic::LongDouble => 64,
+                Arithmetic::Char => 8,
+                Arithmetic::SignedChar => 8,
+                Arithmetic::SignedShortInt => 16,
+                Arithmetic::SignedInt => 32,
+                Arithmetic::SignedLongInt => 32,
+                Arithmetic::UnsignedChar => 8,
+                Arithmetic::UnsignedShortInt => 16,
+                Arithmetic::UnsignedInt => 32,
+                Arithmetic::UnsignedLongInt => 32,
+            },
         }
     }
 
-    pub fn conversion_lossynes_into(&self, to_ty: &Arithmetic) -> ConversionLossyness {
-        // TODO this should be platform specific
+    pub fn conversion_lossynes_into(
+        &self,
+        to_ty: &Arithmetic,
+        settings: &Settings,
+    ) -> ConversionLossyness {
         use {std::cmp::Ordering::*, ConversionLossyness::*};
         let from_ty = self;
         if from_ty == to_ty {
@@ -269,19 +294,26 @@ impl Arithmetic {
         } else if from_ty.is_floating() && to_ty.is_integral() {
             Lossy
         } else if from_ty.is_floating() && to_ty.is_floating() {
-            match from_ty.size_in_bits().cmp(&to_ty.size_in_bits()) {
+            match from_ty
+                .size_in_bits(settings)
+                .cmp(&to_ty.size_in_bits(settings))
+            {
                 Less => Lossy,
                 Equal => Lossless,
                 Greater => Lossless,
             }
         } else {
             // both are integral
-            match from_ty.size_in_bits().cmp(&to_ty.size_in_bits()) {
+            match from_ty
+                .size_in_bits(settings)
+                .cmp(&to_ty.size_in_bits(settings))
+            {
                 Less => Lossless,
                 Equal => {
                     if from_ty.is_signed() == to_ty.is_signed() {
                         Lossless
                     } else {
+                        // TODO investigate if errors warnings from here are correct
                         SignChange
                     }
                 }
@@ -437,6 +469,9 @@ mod test {
     #[test]
     fn test_usual_arithmetic_conversions() {
         use Arithmetic::*;
+        let settings = Settings {
+            target: crate::settings::Target::X86_64,
+        };
 
         let test = [
             ((Double, Float), Double),
@@ -448,7 +483,10 @@ mod test {
         ];
 
         for ((l, r), a) in test {
-            assert_eq!(Arithmetic::usual_arithmetic_conversions(&l, &r), a);
+            assert_eq!(
+                Arithmetic::usual_arithmetic_conversions(&l, &r, &settings),
+                a
+            );
         }
     }
 }

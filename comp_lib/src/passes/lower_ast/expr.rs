@@ -20,39 +20,52 @@ use crate::{
         },
         util::{find_first_fit, maybe_cast, FunctionScope},
     },
+    settings::Settings,
 };
 
 const SIGNED_INT: CType = CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::SignedInt));
 
 pub fn build_ir_expr(
     e: &ast::ExpressionNode,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<ExprNode> {
     let span = e.span;
     match &e.data {
         ast::Expression::Assignment(lhs, op, rhs) => {
             // Building rhs first to make shure the lvalue is not assignent yet
-            build_ir_expr(rhs, scope)
-                .zip(build_ir_lvalue(lhs, "assignment", true, op.span, scope))
-                .and_then(|(rhs, lhs)| assign(lhs, rhs, span, op.span))
+            build_ir_expr(rhs, settings, scope)
+                .zip(build_ir_lvalue(
+                    lhs,
+                    "assignment",
+                    true,
+                    op.span,
+                    settings,
+                    scope,
+                ))
+                .and_then(|(rhs, lhs)| assign(lhs, rhs, span, op.span, settings))
         }
         ast::Expression::Binary(left, op, right) => {
-            build_binary_op_ir_expr(op, left, right, span, scope)
+            build_binary_op_ir_expr(op, left, right, span, settings, scope)
         }
         ast::Expression::ArraySubscript(left, right) => {
-            arrays_subscript(left, right, span, scope).map(lvalue_dereference)
+            arrays_subscript(left, right, span, settings, scope).map(lvalue_dereference)
         }
-        ast::Expression::Unary(op, inner) => build_unary_op_ir_expr(op, inner, span, scope),
-        ast::Expression::Cast(type_name, inner) => build_ir_expr(inner, scope).and_then(|inner| {
-            cast(
-                inner,
-                CType::from_ast_type(&type_name.unqualified.data),
-                span,
-                type_name.span,
-            )
-        }),
-        ast::Expression::FunctionCall(fcall) => function_call(fcall, span, scope),
-        ast::Expression::Literal(lit) => literal(lit),
+        ast::Expression::Unary(op, inner) => {
+            build_unary_op_ir_expr(op, inner, span, settings, scope)
+        }
+        ast::Expression::Cast(type_name, inner) => {
+            build_ir_expr(inner, settings, scope).and_then(|inner| {
+                cast(
+                    inner,
+                    CType::from_ast_type(&type_name.unqualified.data),
+                    span,
+                    type_name.span,
+                )
+            })
+        }
+        ast::Expression::FunctionCall(fcall) => function_call(fcall, span, settings, scope),
+        ast::Expression::Literal(lit) => literal(lit, settings),
         ast::Expression::Ident(idt) => variable_ident(idt, false, scope).map(lvalue_dereference),
     }
 }
@@ -62,17 +75,19 @@ fn build_binary_op_ir_expr(
     left: &ast::ExpressionNode,
     right: &ast::ExpressionNode,
     span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<ExprNode> {
     use ast::BinaryOperator::*;
-    let res = build_ir_expr(left, scope);
-    let res = res.zip(build_ir_expr(right, scope));
+    let res = build_ir_expr(left, settings, scope);
+    let res = res.zip(build_ir_expr(right, settings, scope));
     res.and_then(|(left, right)| {
         let builder = BinaryBuilder {
             full_span: span,
             op_span: op.span,
             left,
             right,
+            settings,
         };
         match &op.data {
             Plus => builder.add(false),
@@ -105,6 +120,7 @@ fn build_unary_op_ir_expr(
     op: &ast::UnaryOperatorNode,
     inner: &ast::ExpressionNode,
     span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<ExprNode> {
     use ast::UnaryOperator::*;
@@ -112,6 +128,7 @@ fn build_unary_op_ir_expr(
         full_span: span,
         op_span: op.span,
         inner,
+        settings,
         scope,
     };
     match &op.data {
@@ -138,6 +155,7 @@ pub fn build_ir_lvalue(
     needed_for: &str,
     will_init: bool,
     op_span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<LvalueExprNode> {
     let lvalue = match &e.data {
@@ -146,6 +164,7 @@ pub fn build_ir_lvalue(
                 full_span: e.span,
                 op_span: op.span,
                 inner,
+                settings,
                 scope,
             };
             match op.data {
@@ -156,7 +175,7 @@ pub fn build_ir_lvalue(
             }
         }
         ast::Expression::ArraySubscript(left, right) => {
-            Some(arrays_subscript(left, right, e.span, scope))
+            Some(arrays_subscript(left, right, e.span, settings, scope))
         }
         ast::Expression::Ident(idt) => Some(variable_ident(idt, will_init, scope)),
         _ => None,
@@ -172,16 +191,18 @@ fn arrays_subscript(
     left: &ast::ExpressionNode,
     right: &ast::ExpressionNode,
     span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<LvalueExprNode> {
-    build_ir_expr(left, scope)
-        .zip(build_ir_expr(right, scope))
+    build_ir_expr(left, settings, scope)
+        .zip(build_ir_expr(right, settings, scope))
         .and_then(|(left, right)| {
             let builder = BinaryBuilder {
                 full_span: span,
                 op_span: span,
                 left,
                 right,
+                settings,
             };
             builder.add(true)
         })
@@ -190,6 +211,7 @@ fn arrays_subscript(
                 full_span: span,
                 op_span: span,
                 inner: add,
+                settings,
             }
             .dereference(true)
         })
@@ -198,6 +220,7 @@ fn arrays_subscript(
 fn function_call(
     fcall: &ast::FunctionCall,
     span: Span,
+    settings: &Settings,
     scope: &mut FunctionScope,
 ) -> AggregateResult<ExprNode> {
     let Some(func) = scope.global.functions.get(&fcall.ident.data) else {
@@ -238,7 +261,7 @@ fn function_call(
         .iter()
         .zip(func.params.iter().map(Some).chain(repeat(None)))
     {
-        let arg = build_ir_expr(arg, scope);
+        let arg = build_ir_expr(arg, settings, scope);
 
         arg.and_then(|arg| {
             let to_type = match param {
@@ -256,7 +279,7 @@ fn function_call(
 
                     let builder = DiagnosticBuilder::new(arg.span);
                     use super::type_checking::AssignCheckResult::*;
-                    match check_assign(&out_ty, &arg.ty) {
+                    match check_assign(&out_ty, &arg.ty, settings) {
                         Ok => AggregateResult::new_ok(out_ty),
                         Lossy => AggregateResult::new_rec(
                             out_ty,
@@ -291,7 +314,7 @@ fn function_call(
                     let out_ty = match &arg.ty {
                         CType::Scalar(ctype::Scalar::Arithmetic(a)) => {
                             if a.is_integral() {
-                                let p = a.promote().0;
+                                let p = a.promote(settings);
                                 CType::Scalar(ctype::Scalar::Arithmetic(p))
                             } else {
                                 CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::Double))
@@ -388,7 +411,7 @@ fn function_ident<'a, 'b, 'c, 'g: 'a>(
         })
 }
 
-pub fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
+pub fn literal(lit: &ast::LiteralNode, settings: &Settings) -> AggregateResult<ExprNode> {
     use ctype::Arithmetic::*;
     // TODO these need to change if we ever support sufixes
     let (value, pos_types) = match &lit.data {
@@ -424,7 +447,7 @@ pub fn literal(lit: &ast::LiteralNode) -> AggregateResult<ExprNode> {
         }
     };
 
-    match find_first_fit(value, pos_types) {
+    match find_first_fit(value, pos_types, settings) {
         Some(ty) => AggregateResult::new_ok(ExprNode {
             span: lit.span,
             ty: CType::Scalar(ctype::Scalar::Arithmetic(ty)),
@@ -476,6 +499,7 @@ pub fn assign(
     from: ExprNode,
     span: Span,
     op_span: Span,
+    settings: &Settings,
 ) -> AggregateResult<ExprNode> {
     let mut res = AggregateResult::new_ok(());
     if to.is_const {
@@ -484,7 +508,7 @@ pub fn assign(
 
     use super::type_checking::AssignCheckResult::*;
     let builder = DiagnosticBuilder::new(op_span);
-    match check_assign(&to.ty, &from.ty) {
+    match check_assign(&to.ty, &from.ty, settings) {
         Ok => {}
         Lossy => res.add_rec_diagnostic(builder.build_implicit_lossy_assign(&from, &to, false)),
         SignChange => res.add_rec_diagnostic(builder.build_implicit_lossy_assign(&from, &to, true)),
@@ -510,13 +534,15 @@ struct UnaryBuilder<'a, 'b, 'g> {
     full_span: Span,
     op_span: Span,
     inner: &'a ast::ExpressionNode,
+    settings: &'a Settings,
     scope: &'a mut FunctionScope<'b, 'g>,
 }
 
-struct ValueUnaryBuilder {
+struct ValueUnaryBuilder<'s> {
     full_span: Span,
     op_span: Span,
     inner: ExprNode,
+    settings: &'s Settings,
 }
 
 enum LvalueBuildErr {
@@ -531,7 +557,14 @@ impl<'a, 'b, 'g> UnaryBuilder<'a, 'b, 'g> {
         R: FnOnce(&CType, bool) -> Result<CType, LvalueBuildErr>,
         F: FnOnce(Box<LvalueExprNode>) -> Expr,
     {
-        let res = build_ir_lvalue(self.inner, name, false, self.op_span, self.scope);
+        let res = build_ir_lvalue(
+            self.inner,
+            name,
+            false,
+            self.op_span,
+            self.settings,
+            self.scope,
+        );
 
         res.and_then(|inner| match rule(&inner.ty, inner.is_const) {
             Ok(out_ty) => AggregateResult::new_ok(ExprNode {
@@ -607,23 +640,24 @@ impl<'a, 'b, 'g> UnaryBuilder<'a, 'b, 'g> {
     }
 
     // Also turn arrays into ptrs
-    fn value(self) -> AggregateResult<ValueUnaryBuilder> {
-        let res = build_ir_expr(self.inner, self.scope);
+    fn value(self) -> AggregateResult<ValueUnaryBuilder<'a>> {
+        let res = build_ir_expr(self.inner, self.settings, self.scope);
         res.map(|inner| ValueUnaryBuilder {
             full_span: self.full_span,
             op_span: self.op_span,
             inner,
+            settings: self.settings,
         })
     }
 }
 
-impl ValueUnaryBuilder {
+impl<'s> ValueUnaryBuilder<'s> {
     fn build<R, F>(self, rule: R, name: &str, build: F) -> AggregateResult<ExprNode>
     where
         R: TypeRuleUn,
         F: FnOnce(Box<ExprNode>) -> Expr,
     {
-        match rule.check(&self.inner.ty) {
+        match rule.check(&self.inner.ty, self.settings) {
             Ok(CheckUnOk { inner_ty, out_ty }) => {
                 let inner = match inner_ty {
                     Some(inner_ty) => maybe_cast(self.inner, inner_ty),
@@ -706,20 +740,21 @@ impl ValueUnaryBuilder {
     }
 }
 
-struct BinaryBuilder {
+struct BinaryBuilder<'s> {
     full_span: Span,
     op_span: Span,
     left: ExprNode,
     right: ExprNode,
+    settings: &'s Settings,
 }
 
-impl BinaryBuilder {
+impl<'s> BinaryBuilder<'s> {
     fn build<R, F>(self, rule: R, name: &str, build: F) -> AggregateResult<ExprNode>
     where
         R: TypeRuleBin,
         F: FnOnce(Box<ExprNode>, Box<ExprNode>) -> Expr,
     {
-        match rule.check(&self.left.ty, &self.right.ty) {
+        match rule.check(&self.left.ty, &self.right.ty, self.settings) {
             Ok(CheckBinOk {
                 left_ty,
                 right_ty,

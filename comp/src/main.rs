@@ -12,10 +12,12 @@ use std::io::Write;
 fn main() -> Result<()> {
     let args = cli::Args::parse();
 
+    // Doing this now to early report errors
+    let compile_opts = cli::extract_compile_opts(&args)?;
+
     let source = cli::open_input_source(&args)?;
     let source_name = source.name().clone();
 
-    let compile_opts = cli::extract_compile_opts(&args);
     let res = compile(source.source(), &source_name, &compile_opts);
 
     if !res.is_ok() {

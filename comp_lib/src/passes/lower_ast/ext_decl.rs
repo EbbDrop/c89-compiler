@@ -4,13 +4,14 @@ use super::{
     symbol_table::ScopedTable,
     util::{DeclarationType, FunctionScope},
 };
-use crate::ast;
 use crate::diagnostic::{AggregateResult, DiagnosticBuilder, Span};
 use crate::ir::{self, ctype::CType, table::VariableItem};
+use crate::{ast, settings::Settings};
 
 pub fn build_ir_from_external_declaration(
     external_declaration: &ast::ExternalDeclarationNode,
     global: &mut ir::Root,
+    settings: &Settings,
 ) -> AggregateResult<()> {
     let span = external_declaration.span;
     match &external_declaration.data {
@@ -20,7 +21,7 @@ pub fn build_ir_from_external_declaration(
                 comments: external_declaration.comments.as_deref(),
                 decl,
             };
-            add_global_var(var, global)
+            add_global_var(var, global, settings)
         }
         ast::ExternalDeclaration::Declaration(ast::Declaration::FunctionDeclaration(fd)) => {
             let function = AstFunction {
@@ -32,7 +33,7 @@ pub fn build_ir_from_external_declaration(
                 is_vararg: fd.is_vararg,
                 body: None,
             };
-            add_function(function, global)
+            add_function(function, global, settings)
         }
         ast::ExternalDeclaration::FunctionDefinition(fd) => {
             let mut function = AstFunction {
@@ -46,11 +47,11 @@ pub fn build_ir_from_external_declaration(
             };
             // First forward declare the function, so that is already in scope if it is used within
             // its own body (i.e. for recursive functions).
-            let _ = add_function(function.clone(), global);
+            let _ = add_function(function.clone(), global, settings);
             // Now add the function definition as a whole.
             function.comments = external_declaration.comments.as_deref();
             function.body = Some(&fd.body);
-            add_function(function, global)
+            add_function(function, global, settings)
         }
     }
 }
@@ -62,12 +63,16 @@ struct AstGlobalVar<'a> {
     pub decl: &'a ast::VariableDeclaration,
 }
 
-fn add_global_var(ext_decl: AstGlobalVar, global: &mut ir::Root) -> AggregateResult<()> {
+fn add_global_var(
+    ext_decl: AstGlobalVar,
+    global: &mut ir::Root,
+    settings: &Settings,
+) -> AggregateResult<()> {
     let decl = &ext_decl.decl;
     declaration_type(&decl.type_name, &decl.array_parts)
         .zip(AggregateResult::transpose_from(
             decl.initializer.as_ref().map(|(span, expr_node)| {
-                extract_global_var_initializer(expr_node).map(|con| (*span, con))
+                extract_global_var_initializer(expr_node, settings).map(|con| (*span, con))
             }),
         ))
         .and_then(|(DeclarationType { ty, is_const }, constant)| match ty {
@@ -165,12 +170,15 @@ fn check_constant_init(
 
 fn extract_global_var_initializer(
     expr_node: &ast::ExpressionNode,
+    settings: &Settings,
 ) -> AggregateResult<ir::Constant> {
     match &expr_node.data {
-        ast::Expression::Literal(lit) => literal(lit).map(|expr_node| match expr_node.expr {
-            ir::Expr::Constant(constant) => constant,
-            _ => unreachable!("ICE: ast literals can only be mapped to ir constants"),
-        }),
+        ast::Expression::Literal(lit) => {
+            literal(lit, settings).map(|expr_node| match expr_node.expr {
+                ir::Expr::Constant(constant) => constant,
+                _ => unreachable!("ICE: ast literals can only be mapped to ir constants"),
+            })
+        }
         // TODO: allow more constant expressions than only literals
         _ => AggregateResult::new_err(
             DiagnosticBuilder::new(expr_node.span).build_non_const_global_initializer(),
@@ -190,7 +198,11 @@ struct AstFunction<'a> {
     pub body: Option<&'a ast::BlockStatementNode>,
 }
 
-fn add_function(function: AstFunction, global: &mut ir::Root) -> AggregateResult<()> {
+fn add_function(
+    function: AstFunction,
+    global: &mut ir::Root,
+    settings: &Settings,
+) -> AggregateResult<()> {
     let return_type = CType::from_ast_type(&function.return_type.unqualified.data);
     let ident = &function.ident.data;
 
@@ -207,11 +219,9 @@ fn add_function(function: AstFunction, global: &mut ir::Root) -> AggregateResult
 
     let res = res
         .zip(function_params(function.params, &mut function_scope))
-        .zip(AggregateResult::transpose_from(
-            function
-                .body
-                .map(|body| build_ir_from_block(body, &mut function_scope)),
-        ));
+        .zip(AggregateResult::transpose_from(function.body.map(|body| {
+            build_ir_from_block(body, settings, &mut function_scope)
+        })));
 
     std::mem::drop(function_scope);
 

@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 
+pub use crate::settings::Target;
 use crate::{
     codegen,
     diagnostic::{AggregateResult, Code},
     inspectors, passes,
+    settings::Settings,
 };
 
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum OutputFormat {
     AntlrTree,
     AstDot,
@@ -14,28 +16,66 @@ pub enum OutputFormat {
     IrDot,
     IrRustDbg,
     SymbolTableAscii,
-    #[default]
     LlvmIr,
+    MipsAsm,
 }
 
+impl std::fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            OutputFormat::AntlrTree => "antlr tree",
+            OutputFormat::AstDot => "ast dot",
+            OutputFormat::AstRustDbg => "ast rust dbg",
+            OutputFormat::IrDot => "ir dot",
+            OutputFormat::IrRustDbg => "ir rust dbg",
+            OutputFormat::SymbolTableAscii => "symbol table",
+            OutputFormat::LlvmIr => "llvm ir",
+            OutputFormat::MipsAsm => "mips assembly",
+        };
+        write!(f, "{name}")
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct CompileOpts {
     output_format: OutputFormat,
+    settings: Settings,
     const_fold: bool,
     analyze_control_flow: bool,
     upgrade_to_err: HashSet<Code>,
 }
 
+#[derive(Debug, Clone)]
 pub struct CompileOptsBuilder {
-    output_format: OutputFormat,
+    output_format: Option<OutputFormat>,
+    target: Target,
     const_fold: bool,
     analyze_control_flow: bool,
     upgrade_to_err: HashSet<Code>,
 }
+
+#[derive(Debug, Clone)]
+pub enum CompileOptsErr {
+    IncompatibleFormatAndTarget(OutputFormat, Target),
+}
+
+impl std::fmt::Display for CompileOptsErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompileOptsErr::IncompatibleFormatAndTarget(format, target) => {
+                write!(f, "Can't use the {format} format with the {target} target.")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CompileOptsErr {}
 
 impl Default for CompileOptsBuilder {
     fn default() -> Self {
         Self {
-            output_format: OutputFormat::default(),
+            output_format: None,
+            target: Target::X86_64,
             const_fold: true,
             analyze_control_flow: true,
             upgrade_to_err: HashSet::default(),
@@ -50,7 +90,13 @@ impl CompileOptsBuilder {
     }
 
     pub fn output_format(mut self, format: OutputFormat) -> Self {
-        self.output_format = format;
+        self.output_format = Some(format);
+        self
+    }
+
+    // Set the target
+    pub fn target(mut self, target: Target) -> Self {
+        self.target = target;
         self
     }
 
@@ -84,13 +130,32 @@ impl CompileOptsBuilder {
         self
     }
 
-    pub fn build(self) -> CompileOpts {
-        CompileOpts {
-            output_format: self.output_format,
+    pub fn build(self) -> Result<CompileOpts, CompileOptsErr> {
+        let output_format = match self.output_format {
+            Some(format) => match (&self.target, &format) {
+                (Target::X86_64, OutputFormat::MipsAsm) => {
+                    return Err(CompileOptsErr::IncompatibleFormatAndTarget(
+                        format,
+                        self.target,
+                    ))
+                }
+                _ => format,
+            },
+            None => match &self.target {
+                Target::X86_64 => OutputFormat::LlvmIr,
+                Target::Mips => OutputFormat::MipsAsm,
+            },
+        };
+        let settings = Settings {
+            target: self.target,
+        };
+        Ok(CompileOpts {
+            output_format,
+            settings,
             const_fold: self.const_fold,
             analyze_control_flow: self.analyze_control_flow,
             upgrade_to_err: self.upgrade_to_err,
-        }
+        })
     }
 }
 
@@ -126,7 +191,7 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
         _ => {}
     }
 
-    let mut res = ast.and_then(|ast| passes::lower_ast::build_ir_from_ast(&ast));
+    let mut res = ast.and_then(|ast| passes::lower_ast::build_ir_from_ast(&ast, &opts.settings));
 
     if opts.analyze_control_flow {
         if let Some(ir) = res.value_mut() {
@@ -138,10 +203,10 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
     }
 
     match opts.output_format {
-        OutputFormat::IrDot => return res.map(|ir| inspectors::dot::inspect_ir(&ir).into_bytes()),
-        OutputFormat::IrRustDbg => return res.map(|ir| format!("{ir:#?}\n").into_bytes()),
+        OutputFormat::IrDot => res.map(|ir| inspectors::dot::inspect_ir(&ir).into_bytes()),
+        OutputFormat::IrRustDbg => res.map(|ir| format!("{ir:#?}\n").into_bytes()),
         OutputFormat::SymbolTableAscii => {
-            return res.map(|ir| {
+            res.map(|ir| {
                 let mut s = String::new();
                 for (name, funcion) in ir.functions {
                     s += &format!("function {}:\n", name);
@@ -154,13 +219,19 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
                     s.push('\n');
                 }
                 s.into_bytes()
-            });
+            })
         }
-        _ => {}
+        OutputFormat::LlvmIr => {
+            let llvm_ir = res.and_then(|ir| {
+                codegen::llvm::build_from_ir(&ir, &opts.settings, source_name, source)
+            });
+
+            llvm_ir.map(|s| format!("{s}\n").into_bytes())
+        }
+        OutputFormat::MipsAsm => todo!("Mips output not supported yet"),
+        _ => unreachable!(
+            "Format {:?} should have been handled before",
+            opts.output_format
+        ),
     }
-
-    let llvm_ir = res.and_then(|ir| codegen::llvm::build_from_ir(&ir, source_name, source));
-
-    assert_eq!(opts.output_format, OutputFormat::LlvmIr);
-    llvm_ir.map(|s| format!("{s}\n").into_bytes())
 }
