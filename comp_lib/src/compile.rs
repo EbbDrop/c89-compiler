@@ -17,6 +17,7 @@ pub enum OutputFormat {
     IrRustDbg,
     SymbolTableAscii,
     LlvmIr,
+    MipsDbg,
     MipsAsm,
 }
 
@@ -30,6 +31,7 @@ impl std::fmt::Display for OutputFormat {
             OutputFormat::IrRustDbg => "ir rust dbg",
             OutputFormat::SymbolTableAscii => "symbol table",
             OutputFormat::LlvmIr => "llvm ir",
+            OutputFormat::MipsDbg => "mips dbg",
             OutputFormat::MipsAsm => "mips assembly",
         };
         write!(f, "{name}")
@@ -228,6 +230,7 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
 
             llvm_ir.map(|s| format!("{s}\n").into_bytes())
         }
+        OutputFormat::MipsDbg => todo!("Mips dbg output not supported yet"),
         OutputFormat::MipsAsm => todo!("Mips output not supported yet"),
         _ => unreachable!(
             "Format {:?} should have been handled before",

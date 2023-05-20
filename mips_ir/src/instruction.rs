@@ -175,9 +175,6 @@ pub mod instr {
         Instruction::Imm2(ImmOp2::TrapIf(cond), rt, rs, imm)
     }
 
-    //----------------------------------------------------------------------------------------------
-    // Memory loads & stores
-    //----------------------------------------------------------------------------------------------
     /// Load byte from memory and store sign-extended in the first register.
     /// Memory address computed by adding the value in the second register to the immediate value.
     pub fn load_byte_s(rt: Reg, rs: Reg, imm: u16) -> Instruction {
@@ -476,38 +473,9 @@ pub enum Instruction {
     Pseudo(PseudoInstruction),
 }
 
-impl std::fmt::Display for Instruction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Nop => f.write_str("nop"),
-            Self::Reg3(op, rd, rs, rt) => write!(f, "{op}\t{rd}, {rs}, {rt}"),
-            Self::Reg2(op, rd, rs) => write!(f, "{op}\t{rd}, {rs}"),
-            Self::Reg1(op, rd) => write!(f, "{op}\t{rd}"),
-            Self::Imm2(op, rt, rs, imm) => write!(f, "{op}\t{rt}, {rs}, {imm}"),
-            Self::Imm1(op, rt, imm) => write!(f, "{op}\t{rt}, {imm}"),
-            Self::FReg3(op, fd, fs, ft) => write!(f, "{op}\t{fd}, {fs}, {ft}"),
-            Self::FReg2(op, fd, fs) => write!(f, "{op}\t{fd}, {fs}",),
-            Self::FImm(op, ft, base, offset) => write!(f, "{op}\t{ft}, {offset}({base})"),
-            Self::MoveFromFpu(rt, fs) => write!(f, "mfc1\t{rt}, {fs}"),
-            Self::MoveToFpu(rt, fs) => write!(f, "mtc1\t{rt}, {fs}"),
-            Self::Syscall => f.write_str("syscall"),
-            Self::Break => f.write_str("break"),
-            Self::Pseudo(pseudo) => pseudo.fmt(f),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum PseudoInstruction {
     LoadAddress(Reg, Label),
-}
-
-impl std::fmt::Display for PseudoInstruction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::LoadAddress(rt, label) => write!(f, "la\t{rt}, {label}"),
-        }
-    }
 }
 
 /// An instruction that branches and is used to terminate basic blocks.
@@ -523,24 +491,6 @@ pub enum Terminator {
     ReturnToRa,
     JumpAndLinkRa(Reg, BlockRef),
     JumpAndLinkReg(Reg, Reg, BlockRef),
-}
-
-impl std::fmt::Display for Terminator {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BranchIf(cond, rs, rt, target, _) => write!(f, "b{cond}\t{rs}, {rt}, {target}"),
-            Self::BranchIfZ(cond, rs, target, _) => write!(f, "b{cond}\t{rs}, {target}"),
-            Self::BranchIfZAndLink(cond, rs, target, _) => write!(f, "b{cond}al\t{rs}, {target}"),
-            Self::BranchIfFCond(b, target, _) => {
-                write!(f, "bc1{}\t{target}", if *b { 't' } else { 'f' })
-            }
-            Self::Jump(target) => write!(f, "j\t{target}"),
-            Self::JumpAndLink(target, _) => write!(f, "jal\t{target}"),
-            Self::ReturnToRa => write!(f, "jr\t{}", Reg::RA),
-            Self::JumpAndLinkRa(rs, _) => write!(f, "jalr\t{rs}"),
-            Self::JumpAndLinkReg(rd, rs, _) => write!(f, "jalr\t{rd}, {rs}"),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

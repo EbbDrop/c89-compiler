@@ -114,13 +114,34 @@ fn displays_fpu_registers_correctly() {
 }
 
 #[test]
-#[should_panic(expected = "virtual")]
-fn displaying_virtual_registers_panics() {
-    format!("{}", Reg::Virtual(5));
+fn displays_virtual_registers() {
+    assert_eq!("@0", format!("{}", Reg::Virtual(0)));
+    assert_eq!("@1", format!("{}", Reg::Virtual(1)));
+    assert_eq!("@15", format!("{}", Reg::Virtual(15)));
+    assert_eq!("@3658", format!("{}", Reg::Virtual(3658)));
 }
 
 #[test]
-#[should_panic(expected = "virtual")]
-fn displaying_virtual_fpu_registers_panics() {
-    format!("{}", FReg::VirtualSingle(5));
+fn displays_virtual_fpu_registers() {
+    assert_eq!("@fs0", format!("{}", FReg::VirtualSingle(0)));
+    assert_eq!("@fs1", format!("{}", FReg::VirtualSingle(1)));
+    assert_eq!("@fs32", format!("{}", FReg::VirtualSingle(32)));
+    assert_eq!("@fs211", format!("{}", FReg::VirtualSingle(211)));
+
+    assert_eq!("@fd0", format!("{}", FReg::VirtualDouble(0)));
+    assert_eq!("@fd1", format!("{}", FReg::VirtualDouble(1)));
+    assert_eq!("@fd32", format!("{}", FReg::VirtualDouble(32)));
+    assert_eq!("@fd211", format!("{}", FReg::VirtualDouble(211)));
+}
+
+#[test]
+#[should_panic = "$32"]
+fn displaying_nonexistent_registers_panics() {
+    format!("{}", Reg::R(32));
+}
+
+#[test]
+#[should_panic = "$f32"]
+fn displaying_nonexistent_fpu_registers_panics() {
+    format!("{}", FReg::F(32));
 }

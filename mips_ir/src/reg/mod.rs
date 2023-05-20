@@ -8,6 +8,15 @@ pub enum AnyReg {
     F(FReg),
 }
 
+impl AnyReg {
+    pub fn is_virtual(self) -> bool {
+        match self {
+            AnyReg::R(reg) => reg.is_virtual(),
+            AnyReg::F(freg) => freg.is_virtual(),
+        }
+    }
+}
+
 impl From<Reg> for AnyReg {
     fn from(value: Reg) -> Self {
         Self::R(value)
@@ -17,6 +26,15 @@ impl From<Reg> for AnyReg {
 impl From<FReg> for AnyReg {
     fn from(value: FReg) -> Self {
         Self::F(value)
+    }
+}
+
+impl std::fmt::Display for AnyReg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AnyReg::R(reg) => reg.fmt(f),
+            AnyReg::F(freg) => freg.fmt(f),
+        }
     }
 }
 
@@ -175,14 +193,14 @@ impl std::fmt::Display for Reg {
                 Self::SP => "$sp",
                 Self::FP => "$fp",
                 Self::RA => "$ra",
-                Self::R(n) => panic!("encountered nonexisting register ${n}"),
-                Self::Virtual(_) => panic!("cannot format virtual register"),
+                Self::R(n) => panic!("encountered nonexistent register ${n}"),
+                Self::Virtual(n) => return write!(f, "@{n}"),
             })
         } else {
             match self {
                 Self::R(n @ 0..=31) => write!(f, "${n}"),
-                Self::R(n) => panic!("encountered nonexisting register: ${n}"),
-                Self::Virtual(_) => panic!("cannot format virtual register"),
+                Self::R(n) => panic!("encountered nonexistent register: ${n}"),
+                Self::Virtual(n) => write!(f, "@{n}"),
             }
         }
     }
@@ -196,6 +214,17 @@ impl std::fmt::Display for Reg {
 ///  - Only the even registers ($f0, $f2, ..., $f30) can be used to for double-precision values.
 ///  - If an even register is used for a double-precision value, the next uneven register cannot be
 ///    used for a single-precision value without invalidating the double-precision value.
+///
+/// The MIPS registers are conventinally used as follows:
+///
+/// | registers      | preserved? | usage |
+/// | -------------- | --- | ------------ |
+/// |`$f0`  - `$f2`  | no  | floating-point function results |
+/// |`$f4`  - `$f10` | no  | temporaries |
+/// |`$f12` - `$f14` | no  | to pass the first arguments |
+/// |`$f16` - `$f18` | no  | temporaries |
+/// |`$f20` - `$f30` | yes | saved temporaries |
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FReg {
     F(u8),
@@ -245,10 +274,10 @@ impl FReg {
 impl std::fmt::Display for FReg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FReg::F(n) => write!(f, "$f{n}"),
-            FReg::VirtualSingle(_) | FReg::VirtualDouble(_) => {
-                panic!("cannot format virtual fpu register")
-            }
+            FReg::F(n @ 0..=31) => write!(f, "$f{n}"),
+            FReg::F(n) => panic!("encountered nonexistent register $f{n}"),
+            FReg::VirtualSingle(n) => write!(f, "@fs{n}"),
+            FReg::VirtualDouble(n) => write!(f, "@fd{n}"),
         }
     }
 }

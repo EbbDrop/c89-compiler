@@ -17,6 +17,7 @@ pub enum OutputFormat {
     IrRustDbg,
     SymbolTableAscii,
     LlvmIr,
+    MipsDbg,
     MipsAsm,
 }
 
@@ -98,6 +99,7 @@ pub fn extract_compile_opts(args: &Args) -> Result<CompileOpts, CompileOptsErr> 
             OutputFormat::IrRustDbg => compile::OutputFormat::IrRustDbg,
             OutputFormat::SymbolTableAscii => compile::OutputFormat::SymbolTableAscii,
             OutputFormat::LlvmIr => compile::OutputFormat::LlvmIr,
+            OutputFormat::MipsDbg => compile::OutputFormat::MipsDbg,
             OutputFormat::MipsAsm => compile::OutputFormat::MipsAsm,
         };
         opts.output_format(format)

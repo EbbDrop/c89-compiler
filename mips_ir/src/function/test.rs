@@ -8,11 +8,11 @@ fn empty_functions() {
     assert!(empty_cfg.entry_block().is_none());
     assert!(empty_cfg.blocks().next().is_none());
     assert!(empty_cfg.traverse().next().is_none());
-    assert_eq!("main:\n", format!("{}", empty_cfg));
+    assert!(empty_cfg.label().as_ref() == "main");
 
-    let entry_id = empty_cfg.create_block_id();
+    let entry_label = empty_cfg.create_block_label();
     let block = empty_cfg
-        .start_block(entry_id.clone(), Vec::new())
+        .start_block(entry_label.clone(), Vec::new())
         .terminate(crate::term::return_to_ra());
     empty_cfg.add_block(block);
 
@@ -24,9 +24,8 @@ fn empty_functions() {
         assert!(blocks.next().is_none());
     }
     assert!(empty_cfg.traverse().next().is_none());
-    assert_eq!("main:\n", format!("{}", empty_cfg));
 
-    empty_cfg.set_entry_block(entry_id);
+    empty_cfg.set_entry_block(entry_label.id());
 
     assert!(!empty_cfg.is_empty());
     assert!(empty_cfg.entry_block().is_some());
@@ -40,20 +39,16 @@ fn empty_functions() {
         assert!(blocks.next().is_some());
         assert!(blocks.next().is_none());
     }
-    assert_eq!(
-        "\
-main:
-	jr	$31
-",
-        format!("{}", empty_cfg)
-    );
+    let entry_block = empty_cfg.entry_block();
+    assert!(entry_block.is_some());
+    assert!(*entry_block.unwrap().label() == entry_label);
 }
 
 #[test]
-fn displays_only_referenced_labels() {
+fn traverses_only_referenced_labels() {
     let mut function = Function::new("main".into());
 
-    let target = function.create_block_id();
+    let target = function.create_block_label();
 
     // This block will be added to the graph, but will have no predecessors. This means it won't
     // show up when rendering or traversing the graph.
@@ -67,15 +62,11 @@ fn displays_only_referenced_labels() {
     function
         .add_block(builder.terminate(crate::term::jump(BlockRef::new(target.clone(), Vec::new()))));
 
-    function.set_entry_block(target);
+    function.set_entry_block(target.id());
 
-    assert_eq!(
-        "\
-main:
-$main.bb0:
-	nop
-	j	$main.bb0
-",
-        format!("{}", function)
-    );
+    let mut traverse = function.traverse();
+    let first = traverse.next();
+    assert!(first.is_some());
+    assert!(*first.unwrap().label() == target);
+    assert!(traverse.next().is_none());
 }
