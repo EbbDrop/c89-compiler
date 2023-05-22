@@ -16,7 +16,7 @@ fn empty_functions() {
         .terminate(crate::term::return_to_ra());
     empty_cfg.add_block(block);
 
-    assert!(empty_cfg.is_empty());
+    assert!(!empty_cfg.is_empty());
     assert!(empty_cfg.entry_block().is_none());
     {
         let mut blocks = empty_cfg.blocks();

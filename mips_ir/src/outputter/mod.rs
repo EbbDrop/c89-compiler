@@ -16,6 +16,8 @@ pub struct MipsOutputConfig {
     /// If `true`, block arguments will be shown when blocks are referenced and at the label that
     /// starts a block.
     pub show_block_arguments: bool,
+    /// If `true`, all blocks in functions will be shown, even those which have no predecessors.
+    pub show_all_blocks: bool,
 }
 
 /// Can be used to format [`Root`]s to a writer.
@@ -30,10 +32,22 @@ pub struct MipsOutputConfig {
 /// The outputter can only output valid MIPS if the following constraints are met:
 ///
 ///  - No virtual registers are present.
-///  - The `show_block_arguments` configuration option is set to `false`.
-///  - Every block has at most one default successor within its graph (function).
-///  - The entry block of each graph (function) has no default predecessor.
-///  - Every graph (function) must have an entry point set.
+///  - The following configuration options are set:
+///    ```skip
+///    MipsOutputConfig {
+///        show_block_arguments: false,
+///        show_all_blocks: false,
+///        // ...
+///    }
+///    ```
+///  - Blocks without predecessors can be ignored for the following constraints:
+///    - Every block has at most one default successor within its graph/function.
+///    - The graph reduced to the edges formed by default successors (starting from the entry point)
+///      should be acyclic (a DAG).
+///    - All successors of every block reachable from the entry block should be in the
+///      graph/function.
+///  - The entry block of each graph/function has no default predecessor.
+///  - Every graph/function must have an entry point set.
 pub struct MipsOutputter<'w, W: std::fmt::Write> {
     writer: &'w mut W,
     config: MipsOutputConfig,
@@ -74,7 +88,7 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
         Ok(())
     }
 
-    fn write_global_data(&mut self, value: &GlobalData) -> Result {
+    pub fn write_global_data(&mut self, value: &GlobalData) -> Result {
         if value.align() != value.data().natural_align() {
             writeln!(self.writer, "\t.align\t{}", *value.align())?;
         }
@@ -136,19 +150,23 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
         }
     }
 
-    fn write_function(&mut self, value: &Function) -> Result {
+    pub fn write_function(&mut self, value: &Function) -> Result {
         self.write_label(value.label())?;
         // TODO: FIXME: Patch the graph such that there are no two nodes with the same default
         // successor (i.e. such that every node has exactly one predecessor for which it is the
         // default successor) and such that there is no node which has the entry point as default
         // successor.
-        for block in value.traverse() {
-            if self.config.show_block_arguments && value.has_any_predecessors(block.id())
-                || value.has_any_non_default_predecessors(block.id())
+        let traverser = match self.config.show_all_blocks {
+            false => value.traverse(),
+            true => value.traverse_all(),
+        };
+        for block in traverser {
+            if self.config.show_block_arguments && block.has_preds_in(value)
+                || block.has_ndpreds_in(value)
             {
                 write!(self.writer, "{}", block.label())?;
-                if self.config.show_block_arguments && !block.arguments().is_empty() {
-                    let mut arguments = block.arguments().iter().copied();
+                if self.config.show_block_arguments && !block.arguments.is_empty() {
+                    let mut arguments = block.arguments.iter().copied();
                     self.write_char('[')?;
                     if let Some(arg) = arguments.next() {
                         self.write_any_reg(arg)?;
@@ -167,17 +185,17 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
     }
 
     fn write_block(&mut self, value: &BasicBlock) -> Result {
-        for instruction in value.instructions() {
+        for instruction in &value.instructions {
             self.write_char('\t')?;
             self.write_instruction(instruction)?;
             self.writeln()?;
         }
         self.write_char('\t')?;
-        self.write_terminator(value.terminator())?;
+        self.write_terminator(&value.terminator)?;
         self.writeln()
     }
 
-    fn write_instruction(&mut self, value: &Instruction) -> Result {
+    pub fn write_instruction(&mut self, value: &Instruction) -> Result {
         match value {
             Instruction::Nop => self.write_str("nop"),
             &Instruction::Reg3(op, rd, rs, rt) => {
@@ -261,7 +279,7 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
         }
     }
 
-    fn write_pseudo_instruction(&mut self, value: &PseudoInstruction) -> Result {
+    pub fn write_pseudo_instruction(&mut self, value: &PseudoInstruction) -> Result {
         match value {
             PseudoInstruction::LoadAddress(rt, label) => {
                 self.write_str("la\t")?;
@@ -272,7 +290,7 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
         }
     }
 
-    fn write_terminator(&mut self, value: &Terminator) -> Result {
+    pub fn write_terminator(&mut self, value: &Terminator) -> Result {
         match value {
             Terminator::BranchIf(cond, rs, rt, true_target, false_target) => {
                 write!(self.writer, "b{cond}\t")?;

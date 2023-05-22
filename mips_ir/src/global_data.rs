@@ -98,15 +98,29 @@ impl GlobalData {
         Self { align, ..self }
     }
 
+    /// Returns the global label of this data item. It's not possible to change this.
     pub fn label(&self) -> &Label {
         &self.label
     }
 
+    /// Returns the align boundary if one was set, or the natural align of the data if not.
     pub fn align(&self) -> AlignBoundary {
         self.align.unwrap_or(self.data.natural_align())
     }
 
+    /// Sets the align to the given align boundary, or to the natural alignment of the given align
+    /// is `None`.
+    pub fn set_align(&mut self, align: Option<AlignBoundary>) {
+        self.align = align;
+    }
+
+    /// Returns a reference to the data directive of this global data item.
     pub fn data(&self) -> &DataDirective {
         &self.data
+    }
+
+    /// Sets the data to the given data directive.
+    pub fn set_data(&mut self, data: DataDirective) {
+        self.data = data;
     }
 }

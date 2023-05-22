@@ -6,6 +6,8 @@ mod outputter;
 mod reg;
 mod root;
 
+pub mod fixer;
+
 pub use function::*;
 pub use global_data::*;
 pub use instruction::*;

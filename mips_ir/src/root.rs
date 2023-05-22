@@ -34,6 +34,12 @@ impl Root {
         &self.data
     }
 
+    /// Returns a mutable reference to all global data in order.
+    // This is safe, since the label of global data items cannot be changed.
+    pub fn data_mut(&mut self) -> &mut [GlobalData] {
+        &mut self.data
+    }
+
     /// Returns `true` if at least one global data item was added to this root.
     pub fn has_any_data(&self) -> bool {
         !self.data.is_empty()
@@ -44,9 +50,26 @@ impl Root {
         self.functions.values()
     }
 
+    /// Returns an iterator over all functions in an undefined order.
+    // This is safe, since functions do not allow changing their id.
+    pub fn functions_mut(&mut self) -> impl Iterator<Item = &mut Function> {
+        self.functions.values_mut()
+    }
+
     /// Returns `true` if at least one function was added to this root.
     pub fn has_any_functions(&self) -> bool {
         !self.functions.is_empty()
+    }
+
+    /// Returns the function associated with the specified label, if such function exists.
+    pub fn function(&self, label: &Label) -> Option<&Function> {
+        self.functions.get(label)
+    }
+
+    /// Returns the function associated with the specified label, if such function exists.
+    // This is safe, since functions do not allow changing their id.
+    pub fn function_mut(&mut self, label: &Label) -> Option<&mut Function> {
+        self.functions.get_mut(label)
     }
 
     /// Marks the specified label as `global`. This will make the label visible to other files when
