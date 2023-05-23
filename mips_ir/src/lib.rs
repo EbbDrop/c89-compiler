@@ -7,6 +7,8 @@ mod reg;
 mod root;
 
 pub mod fixer;
+pub mod uda;
+pub mod validator;
 
 pub use function::*;
 pub use global_data::*;

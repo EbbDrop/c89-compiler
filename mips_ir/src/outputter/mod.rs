@@ -2,9 +2,9 @@
 mod test;
 
 use crate::{
-    AnyReg, BasicBlock, BlockRef, DataDirective, FReg, Function, GlobalData, ImmOp1, ImmOp2,
-    Instruction, Label, PseudoInstruction, Reg, Root, Terminator, TrapCondImm, VirtualInstruction,
-    VirtualTerminator,
+    AnyReg, BasicBlock, BlockRef, DataDirective, FReg, Function, FunctionCall, GlobalData, ImmOp1,
+    ImmOp2, Instruction, Label, PseudoInstruction, Reg, Root, Terminator, TrapCondImm,
+    VirtualInstruction, VirtualTerminator,
 };
 use std::fmt::Result;
 
@@ -284,11 +284,11 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
 
     pub fn write_virtual_instruction(&mut self, value: &VirtualInstruction) -> Result {
         match value {
-            VirtualInstruction::FunctionCall {
+            VirtualInstruction::FunctionCall(FunctionCall {
                 label,
                 return_reg,
                 arguments,
-            } => {
+            }) => {
                 self.write_str("@call\t")?;
                 match return_reg.as_ref() {
                     Some(reg) => self.write_any_reg(*reg)?,
@@ -512,14 +512,6 @@ fn display_imm2_signed(op: ImmOp2) -> bool {
         ImmOp2::ShiftRightArithmetic => false,
         ImmOp2::SetLtS => true,
         ImmOp2::SetLtU => true,
-        ImmOp2::TrapIf(cond) => match cond {
-            TrapCondImm::Eq => true,
-            TrapCondImm::Ne => true,
-            TrapCondImm::GeS => true,
-            TrapCondImm::GeU => true,
-            TrapCondImm::LtS => true,
-            TrapCondImm::LtU => true,
-        },
         ImmOp2::LoadByteS => true,
         ImmOp2::LoadByteU => true,
         ImmOp2::LoadHalfS => true,
@@ -541,5 +533,13 @@ fn display_imm2_signed(op: ImmOp2) -> bool {
 fn display_imm1_signed(op: ImmOp1) -> bool {
     match op {
         ImmOp1::LoadUpper => false,
+        ImmOp1::TrapIf(cond) => match cond {
+            TrapCondImm::Eq => true,
+            TrapCondImm::Ne => true,
+            TrapCondImm::GeS => true,
+            TrapCondImm::GeU => true,
+            TrapCondImm::LtS => true,
+            TrapCondImm::LtU => true,
+        },
     }
 }

@@ -2,7 +2,7 @@
 mod test;
 
 /// Represents a (possibly virtual) MIPS register. Can be a CPU or a FPU register.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyReg {
     R(Reg),
     F(FReg),
@@ -56,7 +56,7 @@ impl std::fmt::Display for AnyReg {
 /// |`$29`        |`$sp`         | yes | stack pointer |
 /// |`$30`        |`$fp` or `$s8`| yes | frame pointer or another saved temporary |
 /// |`$31`        |`$ra`         | yes | return address (used by e.g. `jal`) |
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Reg {
     /// $0 - $31
     R(u8),
@@ -225,7 +225,7 @@ impl std::fmt::Display for Reg {
 /// |`$f16` - `$f18` | no  | temporaries |
 /// |`$f20` - `$f30` | yes | saved temporaries |
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FReg {
     F(u8),
     /// Virtual single-precision FPU register.

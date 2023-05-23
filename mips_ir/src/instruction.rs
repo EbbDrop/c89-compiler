@@ -169,12 +169,6 @@ pub mod instr {
         Instruction::Imm2(ImmOp2::SetLtU, rt, rs, imm)
     }
 
-    /// Trap if the comparing the value in the first register and the immediate value by the
-    /// specified condition yields true.
-    pub fn trap_if_imm(cond: TrapCondImm, rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::TrapIf(cond), rt, rs, imm)
-    }
-
     /// Load byte from memory and store sign-extended in the first register.
     /// Memory address computed by adding the value in the second register to the immediate value.
     pub fn load_byte_s(rt: Reg, rs: Reg, imm: u16) -> Instruction {
@@ -257,6 +251,12 @@ pub mod instr {
     /// 16 bits to 0.
     pub fn load_upper(rt: Reg, imm: u16) -> Instruction {
         Instruction::Imm1(ImmOp1::LoadUpper, rt, imm)
+    }
+
+    /// Trap if the comparing the value in register `rt` and the immediate value by the specified
+    /// condition yields true.
+    pub fn trap_if_imm(cond: TrapCondImm, rt: Reg, imm: u16) -> Instruction {
+        Instruction::Imm1(ImmOp1::TrapIf(cond), rt, imm)
     }
 
     /// Add the floating-point values in the second and third register and store the result in the
@@ -385,6 +385,8 @@ pub mod instr {
     }
 
     pub mod virt {
+        use crate::FunctionCall;
+
         use super::*;
 
         pub fn function_call(
@@ -392,11 +394,11 @@ pub mod instr {
             return_reg: Option<AnyReg>,
             arguments: Vec<(AnyReg, StackInfo)>,
         ) -> Instruction {
-            Instruction::Virtual(VirtualInstruction::FunctionCall {
+            Instruction::Virtual(VirtualInstruction::FunctionCall(FunctionCall {
                 label,
                 return_reg,
                 arguments,
-            })
+            }))
         }
     }
 }
@@ -505,12 +507,15 @@ pub enum PseudoInstruction {
 }
 
 #[derive(Debug, Clone)]
+pub struct FunctionCall {
+    pub label: Label,
+    pub return_reg: Option<AnyReg>,
+    pub arguments: Vec<(AnyReg, StackInfo)>,
+}
+
+#[derive(Debug, Clone)]
 pub enum VirtualInstruction {
-    FunctionCall {
-        label: Label,
-        return_reg: Option<AnyReg>,
-        arguments: Vec<(AnyReg, StackInfo)>,
-    },
+    FunctionCall(FunctionCall),
 }
 
 /// An instruction that branches and is used to terminate basic blocks.
@@ -691,9 +696,6 @@ pub enum ImmOp2 {
     /// Set the first register to 1 if the unsigned value in the second register is less than the
     /// unsigned immediate value, otherwise set to 0.
     SetLtU,
-    /// Trap if the comparing the value in the first register and the immediate value by the
-    /// specified condition yields true.
-    TrapIf(TrapCondImm),
     //----------------------------------------------------------------------------------------------
     // Memory loads & stores
     //----------------------------------------------------------------------------------------------
@@ -748,7 +750,6 @@ impl std::fmt::Display for ImmOp2 {
             Self::ShiftRightArithmetic => f.write_str("sra"),
             Self::SetLtS => f.write_str("slti"),
             Self::SetLtU => f.write_str("sltiu"),
-            Self::TrapIf(cond) => write!(f, "t{cond}"),
             // Memory loads & stores
             Self::LoadByteS => f.write_str("lb"),
             Self::LoadByteU => f.write_str("lbu"),
@@ -773,13 +774,17 @@ pub enum ImmOp1 {
     /// Set high-order 16 bits of the first register to the 16-bit immediate and the low-order
     /// 16 bits to 0.
     LoadUpper,
+    /// Trap if the comparing the value in the first register and the immediate value by the
+    /// specified condition yields true.
+    TrapIf(TrapCondImm),
 }
 
 impl std::fmt::Display for ImmOp1 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::LoadUpper => "lui",
-        })
+        match self {
+            Self::LoadUpper => f.write_str("lui"),
+            Self::TrapIf(cond) => write!(f, "t{cond}"),
+        }
     }
 }
 

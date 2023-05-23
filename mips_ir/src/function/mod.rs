@@ -3,7 +3,10 @@ mod test;
 
 pub mod graph;
 
-use crate::{AlignBoundary, AnyReg, BCond, BZCond, Instruction, Label, Reg, Terminator};
+use crate::{
+    AlignBoundary, AnyReg, BCond, BZCond, FunctionCall, Instruction, Label, Reg, Terminator,
+    VirtualInstruction,
+};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -96,7 +99,7 @@ pub struct Function {
     /// The registers here are expected to have references to places on the stack before the
     /// entry block is started.
     reference_registers: Vec<ReferenceRegister>,
-    _params_info: Vec<StackInfo>,
+    params_info: Vec<StackInfo>,
     next_id: BlockId,
 }
 
@@ -107,7 +110,7 @@ impl Function {
             entry_block: None,
             blocks: HashMap::new(),
             reference_registers: Vec::new(),
-            _params_info: params_info,
+            params_info,
             next_id: BlockId(0),
         }
     }
@@ -115,6 +118,10 @@ impl Function {
     /// Returns the global label of this function. It's not possible to change this.
     pub fn label(&self) -> &Label {
         &self.label
+    }
+
+    pub fn params_info(&self) -> &[StackInfo] {
+        &self.params_info
     }
 
     /// Returns a reference to the entry block of the graph, or `None` if no entry point has been
@@ -342,6 +349,48 @@ impl BasicBlock {
     #[inline]
     pub fn label(&self) -> &BlockLabel {
         &self.label
+    }
+
+    /// Returns `true` if the specified global label is referenced anywhere in this block.
+    pub fn references_label(&self, label: &Label) -> bool {
+        match &self.terminator {
+            Terminator::BranchIfZAndLink(_, _, target, _) | Terminator::JumpAndLink(target, _) => {
+                target == label
+            }
+            _ => false,
+        }
+    }
+
+    /// Returns all the global labels that are referenced anywhere in this block.
+    pub fn referenced_labels(&self) -> impl Iterator<Item = &Label> {
+        self.instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instruction::Virtual(VirtualInstruction::FunctionCall(FunctionCall {
+                    label,
+                    ..
+                })) => Some(label),
+                _ => None,
+            })
+            .chain(match &self.terminator {
+                Terminator::BranchIfZAndLink(_, _, target, _)
+                | Terminator::JumpAndLink(target, _) => Some(target),
+                _ => None,
+            })
+    }
+
+    pub fn calls_function(&self, label: &Label) -> bool {
+        self.instructions.iter().any(|instr| match instr {
+            Instruction::Virtual(VirtualInstruction::FunctionCall(call)) => &call.label == label,
+            _ => false,
+        })
+    }
+
+    pub fn function_calls(&self) -> impl Iterator<Item = &FunctionCall> {
+        self.instructions.iter().filter_map(|instr| match instr {
+            Instruction::Virtual(VirtualInstruction::FunctionCall(call)) => Some(call),
+            _ => None,
+        })
     }
 }
 

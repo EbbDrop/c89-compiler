@@ -29,6 +29,18 @@ impl Root {
         self.exported_labels.contains(label)
     }
 
+    /// Returns `true` if the label was created using [`create_external_label`].
+    pub fn is_external(&self, label: &Label) -> bool {
+        self.external_labels.contains(label)
+    }
+
+    /// Returns `true` if the label refers to global data, a function, or is declared as external.
+    pub fn has_label(&self, label: &Label) -> bool {
+        self.external_labels.contains(label)
+            || self.functions.contains_key(label)
+            || self.data.iter().any(|d| d.label() == label)
+    }
+
     /// Returns a reference to all global data in order.
     pub fn data(&self) -> &[GlobalData] {
         &self.data
@@ -112,11 +124,5 @@ impl Root {
         }
         self.external_labels.insert(label.clone());
         label
-    }
-
-    fn has_label(&self, label: &Label) -> bool {
-        self.external_labels.contains(label)
-            || self.functions.contains_key(label)
-            || self.data.iter().any(|d| d.label() == label)
     }
 }

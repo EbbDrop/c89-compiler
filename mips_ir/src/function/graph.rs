@@ -15,7 +15,7 @@
 //! | BB, block                 | [`Basic Block`]                        |
 //!
 
-use crate::VirtualTerminator;
+use crate::{FunctionCall, VirtualTerminator};
 
 use super::*;
 
@@ -23,6 +23,19 @@ impl Function {
     /// Returns `true` if the specified global label is referenced anywhere in this function.
     pub fn references_label(&self, label: &Label) -> bool {
         self.blocks().any(|b| b.references_label(label))
+    }
+
+    /// Returns all the global labels that are referenced anywhere in this function.
+    pub fn referenced_labels(&self) -> impl Iterator<Item = &Label> {
+        self.blocks().flat_map(|b| b.referenced_labels())
+    }
+
+    pub fn calls_function(&self, label: &Label) -> bool {
+        self.blocks().any(|b| b.calls_function(label))
+    }
+
+    pub fn function_calls(&self) -> impl Iterator<Item = &FunctionCall> {
+        self.blocks().flat_map(|b| b.function_calls())
     }
 }
 
@@ -32,16 +45,6 @@ impl Function {
 pub struct SuccIdx(usize);
 
 impl BasicBlock {
-    /// Returns `true` if the specified global label is referenced anywhere in this block.
-    pub fn references_label(&self, label: &Label) -> bool {
-        match &self.terminator {
-            Terminator::BranchIfZAndLink(_, _, target, _) | Terminator::JumpAndLink(target, _) => {
-                target == label
-            }
-            _ => false,
-        }
-    }
-
     pub fn succ_id(&self, succ_idx: SuccIdx) -> BlockId {
         self.succ_bref(succ_idx).label.id
     }
