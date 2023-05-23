@@ -207,22 +207,28 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
     match opts.output_format {
         OutputFormat::IrDot => res.map(|ir| inspectors::dot::inspect_ir(&ir).into_bytes()),
         OutputFormat::IrRustDbg => res.map(|ir| format!("{ir:#?}\n").into_bytes()),
-        OutputFormat::SymbolTableAscii => {
-            res.map(|ir| {
-                let mut s = String::new();
-                for (name, funcion) in ir.functions {
-                    s += &format!("function {}:\n", name);
-                    s += &format!("{:^8}|{:^10}\n", "id", "type");
-                    s += &format!("{:-^8}|{:-^10}\n", "", "");
-                    // TODO: relies on unspecified order
-                    for (i, entry) in funcion.table.items().enumerate() {
-                        s += &format!("{:^8}|{:^10}\n", i, entry.ty);
-                    }
-                    s.push('\n');
+        OutputFormat::SymbolTableAscii => res.map(|ir| {
+            let mut s = String::new();
+            for (name, funcion) in ir.functions {
+                s += &format!("function {}:\n", name);
+                s += &format!(
+                    "{:^8}|{:^10}|{:^14}|{:^6}\n",
+                    "id", "type", "needs address", "init"
+                );
+                s += &format!("{:-^8}|{:-^10}|{:-^14}|{:-^6}\n", "", "", "", "");
+                for (i, entry) in funcion.table.iter() {
+                    s += &format!(
+                        "{:^8}|{:<10}|{:^14}|{:^6}\n",
+                        i.to_string(),
+                        entry.ty.to_string(),
+                        entry.needs_address,
+                        entry.initialized
+                    );
                 }
-                s.into_bytes()
-            })
-        }
+                s.push('\n');
+            }
+            s.into_bytes()
+        }),
         OutputFormat::LlvmIr => {
             let llvm_ir = res.and_then(|ir| {
                 codegen::llvm::build_from_ir(&ir, &opts.settings, source_name, source)
@@ -230,8 +236,39 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
 
             llvm_ir.map(|s| format!("{s}\n").into_bytes())
         }
-        OutputFormat::MipsDbg => todo!("Mips dbg output not supported yet"),
-        OutputFormat::MipsAsm => todo!("Mips output not supported yet"),
+        OutputFormat::MipsDbg | OutputFormat::MipsAsm => {
+            let mips_ir = res.and_then(|ir| {
+                codegen::mips::build_from_ir(&ir, &opts.settings, source_name, source)
+            });
+
+            let config = if opts.output_format == OutputFormat::MipsDbg {
+                mips_ir::MipsOutputConfig {
+                    use_register_names: true,
+                    allow_virtuals: true,
+                    show_block_arguments: true,
+                    show_all_blocks: false,
+                }
+            } else {
+                //TODO also do the other algos in this case
+                mips_ir::MipsOutputConfig {
+                    use_register_names: true,
+                    allow_virtuals: false,
+                    show_block_arguments: false,
+                    show_all_blocks: false,
+                }
+            };
+
+            mips_ir.map(|mir| {
+                let mut output = String::new();
+
+                mips_ir::MipsOutputter::new(&mut output)
+                    .with_config(config)
+                    .write_root(&mir)
+                    .unwrap();
+
+                output.into_bytes()
+            })
+        }
         _ => unreachable!(
             "Format {:?} should have been handled before",
             opts.output_format

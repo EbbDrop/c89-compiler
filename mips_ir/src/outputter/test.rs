@@ -50,7 +50,7 @@ foobar:
 #[test]
 pub fn outputs_empty_functions() {
     let mut root = Root::new();
-    root.add_function(Function::new("main".into()));
+    root.add_function(Function::new("main".into(), Vec::new()));
     let mut output = String::new();
     MipsOutputter::new(&mut output).write_root(&root).unwrap();
     assert_eq!(
@@ -64,7 +64,7 @@ main:
 
 #[test]
 pub fn outputs_virtual_registers() {
-    let mut function = Function::new("main".into());
+    let mut function = Function::new("main".into(), Vec::new());
     let mut builder = function.start_new_block(Vec::new());
     builder.add_instruction(crate::instr::add_u(
         Reg::Virtual(3),
@@ -87,7 +87,7 @@ pub fn outputs_virtual_registers() {
     let mut output = String::new();
     MipsOutputter::new(&mut output)
         .with_config(MipsOutputConfig {
-            allow_virtual_registers: true,
+            allow_virtuals: true,
             ..Default::default()
         })
         .write_root(&root)
@@ -96,6 +96,7 @@ pub fn outputs_virtual_registers() {
         "	.text
 
 main:
+$main.bb0:
 	addu	@3, $0, @1
 	cvt.d.s	@fd3, @fs34
 	jr	$31
@@ -106,7 +107,7 @@ main:
 
 #[test]
 pub fn outputs_register_names() {
-    let mut function = Function::new("main".into());
+    let mut function = Function::new("main".into(), Vec::new());
     let mut builder = function.start_new_block(Vec::new());
     builder.add_instruction(crate::instr::add_u(Reg::SP, Reg::ZERO, Reg::FP));
     builder.add_instruction(crate::instr::sub_u(Reg::T9, Reg::A0, Reg::V1));
@@ -129,6 +130,7 @@ pub fn outputs_register_names() {
         "	.text
 
 main:
+$main.bb0:
 	addu	$sp, $zero, $fp
 	subu	$t9, $a0, $v1
 	jr	$ra
@@ -139,7 +141,7 @@ main:
 
 #[test]
 pub fn outputs_block_arguments() {
-    let mut function = Function::new("main".into());
+    let mut function = Function::new("main".into(), Vec::new());
 
     let true_target = function.create_block_label();
     let false_target = function.create_block_label();
@@ -183,6 +185,7 @@ pub fn outputs_block_arguments() {
         "	.text
 
 main:
+$main.bb2:
 	beq	$a0, $a1, $main.bb0[$a2], $main.bb1[$a3, $t0]
 $main.bb1[$a3, $t0]:
 	nop

@@ -3,7 +3,8 @@ mod test;
 
 use crate::{
     AnyReg, BasicBlock, BlockRef, DataDirective, FReg, Function, GlobalData, ImmOp1, ImmOp2,
-    Instruction, Label, PseudoInstruction, Reg, Root, Terminator, TrapCondImm,
+    Instruction, Label, PseudoInstruction, Reg, Root, Terminator, TrapCondImm, VirtualInstruction,
+    VirtualTerminator,
 };
 use std::fmt::Result;
 
@@ -12,7 +13,7 @@ pub struct MipsOutputConfig {
     /// If `true`, registers will be named (`$sp`, `$a0`) instead of numbered (`$29`, `$4`).
     pub use_register_names: bool,
     /// If `false`, the outputter will panic when encountering virtual registers.
-    pub allow_virtual_registers: bool,
+    pub allow_virtuals: bool,
     /// If `true`, block arguments will be shown when blocks are referenced and at the label that
     /// starts a block.
     pub show_block_arguments: bool,
@@ -161,24 +162,9 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
             true => value.traverse_all(),
         };
         for block in traverser {
-            if self.config.show_block_arguments && block.has_preds_in(value)
-                || block.has_ndpreds_in(value)
-            {
-                write!(self.writer, "{}", block.label())?;
-                if self.config.show_block_arguments && !block.arguments.is_empty() {
-                    let mut arguments = block.arguments.iter().copied();
-                    self.write_char('[')?;
-                    if let Some(arg) = arguments.next() {
-                        self.write_any_reg(arg)?;
-                    }
-                    for arg in arguments {
-                        self.write_str(", ")?;
-                        self.write_any_reg(arg)?;
-                    }
-                    self.write_char(']')?;
-                }
-                self.write_str(":\n")?;
-            }
+            write!(self.writer, "{}", block.label())?;
+            self.write_arguments(&block.arguments)?;
+            self.write_str(":\n")?;
             self.write_block(block)?;
         }
         Ok(())
@@ -276,6 +262,12 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
             Instruction::Syscall => self.write_str("syscall"),
             Instruction::Break => self.write_str("break"),
             Instruction::Pseudo(pseudo) => self.write_pseudo_instruction(pseudo),
+            Instruction::Virtual(value) => {
+                if !self.config.allow_virtuals {
+                    panic!("formatting virtual instruction not allowed");
+                }
+                self.write_virtual_instruction(value)
+            }
         }
     }
 
@@ -286,6 +278,25 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
                 self.write_reg(*rt)?;
                 self.write_sep()?;
                 self.write_label_ref(label)
+            }
+        }
+    }
+
+    pub fn write_virtual_instruction(&mut self, value: &VirtualInstruction) -> Result {
+        match value {
+            VirtualInstruction::FunctionCall {
+                label,
+                return_reg,
+                arguments,
+            } => {
+                self.write_str("@call\t")?;
+                match return_reg.as_ref() {
+                    Some(reg) => self.write_any_reg(*reg)?,
+                    None => self.write_str("_")?,
+                }
+                self.write_sep()?;
+                self.write_label_ref(label)?;
+                self.write_arguments(&arguments.iter().map(|(reg, _)| *reg).collect::<Vec<_>>())
             }
         }
     }
@@ -366,8 +377,28 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
                     self.write_block_ref(next_block)?;
                 }
             }
+            Terminator::Virtual(value) => {
+                if !self.config.allow_virtuals {
+                    panic!("formatting virtual instruction not allowed");
+                }
+                self.write_virtual_terminator(value)?;
+            }
         }
         Ok(())
+    }
+
+    fn write_virtual_terminator(&mut self, value: &VirtualTerminator) -> Result {
+        match value {
+            VirtualTerminator::Return(reg) => {
+                self.write_str("@return")?;
+                if let Some(reg) = reg {
+                    self.write_char('[')?;
+                    self.write_any_reg(*reg)?;
+                    self.write_char(']')?;
+                }
+                Ok(())
+            }
+        }
     }
 
     fn write_label(&mut self, value: &Label) -> Result {
@@ -380,15 +411,19 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
 
     fn write_block_ref(&mut self, value: &BlockRef) -> Result {
         write!(self.writer, "{}", value.label)?;
-        if self.config.show_block_arguments && !value.arguments.is_empty() {
-            let mut arguments = value.arguments.iter().copied();
+        self.write_arguments(&value.arguments)
+    }
+
+    fn write_arguments(&mut self, args: &[AnyReg]) -> Result {
+        if self.config.show_block_arguments && !args.is_empty() {
+            let mut arguments = args.iter();
             self.write_char('[')?;
             if let Some(arg) = arguments.next() {
-                self.write_any_reg(arg)?;
+                self.write_any_reg(*arg)?;
             }
             for arg in arguments {
                 self.write_str(", ")?;
-                self.write_any_reg(arg)?;
+                self.write_any_reg(*arg)?;
             }
             self.write_char(']')?;
         }
@@ -396,7 +431,7 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
     }
 
     fn write_any_reg(&mut self, value: AnyReg) -> Result {
-        if value.is_virtual() && !self.config.allow_virtual_registers {
+        if value.is_virtual() && !self.config.allow_virtuals {
             panic!("formatting virtual registers not allowed");
         }
         if self.config.use_register_names {
@@ -407,7 +442,7 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
     }
 
     fn write_reg(&mut self, value: Reg) -> Result {
-        if value.is_virtual() && !self.config.allow_virtual_registers {
+        if value.is_virtual() && !self.config.allow_virtuals {
             panic!("formatting virtual registers not allowed");
         }
         if self.config.use_register_names {
@@ -418,7 +453,7 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
     }
 
     fn write_freg(&mut self, value: FReg) -> Result {
-        if value.is_virtual() && !self.config.allow_virtual_registers {
+        if value.is_virtual() && !self.config.allow_virtuals {
             panic!("formatting virtual registers not allowed");
         }
         if self.config.use_register_names {

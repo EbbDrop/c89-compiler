@@ -13,7 +13,7 @@ use crate::{Function, Root};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnfixableProblem {
     MissingEntryBlock,
-    VirtualRegister,
+    VirtualInstrOrReg,
     IncompleteGraph,
 }
 
@@ -46,8 +46,8 @@ pub fn fix_root(root: &mut Root) -> Result<(), UnfixableProblem> {
 /// which is not required to be able to output valid mips (because they wouldn't show up in the
 /// output anyway).
 pub fn fix_function(function: &mut Function) -> Result<(), UnfixableProblem> {
-    if check::function_contains_virtual_registers(function) {
-        return Err(UnfixableProblem::VirtualRegister);
+    if check::function_contains_virtuals(function) {
+        return Err(UnfixableProblem::VirtualInstrOrReg);
     }
     if !check::is_graph_complete(function) {
         return Err(UnfixableProblem::IncompleteGraph);
@@ -55,7 +55,7 @@ pub fn fix_function(function: &mut Function) -> Result<(), UnfixableProblem> {
     // First make sure the entry block doesn't have a default predecessor.
     let Some(entry_block_id) = function.entry_block().map(|b| b.id()) else {
         return Err(UnfixableProblem::MissingEntryBlock)
-   };
+    };
     {
         let default_predecessors = function[entry_block_id]
             .dpreds_in(function)
@@ -168,17 +168,14 @@ mod check {
         })
     }
 
-    pub fn function_contains_virtual_registers(function: &mut Function) -> bool {
+    pub fn function_contains_virtuals(function: &mut Function) -> bool {
         function.blocks().any(|block| {
-            block
-                .instructions
-                .iter()
-                .any(instruction_contains_virtual_registers)
-                || terminator_contains_virtual_registers(&block.terminator)
+            block.instructions.iter().any(instruction_contains_virtuals)
+                || terminator_contains_virtuals(&block.terminator)
         })
     }
 
-    pub fn instruction_contains_virtual_registers(instr: &Instruction) -> bool {
+    pub fn instruction_contains_virtuals(instr: &Instruction) -> bool {
         match instr {
             Instruction::Nop => false,
             Instruction::Reg3(_, rd, rs, rt) => {
@@ -200,10 +197,11 @@ mod check {
             Instruction::Pseudo(pseudo) => match pseudo {
                 PseudoInstruction::LoadAddress(rt, _) => rt.is_virtual(),
             },
+            Instruction::Virtual(_) => true,
         }
     }
 
-    pub fn terminator_contains_virtual_registers(term: &Terminator) -> bool {
+    pub fn terminator_contains_virtuals(term: &Terminator) -> bool {
         match term {
             Terminator::BranchIf(_, rs, rt, _, _) => rs.is_virtual() || rt.is_virtual(),
             Terminator::BranchIfZ(_, rs, _, _) => rs.is_virtual(),
@@ -214,6 +212,7 @@ mod check {
             Terminator::ReturnToRa => false,
             Terminator::JumpAndLinkRa(rs, _) => rs.is_virtual(),
             Terminator::JumpAndLinkReg(rd, rs, _) => rd.is_virtual() || rs.is_virtual(),
+            Terminator::Virtual(_) => true,
         }
     }
 }

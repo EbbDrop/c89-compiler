@@ -17,7 +17,7 @@ pub fn it_works() {
     let mut function = FunctionDeclaration::new(i32_ty.clone().into());
 
     let param_a = function.add_param(i32_ty.clone());
-    let param_b = function.add_param(i32_ty.clone());
+    let param_b = function.add_param(i32_ty);
 
     let mut function = function.to_definition_builder();
 

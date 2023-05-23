@@ -3,7 +3,7 @@ mod test;
 
 pub mod graph;
 
-use crate::{AnyReg, BCond, BZCond, Instruction, Label, Terminator};
+use crate::{AlignBoundary, AnyReg, BCond, BZCond, Instruction, Label, Reg, Terminator};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -45,6 +45,19 @@ impl BlockRef {
     }
 }
 
+/// Used to specify witch registers need to start with pointers to stack allocated space.
+#[derive(Debug, Clone)]
+pub struct ReferenceRegister {
+    pub register: Reg,
+    pub stack_info: StackInfo,
+}
+
+#[derive(Debug, Clone)]
+pub struct StackInfo {
+    pub size: u128,
+    pub aligement: AlignBoundary,
+}
+
 /// A Control Flow Graph of Basic Blocks with a global label.
 ///
 /// The graph has at most one entry point. If no entry point is set, the graph should be considered
@@ -80,15 +93,21 @@ pub struct Function {
     label: Label,
     entry_block: Option<BlockId>,
     blocks: HashMap<BlockId, BasicBlock>,
+    /// The registers here are expected to have references to places on the stack before the
+    /// entry block is started.
+    reference_registers: Vec<ReferenceRegister>,
+    _params_info: Vec<StackInfo>,
     next_id: BlockId,
 }
 
 impl Function {
-    pub fn new(label: Label) -> Self {
+    pub fn new(label: Label, params_info: Vec<StackInfo>) -> Self {
         Self {
             label,
             entry_block: None,
             blocks: HashMap::new(),
+            reference_registers: Vec::new(),
+            _params_info: params_info,
             next_id: BlockId(0),
         }
     }
@@ -121,6 +140,14 @@ impl Function {
     /// Iterate over all blocks in the graph in an undefined order.
     pub fn blocks(&self) -> impl Iterator<Item = &BasicBlock> {
         self.blocks.values()
+    }
+
+    pub fn reference_registers(&self) -> &[ReferenceRegister] {
+        &self.reference_registers
+    }
+
+    pub fn add_reference_register(&mut self, ref_reg: ReferenceRegister) {
+        self.reference_registers.push(ref_reg);
     }
 
     /// Returns an iterator that traverses the graph starting from the entry point, visiting every

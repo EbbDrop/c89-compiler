@@ -4,7 +4,7 @@ use crate::{term, BZCond, BlockRef, Reg};
 /// If a block has the entry block as its default successor, this should be fixed.
 #[test]
 fn fixes_block_with_entry_block_as_default_successors() {
-    let mut function = Function::new("main".into());
+    let mut function = Function::new("main".into(), Vec::new());
     let entry_block_label = function.create_block_label();
 
     // Add a block that has the entry block as its default successor, and itself as a
@@ -59,7 +59,7 @@ fn fixes_block_with_entry_block_as_default_successors() {
 /// this should be fixed.
 #[test]
 fn fixes_block_with_entry_block_as_all_successors() {
-    let mut function = Function::new("main".into());
+    let mut function = Function::new("main".into(), Vec::new());
     let entry_block_label = function.create_block_label();
 
     // Add a block that has the entry block as its default successor, and as all non-default
@@ -92,7 +92,7 @@ fn fixes_block_with_entry_block_as_all_successors() {
 /// If a block has itself as default successor, this should be fixed.
 #[test]
 fn fixes_direct_recursive_default_successor() {
-    let mut function = Function::new("main".into());
+    let mut function = Function::new("main".into(), Vec::new());
     let entry_block_label = function.create_block_label();
 
     // Add a block that has itself as default successor.
@@ -132,7 +132,7 @@ fn fixes_direct_recursive_default_successor() {
 /// If the graph has a default successor loop, this should be fixed.
 #[test]
 fn fixes_default_successor_loop() {
-    let mut function = Function::new("main".into());
+    let mut function = Function::new("main".into(), Vec::new());
 
     let block1_label = function.create_block_label();
     let block1_id = block1_label.id();
@@ -163,7 +163,7 @@ fn fixes_default_successor_loop() {
         BZCond::GeZ,
         Reg::T0,
         BlockRef::new(block2_label.clone(), Vec::new()),
-        BlockRef::new(block3_label.clone(), Vec::new()),
+        BlockRef::new(block3_label, Vec::new()),
     ));
     function.add_block(block);
     assert_eq!(
@@ -177,7 +177,7 @@ fn fixes_default_successor_loop() {
         BZCond::GeZ,
         Reg::T0,
         BlockRef::new(block1_label.clone(), Vec::new()),
-        BlockRef::new(block2_label.clone(), Vec::new()),
+        BlockRef::new(block2_label, Vec::new()),
     ));
     function.add_block(block);
     assert_eq!(
@@ -187,10 +187,7 @@ fn fixes_default_successor_loop() {
 
     // Add the entry block with a reference to block1.
     let builder = function.start_new_block(Vec::new());
-    let entry_block = builder.terminate(crate::term::jump(BlockRef::new(
-        block1_label.clone(),
-        Vec::new(),
-    )));
+    let entry_block = builder.terminate(crate::term::jump(BlockRef::new(block1_label, Vec::new())));
     let entry_block_id = function.add_block(entry_block).id();
     function.set_entry_block(entry_block_id);
 
@@ -216,7 +213,7 @@ fn fixes_default_successor_loop() {
 /// If the entry block has itself as default successor, this should be fixed.
 #[test]
 fn fixes_entry_block_direct_recursive_default_successor() {
-    let mut function = Function::new("main".into());
+    let mut function = Function::new("main".into(), Vec::new());
     let entry_block_label = function.create_block_label();
 
     // Add the entry block with itself as default (and non-default successor).

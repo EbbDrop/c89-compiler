@@ -185,6 +185,8 @@ version = "0.1.0"
 dependencies = [
  "antlr-rust",
  "llvm_ir",
+ "mips_ir",
+ "vec1",
 ]
 
 [[package]]

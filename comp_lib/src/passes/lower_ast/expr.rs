@@ -38,6 +38,7 @@ pub fn build_ir_expr(
                 .zip(build_ir_lvalue(
                     lhs,
                     "assignment",
+                    false,
                     true,
                     op.span,
                     settings,
@@ -66,7 +67,9 @@ pub fn build_ir_expr(
         }
         ast::Expression::FunctionCall(fcall) => function_call(fcall, span, settings, scope),
         ast::Expression::Literal(lit) => literal(lit, settings),
-        ast::Expression::Ident(idt) => variable_ident(idt, false, scope).map(lvalue_dereference),
+        ast::Expression::Ident(idt) => {
+            variable_ident(idt, false, false, scope).map(lvalue_dereference)
+        }
     }
 }
 
@@ -153,6 +156,7 @@ fn build_unary_op_ir_expr(
 pub fn build_ir_lvalue(
     e: &ast::ExpressionNode,
     needed_for: &str,
+    needs_address: bool,
     will_init: bool,
     op_span: Span,
     settings: &Settings,
@@ -177,7 +181,7 @@ pub fn build_ir_lvalue(
         ast::Expression::ArraySubscript(left, right) => {
             Some(arrays_subscript(left, right, e.span, settings, scope))
         }
-        ast::Expression::Ident(idt) => Some(variable_ident(idt, will_init, scope)),
+        ast::Expression::Ident(idt) => Some(variable_ident(idt, needs_address, will_init, scope)),
         _ => None,
     };
     lvalue.unwrap_or_else(|| {
@@ -359,6 +363,7 @@ fn lvalue_dereference(inner: LvalueExprNode) -> ExprNode {
 
 fn variable_ident(
     idt: &ast::IdentNode,
+    needs_address: bool,
     will_init: bool,
     scope: &mut FunctionScope,
 ) -> AggregateResult<LvalueExprNode> {
@@ -373,6 +378,9 @@ fn variable_ident(
             res.add_rec_diagnostic(DiagnosticBuilder::new(idt.span).build_usign_uninit(&idt.data));
         } else if will_init {
             ty.initialized = true;
+        }
+        if needs_address {
+            ty.needs_address = true;
         }
         (LvalueExpr::Ident(id), ty.ty.clone(), ty.is_const)
     } else if let Some(global_var) = scope.global.vars.get(&idt.data) {
@@ -552,7 +560,13 @@ enum LvalueBuildErr {
 }
 
 impl<'a, 'b, 'g> UnaryBuilder<'a, 'b, 'g> {
-    fn lvalue_build<R, F>(self, rule: R, name: &str, build: F) -> AggregateResult<ExprNode>
+    fn lvalue_build<R, F>(
+        self,
+        rule: R,
+        needs_address: bool,
+        name: &str,
+        build: F,
+    ) -> AggregateResult<ExprNode>
     where
         R: FnOnce(&CType, bool) -> Result<CType, LvalueBuildErr>,
         F: FnOnce(Box<LvalueExprNode>) -> Expr,
@@ -560,6 +574,7 @@ impl<'a, 'b, 'g> UnaryBuilder<'a, 'b, 'g> {
         let res = build_ir_lvalue(
             self.inner,
             name,
+            needs_address,
             false,
             self.op_span,
             self.settings,
@@ -600,6 +615,7 @@ impl<'a, 'b, 'g> UnaryBuilder<'a, 'b, 'g> {
                     CType::Void => Err(LvalueBuildErr::WrongType(TypeCat::Scalar)),
                 }
             },
+            false,
             name,
             wrap_expr,
         )
@@ -634,6 +650,7 @@ impl<'a, 'b, 'g> UnaryBuilder<'a, 'b, 'g> {
                     inner_const: is_const,
                 })))
             },
+            true,
             "reference",
             Expr::Reference,
         )

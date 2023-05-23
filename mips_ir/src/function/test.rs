@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn empty_functions() {
-    let mut empty_cfg = Function::new("main".into());
+    let mut empty_cfg = Function::new("main".into(), Vec::new());
 
     assert!(empty_cfg.is_empty());
     assert!(empty_cfg.entry_block().is_none());
@@ -46,7 +46,7 @@ fn empty_functions() {
 
 #[test]
 fn traverses_only_referenced_labels() {
-    let mut function = Function::new("main".into());
+    let mut function = Function::new("main".into(), Vec::new());
 
     let target = function.create_block_label();
 

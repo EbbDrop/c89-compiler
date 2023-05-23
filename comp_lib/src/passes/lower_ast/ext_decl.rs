@@ -75,23 +75,25 @@ fn add_global_var(
                 extract_global_var_initializer(expr_node, settings).map(|con| (*span, con))
             }),
         ))
-        .and_then(|(DeclarationType { ty, is_const }, constant)| match ty {
-            CType::Void => AggregateResult::new_err(
-                DiagnosticBuilder::new(decl.type_name.span).build_void_vars(),
-            ),
-            _ => {
-                let res = AggregateResult::transpose_from(
-                    constant.map(|(span, constant)| check_constant_init(constant, &ty, span)),
-                );
-                res.map(|constant| ir::GlobalVarNode {
-                    original_span: ext_decl.span,
-                    comments: ext_decl.comments.map(String::from),
-                    ty,
-                    is_const,
-                    value: constant,
-                })
-            }
-        })
+        .and_then(
+            |(DeclarationType { ty, is_const, .. }, constant)| match ty {
+                CType::Void => AggregateResult::new_err(
+                    DiagnosticBuilder::new(decl.type_name.span).build_void_vars(),
+                ),
+                _ => {
+                    let res = AggregateResult::transpose_from(
+                        constant.map(|(span, constant)| check_constant_init(constant, &ty, span)),
+                    );
+                    res.map(|constant| ir::GlobalVarNode {
+                        original_span: ext_decl.span,
+                        comments: ext_decl.comments.map(String::from),
+                        ty,
+                        is_const,
+                        value: constant,
+                    })
+                }
+            },
+        )
         .and_then(|global_var| {
             check_global_var_ident(&ext_decl, &global_var, global).map(|should_redefine| {
                 if should_redefine {
@@ -265,37 +267,45 @@ pub fn function_params(
                 }
                 AggregateResult::new_ok(ty)
             })
-            .and_then(|DeclarationType { ty, is_const }| {
-                param
-                    .ident
-                    .as_ref()
-                    .map(|ident| {
-                        let item = VariableItem {
-                            original_span: param.span,
-                            ty: ty.clone(),
-                            is_const,
-                            // params will be initialized by the arguments passsed to a function call
-                            initialized: true,
-                        };
-                        match scope.vars.declare(ident.data.clone(), item) {
-                            Ok(id) => AggregateResult::new_ok(Some(id)),
-                            Err(id) => {
-                                let original_span = scope.vars.root_table().get(id).original_span;
-                                AggregateResult::new_err(
-                                    DiagnosticBuilder::new(ident.span)
-                                        .build_already_defined(&ident.data, original_span),
-                                )
+            .and_then(
+                |DeclarationType {
+                     ty,
+                     is_const,
+                     needs_address,
+                 }| {
+                    param
+                        .ident
+                        .as_ref()
+                        .map(|ident| {
+                            let item = VariableItem {
+                                original_span: param.span,
+                                ty: ty.clone(),
+                                is_const,
+                                needs_address,
+                                // params will be initialized by the arguments passsed to a function call
+                                initialized: true,
+                            };
+                            match scope.vars.declare(ident.data.clone(), item) {
+                                Ok(id) => AggregateResult::new_ok(Some(id)),
+                                Err(id) => {
+                                    let original_span =
+                                        scope.vars.root_table().get(id).original_span;
+                                    AggregateResult::new_err(
+                                        DiagnosticBuilder::new(ident.span)
+                                            .build_already_defined(&ident.data, original_span),
+                                    )
+                                }
                             }
-                        }
-                    })
-                    .unwrap_or(AggregateResult::new_ok(None))
-                    .map(|ident| ir::FunctionParamNode {
-                        span: param.span,
-                        ty,
-                        is_const,
-                        ident,
-                    })
-            })
+                        })
+                        .unwrap_or(AggregateResult::new_ok(None))
+                        .map(|ident| ir::FunctionParamNode {
+                            span: param.span,
+                            ty,
+                            is_const,
+                            ident,
+                        })
+                },
+            )
             .add_to(&mut res, |res, d| res.push(d));
     }
     res

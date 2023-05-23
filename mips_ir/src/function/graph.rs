@@ -15,7 +15,7 @@
 //! | BB, block                 | [`Basic Block`]                        |
 //!
 
-use core::panic;
+use crate::VirtualTerminator;
 
 use super::*;
 
@@ -70,6 +70,7 @@ impl BasicBlock {
                 assert!(succ_idx.0 == 0);
                 next_block
             }
+            Terminator::Virtual(VirtualTerminator::Return(_)) => panic!("invalid successor index"),
         }
     }
 
@@ -97,6 +98,7 @@ impl BasicBlock {
                 assert!(succ_idx.0 == 0);
                 next_block
             }
+            Terminator::Virtual(VirtualTerminator::Return(_)) => panic!("invalid successor index"),
         }
     }
 
@@ -113,10 +115,12 @@ impl BasicBlock {
             | Terminator::BranchIfFCond(_, _, _) => vec![SuccIdx(0), SuccIdx(1)].into_iter(),
             Terminator::BranchIfZAndLink(_, _, _, _) => vec![SuccIdx(0)].into_iter(),
             Terminator::Jump(_) => vec![SuccIdx(1)].into_iter(),
-            Terminator::ReturnToRa => vec![].into_iter(),
             Terminator::JumpAndLink(_, _)
             | Terminator::JumpAndLinkRa(_, _)
             | Terminator::JumpAndLinkReg(_, _, _) => vec![SuccIdx(0)].into_iter(),
+            Terminator::ReturnToRa | Terminator::Virtual(VirtualTerminator::Return(_)) => {
+                vec![].into_iter()
+            }
         }
     }
 
@@ -134,7 +138,9 @@ impl BasicBlock {
             | Terminator::JumpAndLink(_, _)
             | Terminator::JumpAndLinkRa(_, _)
             | Terminator::JumpAndLinkReg(_, _, _) => Some(SuccIdx(0)),
-            Terminator::Jump(_) | Terminator::ReturnToRa => None,
+            Terminator::Jump(_)
+            | Terminator::ReturnToRa
+            | Terminator::Virtual(VirtualTerminator::Return(_)) => None,
         }
     }
 
@@ -152,7 +158,8 @@ impl BasicBlock {
             | Terminator::JumpAndLink(_, _)
             | Terminator::ReturnToRa
             | Terminator::JumpAndLinkRa(_, _)
-            | Terminator::JumpAndLinkReg(_, _, _) => None,
+            | Terminator::JumpAndLinkReg(_, _, _)
+            | Terminator::Virtual(VirtualTerminator::Return(_)) => None,
         }
         .into_iter()
     }
@@ -200,7 +207,9 @@ impl BasicBlock {
                 std::mem::swap(true_target, false_target);
                 Ok((succ2, succ1))
             }
-            Terminator::Jump(_) | Terminator::ReturnToRa => {
+            Terminator::Jump(_)
+            | Terminator::ReturnToRa
+            | Terminator::Virtual(VirtualTerminator::Return(_)) => {
                 // These terminators have no successors.
                 panic!("invalid arguments supplied to try_swap_succs")
             }

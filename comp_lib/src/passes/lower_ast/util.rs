@@ -102,6 +102,7 @@ pub fn extract_literal_int(expr: &ast::Expression) -> Result<i128, LiteralExtrac
 pub struct DeclarationType {
     pub ty: CType,
     pub is_const: bool,
+    pub needs_address: bool,
 }
 
 #[cfg(test)]

@@ -377,29 +377,36 @@ fn variable_declaration(
             }
             AggregateResult::new_ok(ty)
         })
-        .and_then(|DeclarationType { ty, is_const }| {
-            let item = VariableItem {
-                original_span: span,
-                ty: ty.clone(),
-                is_const,
-                initialized: decl.initializer.is_some(),
-            };
-            match scope.vars.declare(decl.ident.data.clone(), item) {
-                Ok(id) => AggregateResult::new_ok(LvalueExprNode {
-                    span: decl.ident.span,
-                    ty,
+        .and_then(
+            |DeclarationType {
+                 ty,
+                 is_const,
+                 needs_address,
+             }| {
+                let item = VariableItem {
+                    original_span: span,
+                    ty: ty.clone(),
                     is_const,
-                    expr: LvalueExpr::Ident(id),
-                }),
-                Err(id) => {
-                    let original_span = scope.vars.root_table().get(id).original_span;
-                    AggregateResult::new_err(
-                        DiagnosticBuilder::new(decl.ident.span)
-                            .build_already_defined(&decl.ident.data, original_span),
-                    )
+                    needs_address,
+                    initialized: decl.initializer.is_some(),
+                };
+                match scope.vars.declare(decl.ident.data.clone(), item) {
+                    Ok(id) => AggregateResult::new_ok(LvalueExprNode {
+                        span: decl.ident.span,
+                        ty,
+                        is_const,
+                        expr: LvalueExpr::Ident(id),
+                    }),
+                    Err(id) => {
+                        let original_span = scope.vars.root_table().get(id).original_span;
+                        AggregateResult::new_err(
+                            DiagnosticBuilder::new(decl.ident.span)
+                                .build_already_defined(&decl.ident.data, original_span),
+                        )
+                    }
                 }
-            }
-        })
+            },
+        )
         .zip(init_expr)
         .and_then(|(mut to, init_expr)| {
             // This is the initializing assignment whitch is allowed to const values
@@ -472,5 +479,10 @@ pub fn declaration_type(
         }
     }
 
-    ty.map(|ty| DeclarationType { ty, is_const })
+    let is_array = !array_parts.is_empty();
+    ty.map(|ty| DeclarationType {
+        ty,
+        is_const,
+        needs_address: is_array,
+    })
 }

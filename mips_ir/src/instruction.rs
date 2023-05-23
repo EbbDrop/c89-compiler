@@ -1,4 +1,4 @@
-use crate::{BlockRef, FReg, Label, Reg};
+use crate::{AnyReg, BlockRef, FReg, Label, Reg, StackInfo};
 
 pub mod instr {
     use super::*;
@@ -383,6 +383,22 @@ pub mod instr {
             Instruction::Pseudo(PseudoInstruction::LoadAddress(rt, label))
         }
     }
+
+    pub mod virt {
+        use super::*;
+
+        pub fn function_call(
+            label: Label,
+            return_reg: Option<AnyReg>,
+            arguments: Vec<(AnyReg, StackInfo)>,
+        ) -> Instruction {
+            Instruction::Virtual(VirtualInstruction::FunctionCall {
+                label,
+                return_reg,
+                arguments,
+            })
+        }
+    }
 }
 
 pub mod term {
@@ -448,6 +464,15 @@ pub mod term {
     pub fn jump_and_link_reg(rd: Reg, rs: Reg, next_block: BlockRef) -> Terminator {
         Terminator::JumpAndLinkReg(rd, rs, next_block)
     }
+
+    pub mod virt {
+        use super::*;
+
+        /// Return from current function. Placing the optional value in the correct register first.
+        pub fn return_(value: Option<AnyReg>) -> Terminator {
+            Terminator::Virtual(VirtualTerminator::Return(value))
+        }
+    }
 }
 
 /// A regular instructions that can appear inside basic blocks (i.e. doesn't branch).
@@ -471,11 +496,21 @@ pub enum Instruction {
     Break,
     // Pseudo instructions supported by the assembler but not directly available in the MIPS ISA.
     Pseudo(PseudoInstruction),
+    Virtual(VirtualInstruction),
 }
 
 #[derive(Debug, Clone)]
 pub enum PseudoInstruction {
     LoadAddress(Reg, Label),
+}
+
+#[derive(Debug, Clone)]
+pub enum VirtualInstruction {
+    FunctionCall {
+        label: Label,
+        return_reg: Option<AnyReg>,
+        arguments: Vec<(AnyReg, StackInfo)>,
+    },
 }
 
 /// An instruction that branches and is used to terminate basic blocks.
@@ -491,6 +526,12 @@ pub enum Terminator {
     ReturnToRa,
     JumpAndLinkRa(Reg, BlockRef),
     JumpAndLinkReg(Reg, Reg, BlockRef),
+    Virtual(VirtualTerminator),
+}
+
+#[derive(Debug, Clone)]
+pub enum VirtualTerminator {
+    Return(Option<AnyReg>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -11,6 +11,8 @@ pub struct VariableItem {
     pub ty: CType,
     /// Defined as const
     pub is_const: bool,
+    /// Whether or not the address of the variable will ever be used
+    pub needs_address: bool,
     pub initialized: bool,
 }
 
@@ -31,6 +33,12 @@ pub struct FunctionItem {
 /// from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ItemId(usize);
+
+impl std::fmt::Display for ItemId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "id: {}", self.0)
+    }
+}
 
 /// A table from id to item, without names or scopes
 #[derive(Debug, Clone)]
@@ -86,11 +94,29 @@ impl<I> Table<I> {
         (0..self.0.len()).map(ItemId)
     }
 
-    /// An iterator visiting all item's in an unspecified order.
+    /// An iterator visiting all item's in an unspecified order. But always in the same order.
     ///
     /// Equivalent to `self.deref().iter()`.
     pub fn items(&self) -> impl Iterator<Item = &I> {
         self.0.iter()
+    }
+
+    /// Creates a new table with the same [`ItemId`]s, where every item is the result of running
+    /// the function `map`. The iteration functions on the new Table will also run in the same
+    /// order as this table .
+    pub fn map<U, F>(&self, map: F) -> Table<U>
+    where
+        F: FnMut(&I) -> U,
+    {
+        Table(self.0.iter().map(map).collect())
+    }
+
+    /// Like [`map`] but also gives the [`ItemId`].
+    pub fn map_with_id<U, F>(&self, mut map: F) -> Table<U>
+    where
+        F: FnMut(ItemId, &I) -> U,
+    {
+        Table(self.iter().map(|(id, item)| map(id, item)).collect())
     }
 }
 
