@@ -54,10 +54,15 @@ impl<'i, 's> Generator<'i, 's> {
     fn add_functions(&mut self) {
         for (ident, function) in &self.ir.functions {
             if function.is_declaration() {
+                self.root.create_external_label(ident);
                 continue;
             }
             let function = FunctionGenerator::new(self, ident, function).generate();
+            let label = function.label().clone();
             self.root.add_function(function);
+            if ident == "main" {
+                self.root.export_label(label);
+            }
         }
     }
 
