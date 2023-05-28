@@ -912,7 +912,7 @@ impl std::fmt::Display for FImmOp {
             Self::LoadWordToFpu => "lwc1",
             Self::StoreWordFromFpu => "swc1",
             Self::LoadDoublewordToFpu => "ldc1",
-            Self::StoreDoublewordFromFpu => "ldc1",
+            Self::StoreDoublewordFromFpu => "sdc1",
         })
     }
 }

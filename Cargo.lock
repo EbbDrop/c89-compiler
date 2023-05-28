@@ -186,7 +186,6 @@ dependencies = [
  "antlr-rust",
  "llvm_ir",
  "mips_ir",
- "vec1",
 ]
 
 [[package]]

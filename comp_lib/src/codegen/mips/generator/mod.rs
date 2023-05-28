@@ -7,7 +7,6 @@ use crate::ir::{self, ctype};
 use function_generator::FunctionGenerator;
 use mips_ir as mir;
 use std::{collections::HashMap, unreachable};
-use vec1::Vec1;
 
 pub struct Generator<'i, 's> {
     root: mir::Root,
@@ -15,8 +14,7 @@ pub struct Generator<'i, 's> {
     _source: &'s str,
     float_constants: HashMap<u32, mir::Label>,
     double_constants: HashMap<u64, mir::Label>,
-    _string_constants: HashMap<String, mir::Label>,
-    _bytes_constants: HashMap<Vec1<u8>, mir::Label>,
+    string_constants: HashMap<Vec<u8>, mir::Label>,
 }
 
 impl<'i, 's> Generator<'i, 's> {
@@ -27,8 +25,7 @@ impl<'i, 's> Generator<'i, 's> {
             _source: source,
             float_constants: HashMap::new(),
             double_constants: HashMap::new(),
-            _string_constants: HashMap::new(),
-            _bytes_constants: HashMap::new(),
+            string_constants: HashMap::new(),
         }
     }
 
@@ -95,30 +92,19 @@ impl<'i, 's> Generator<'i, 's> {
     }
 
     /// Does not add a null byte.
-    fn _add_string_constant(&mut self, value: String) -> &mir::Label {
-        let uid = self._string_constants.len();
-        self._string_constants
-            .entry(value)
-            .or_insert_with_key(|value| {
+    fn add_string_constant(&mut self, data: &[u8]) -> &mir::Label {
+        let uid = self.string_constants.len();
+        self.string_constants
+            .entry(data.to_vec())
+            .or_insert_with_key(|data| {
                 let label = mir::Label::from(format!("$.const.str.{uid}"));
-                self.root.add_data(mir::GlobalData::new(
-                    label.clone(),
-                    mir::DataDirective::Ascii(value.as_bytes().to_vec()),
-                ));
-                label
-            })
-    }
-
-    fn _add_bytes_constant(&mut self, value: Vec1<u8>) -> &mir::Label {
-        let uid = self._bytes_constants.len();
-        self._bytes_constants
-            .entry(value)
-            .or_insert_with_key(|value| {
-                let label = mir::Label::from(format!("$.const.bytes.{uid}"));
-                self.root.add_data(mir::GlobalData::new(
-                    label.clone(),
-                    mir::DataDirective::Bytes(value.clone()),
-                ));
+                // SPIM has a bug where zero escapes imidiatly end the string, so have
+                // to use bytes
+                // Strings will always have atleast a nullbyte so this will never fail
+                // IDEA: Add comment of original string
+                let data = mir::DataDirective::Bytes(data.clone().try_into().unwrap());
+                self.root
+                    .add_data(mir::GlobalData::new(label.clone(), data));
                 label
             })
     }
@@ -155,9 +141,10 @@ fn compile_ir_global_var(ident: &str, global_var: &ir::GlobalVarNode) -> mir::Gl
                 _ => unreachable!(),
             },
             ir::Constant::String(value) => {
+                // SPIM has a bug where zero escapes imidiatly end the string, so have
+                // to use bytes
                 // Strings will always have atleast a nullbyte so this will never fail
-                // IDEA: use ascii directive with escapes
-                mir::DataDirective::Bytes(Vec1::try_from_vec(value.clone()).unwrap())
+                mir::DataDirective::Bytes(value.clone().try_into().unwrap())
             }
         },
         None => mir::DataDirective::Space(props.size),

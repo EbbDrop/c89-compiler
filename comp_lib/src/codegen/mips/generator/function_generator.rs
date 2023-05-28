@@ -1,18 +1,16 @@
 use std::collections::HashSet;
 
 use super::{
-    mips_value::{MipsLvalue, MipsValue},
+    expr_generator::{BinaryExprGenerator, UnaryExprGenerator},
+    mips_value::{MipsCondOrValue, MipsLvalue, MipsValue, StackedMipsValue},
     util::{self, RegType},
 };
-use crate::{
-    codegen::mips::generator::expr_generator::BinaryExprGenerator,
-    ir::{self, ctype, ctype::CType},
-};
+use crate::ir::{self, ctype, ctype::CType};
 use mips_ir as mir;
 use mir::BlockRef;
 
 pub struct FunctionGenerator<'g, 'i, 's> {
-    root_generator: &'g mut super::Generator<'i, 's>,
+    pub root_generator: &'g mut super::Generator<'i, 's>,
     function: mir::Function,
     ir: &'i ir::FunctionNode,
     register_types: ir::table::Table<util::RegType>,
@@ -26,17 +24,54 @@ pub struct FunctionGenerator<'g, 'i, 's> {
 pub struct Builder {
     pub bb: mir::BBBuilder,
     pub var_registers: ir::table::Table<mir::AnyReg>,
+    pub expr_res_stack: Vec<(mir::AnyReg, RegType)>,
     pub continue_label: Option<mir::BlockLabel>,
     pub break_label: Option<mir::BlockLabel>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum IncDecType {
+    Prefix,
+    Postfix,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum LogicalBuilderType {
+    And,
+    Or,
+}
+
 impl Builder {
     fn get_all_registers(&self) -> Vec<mir::AnyReg> {
-        self.var_registers.to_vec()
+        self.var_registers
+            .items()
+            .cloned()
+            .chain(self.expr_res_stack.iter().map(|(reg, _)| *reg))
+            .collect()
     }
 
     fn create_block_ref(&self, label: mir::BlockLabel) -> BlockRef {
         mir::BlockRef::new(label, self.get_all_registers())
+    }
+
+    pub fn push_to_expr_stack(&mut self, value: MipsValue, ty: &CType) -> StackedMipsValue {
+        let reg = match value {
+            MipsValue::Imm(value) => return StackedMipsValue::Imm(value),
+            MipsValue::Reg(reg) => reg.into(),
+            MipsValue::FReg(freg) => freg.into(),
+        };
+        self.expr_res_stack.push((reg, util::ctype_reg_type(ty)));
+        StackedMipsValue::InStack
+    }
+
+    pub fn pop_off_expr_stack(&mut self, value: StackedMipsValue) -> MipsValue {
+        match value {
+            StackedMipsValue::Imm(value) => MipsValue::Imm(value),
+            StackedMipsValue::InStack => {
+                let reg = self.expr_res_stack.pop().unwrap().0;
+                reg.into()
+            }
+        }
     }
 }
 
@@ -116,6 +151,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         let mut builder = Builder {
             bb: bbbuilder,
             var_registers,
+            expr_res_stack: Vec::new(),
             continue_label: None,
             break_label: None,
         };
@@ -133,22 +169,10 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
     /// Creates a new builder with arguments for all the items, taking the continue and break
     /// labels from the given `prev_builder`
     fn create_new_builder(&mut self, prev_builder: &Builder) -> (mir::BlockLabel, Builder) {
-        let registers = self
-            .register_types
-            .clone()
-            .map(|reg| self.new_register_of_type(*reg));
-
-        let new_block_builder = self.function.start_new_block(registers.to_vec());
-        let label = new_block_builder.label().clone();
-
+        let label = self.function.create_block_label();
         (
-            label,
-            Builder {
-                bb: new_block_builder,
-                var_registers: registers,
-                continue_label: prev_builder.continue_label.clone(),
-                break_label: prev_builder.break_label.clone(),
-            },
+            label.clone(),
+            self.create_builder_with_label(label, prev_builder),
         )
     }
 
@@ -164,11 +188,25 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             .clone()
             .map(|reg| self.new_register_of_type(*reg));
 
-        let new_block_builder = self.function.start_block(label, registers.to_vec());
+        let expr_regs: Vec<_> = prev_builder
+            .expr_res_stack
+            .iter()
+            .map(|(_, reg_type)| (self.new_register_of_type(*reg_type), *reg_type))
+            .collect();
+
+        let new_block_builder = self.function.start_block(
+            label,
+            registers
+                .items()
+                .cloned()
+                .chain(expr_regs.iter().map(|(reg, _)| *reg))
+                .collect(),
+        );
 
         Builder {
             bb: new_block_builder,
             var_registers: registers,
+            expr_res_stack: expr_regs,
             continue_label: prev_builder.continue_label.clone(),
             break_label: prev_builder.break_label.clone(),
         }
@@ -186,7 +224,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         match &stmt_node.stmt {
             ir::Stmt::Expr(node) => self.add_ir_expr_node(builder, node).0,
             ir::Stmt::IfStmt(node) => self.add_ir_if(builder, node),
-            ir::Stmt::SwitchStmt(_) => todo!(),
+            ir::Stmt::SwitchStmt(node) => self.add_ir_switch(builder, node),
             ir::Stmt::LoopStmt(node) => self.add_ir_loop(builder, node),
             ir::Stmt::Break => self.add_ir_break(builder),
             ir::Stmt::Continue => self.add_ir_continue(builder),
@@ -198,7 +236,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         &mut self,
         mut builder: Builder,
         expr_node: &ir::ExprNode,
-    ) -> (Builder, MipsValue) {
+    ) -> (Builder, MipsCondOrValue) {
         use ir::Expr as E;
         match &expr_node.expr {
             E::LvalueDeref(expr) => self.add_ir_lvalue_deref(builder, expr, &expr_node.ty),
@@ -209,12 +247,31 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             E::FunctionCall(name, arguments) => {
                 self.add_ir_function_call(builder, name, arguments, &expr_node.ty)
             }
-            E::PostfixInc(_) => todo!(),
-            E::PostfixDec(_) => todo!(),
-            E::PrefixInc(_) => todo!(),
-            E::PrefixDec(_) => todo!(),
+            E::PostfixInc(node) => {
+                self.add_ir_post_pre_inc_dec(builder, node, 1, IncDecType::Postfix)
+            }
+            E::PostfixDec(node) => {
+                self.add_ir_post_pre_inc_dec(builder, node, -1, IncDecType::Postfix)
+            }
+            E::PrefixInc(node) => {
+                self.add_ir_post_pre_inc_dec(builder, node, 1, IncDecType::Prefix)
+            }
+            E::PrefixDec(node) => {
+                self.add_ir_post_pre_inc_dec(builder, node, -1, IncDecType::Prefix)
+            }
             E::Reference(expr) => self.add_ir_reference(builder, expr),
-            E::UnaryArith(_, _) => todo!(),
+            E::UnaryArith(op, expr) => {
+                let generator = UnaryExprGenerator {
+                    function_generator: self,
+                    expr,
+                    to_type: &expr_node.ty,
+                };
+                match op {
+                    ir::UnaryOp::Neg => generator.add_ir_neg(builder),
+                    ir::UnaryOp::BitNot => generator.add_ir_bitnot(builder),
+                    ir::UnaryOp::Not => generator.add_ir_not(builder),
+                }
+            }
             E::Binary(left, op, right) => {
                 let generator = BinaryExprGenerator {
                     function_generator: self,
@@ -233,9 +290,28 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                     ir::BinaryOp::Bitwise(op) => generator.add_ir_bitwise(builder, op),
                 }
             }
-            E::Relation(_, _, _) => todo!(),
-            E::LogicalAnd(_, _) => todo!(),
-            E::LogicalOr(_, _) => todo!(),
+            E::Relation(left, op, right) => {
+                let generator = BinaryExprGenerator {
+                    function_generator: self,
+                    left,
+                    right,
+                    to_type: &expr_node.ty,
+                };
+                match op {
+                    ir::RelationOp::Eq => generator.add_ir_rel_eq(builder),
+                    ir::RelationOp::Ne => generator.add_ir_rel_ne(builder),
+                    ir::RelationOp::Lt => generator.add_ir_rel_lt(builder),
+                    ir::RelationOp::Gt => generator.add_ir_rel_gt(builder),
+                    ir::RelationOp::Ge => generator.add_ir_rel_ge(builder),
+                    ir::RelationOp::Le => generator.add_ir_rel_le(builder),
+                }
+            }
+            E::LogicalAnd(left, right) => {
+                self.add_ir_logical_and(builder, left, right, LogicalBuilderType::And)
+            }
+            E::LogicalOr(left, right) => {
+                self.add_ir_logical_and(builder, left, right, LogicalBuilderType::Or)
+            }
             E::Assign(to_value, from_value) => self.add_ir_assign(builder, to_value, from_value),
             E::Cast(from) => self.cast(builder, from, &expr_node.ty),
         }
@@ -246,7 +322,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         builder: Builder,
         expr: &ir::LvalueExprNode,
         to_type: &CType,
-    ) -> (Builder, MipsValue) {
+    ) -> (Builder, MipsCondOrValue) {
         let (mut builder, value) = self.add_ir_lvalue_node(builder, expr);
         let value = match value {
             MipsLvalue::Address(reg) => {
@@ -297,28 +373,15 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         builder: &mut Builder,
         constant: &ir::Constant,
         ty: &CType,
-    ) -> MipsValue {
+    ) -> MipsCondOrValue {
         use ctype::{Arithmetic, Scalar};
         match constant {
             &ir::Constant::Integer(value) => {
                 // Too many instructions sign extend so it's handier to make sure the value always
                 // fits in a signed 16-bit value.
                 match i16::try_from(value) {
-                    Ok(imm) => MipsValue::Imm(imm as u16),
-                    Err(_) => {
-                        let reg_upper = self.new_register();
-                        let out_reg = self.new_register();
-                        builder.bb.add_instruction(mir::instr::load_upper(
-                            reg_upper,
-                            (value >> 16) as u16,
-                        ));
-                        builder.bb.add_instruction(mir::instr::or_imm(
-                            out_reg,
-                            reg_upper,
-                            value as u16,
-                        ));
-                        out_reg.into()
-                    }
+                    Ok(imm) => MipsCondOrValue::Value(MipsValue::Imm(imm as u16)),
+                    Err(_) => self.load_int_constant(builder, value).into(),
                 }
             }
             &ir::Constant::Float(value) => match ty {
@@ -332,11 +395,43 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                 }
                 _ => panic!("ICE: float constants must have floating-point type"),
             },
-            ir::Constant::String(_) => todo!(),
+            ir::Constant::String(data) => {
+                let label = self.root_generator.add_string_constant(data).clone();
+                let reg = self.new_register();
+                builder
+                    .bb
+                    .add_instruction(mir::instr::pseudo::load_address(reg, label));
+                reg.into()
+            }
         }
     }
 
-    fn load_float(&mut self, builder: &mut Builder, label: mir::Label) -> mir::FReg {
+    /// Will only load the lowwer 32 bits of the value into the register
+    pub fn load_int_constant(&mut self, builder: &mut Builder, value: i128) -> mir::Reg {
+        // or_imm zero extends so its fine to use a u16 here.
+        match u16::try_from(value) {
+            Ok(value) => {
+                let out_reg = self.new_register();
+                builder
+                    .bb
+                    .add_instruction(mir::instr::or_imm(out_reg, mir::Reg::ZERO, value));
+                out_reg
+            }
+            Err(_) => {
+                let reg_upper = self.new_register();
+                let out_reg = self.new_register();
+                builder
+                    .bb
+                    .add_instruction(mir::instr::load_upper(reg_upper, (value >> 16) as u16));
+                builder
+                    .bb
+                    .add_instruction(mir::instr::or_imm(out_reg, reg_upper, value as u16));
+                out_reg
+            }
+        }
+    }
+
+    pub fn load_float(&mut self, builder: &mut Builder, label: mir::Label) -> mir::FReg {
         let reg = self.new_register();
         let freg = self.new_float_register();
         builder
@@ -348,7 +443,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         freg
     }
 
-    fn load_double(&mut self, builder: &mut Builder, label: mir::Label) -> mir::FReg {
+    pub fn load_double(&mut self, builder: &mut Builder, label: mir::Label) -> mir::FReg {
         let reg = self.new_register();
         let freg = self.new_double_register();
         builder
@@ -366,10 +461,11 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         name: &str,
         arguments: &[ir::ExprNode],
         to_type: &CType,
-    ) -> (Builder, MipsValue) {
+    ) -> (Builder, MipsCondOrValue) {
         let mut reg_arguments = Vec::with_capacity(arguments.len());
         for argument in arguments {
             let (b, value) = self.add_ir_expr_node(builder, argument);
+            let (b, value) = self.cond_to_value(b, value);
             builder = b;
             let reg = self.value_into_reg(&mut builder, value, &argument.ty);
             let stack_info = util::ctype_props(&argument.ty);
@@ -391,18 +487,176 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             Some(reg) => reg.into(),
             None => {
                 // This value will not be used, if the lower_ast step did its job correctly.
-                MipsValue::Imm(0)
+                MipsCondOrValue::Value(MipsValue::Imm(0))
             }
         };
 
         (builder, value)
     }
 
+    fn lvalue_operation<OPI, OPF>(
+        &mut self,
+        builder: Builder,
+        node: &ir::LvalueExprNode,
+        op_int: OPI,
+        op_float: OPF,
+    ) -> (Builder, MipsCondOrValue)
+    where
+        OPI: FnOnce(&mut Self, mir::Reg, &mut Builder) -> (mir::Reg, MipsCondOrValue),
+        OPF: FnOnce(&mut Self, mir::FReg, mir::FFmt, &mut Builder) -> (mir::FReg, MipsCondOrValue),
+    {
+        let (mut builder, lvalue) = self.add_ir_lvalue_node(builder, node);
+
+        let ffmt = util::ctype_floating_fmt(&node.ty);
+        let value = match lvalue {
+            MipsLvalue::Address(ptr_reg) => match ffmt {
+                Some(ffmt) => {
+                    let old_reg = self.new_ffmt_register(ffmt);
+
+                    let inst = match ffmt {
+                        mir::FFmt::S => mir::instr::load_word_to_fpu(old_reg, ptr_reg, 0),
+                        mir::FFmt::D => mir::instr::load_doubleword_to_fpu(old_reg, ptr_reg, 0),
+                    };
+                    builder.bb.add_instruction(inst);
+
+                    let (new_reg, value) = op_float(self, old_reg, ffmt, &mut builder);
+
+                    let inst = match ffmt {
+                        mir::FFmt::S => mir::instr::store_word_from_fpu(new_reg, ptr_reg, 0),
+                        mir::FFmt::D => mir::instr::store_doubleword_from_fpu(new_reg, ptr_reg, 0),
+                    };
+                    builder.bb.add_instruction(inst);
+
+                    value
+                }
+
+                None => {
+                    let props = util::ctype_props(&node.ty);
+
+                    let old_reg = self.new_register();
+
+                    let inst = match (props.size as u32, props.signed) {
+                        (mir::size::BYTE, false) => mir::instr::load_byte_u(old_reg, ptr_reg, 0),
+                        (mir::size::BYTE, true) => mir::instr::load_byte_s(old_reg, ptr_reg, 0),
+                        (mir::size::HALF, false) => mir::instr::load_half_u(old_reg, ptr_reg, 0),
+                        (mir::size::HALF, true) => mir::instr::load_half_s(old_reg, ptr_reg, 0),
+                        (mir::size::WORD, _) => mir::instr::load_word(old_reg, ptr_reg, 0),
+                        (other_size, _) => {
+                            unreachable!("ICE: unexpected size for lvalue operation: {other_size}")
+                        }
+                    };
+                    builder.bb.add_instruction(inst);
+
+                    let (new_value_reg, value) = op_int(self, old_reg, &mut builder);
+
+                    let inst = match props.size as u32 {
+                        mir::size::BYTE => mir::instr::store_byte(new_value_reg, ptr_reg, 0),
+                        mir::size::HALF => mir::instr::store_half(new_value_reg, ptr_reg, 0),
+                        mir::size::WORD => mir::instr::store_word(new_value_reg, ptr_reg, 0),
+                        _ => unreachable!("ICE: storing value with invalid size"),
+                    };
+                    builder.bb.add_instruction(inst);
+
+                    value
+                }
+            },
+            MipsLvalue::Reg(id) => {
+                let old_reg = builder.var_registers.get(id);
+                match old_reg {
+                    mir::AnyReg::R(reg) => {
+                        let (new_value_reg, value) = op_int(self, *reg, &mut builder);
+                        *builder.var_registers.get_mut(id) = new_value_reg.into();
+                        value
+                    }
+                    mir::AnyReg::F(freg) => {
+                        let ffmt = ffmt.unwrap();
+                        let (new_value_freg, value) = op_float(self, *freg, ffmt, &mut builder);
+                        *builder.var_registers.get_mut(id) = new_value_freg.into();
+                        value
+                    }
+                }
+            }
+        };
+        (builder, value)
+    }
+
+    fn add_ir_post_pre_inc_dec(
+        &mut self,
+        builder: Builder,
+        node: &ir::LvalueExprNode,
+        dir: i16,
+        op_type: IncDecType,
+    ) -> (Builder, MipsCondOrValue) {
+        let pointer_size = match &node.ty {
+            CType::Scalar(ctype::Scalar::Pointer(ctype::Pointer { inner, .. })) => {
+                let size = util::ctype_props(inner).size;
+                Some(size)
+            }
+            _ => None,
+        };
+
+        self.lvalue_operation(
+            builder,
+            node,
+            |s, in_reg, builder| {
+                let new_reg = s.new_register();
+                match pointer_size {
+                    Some(size) => {
+                        if let Some(offset) = i16::try_from(size)
+                            .ok()
+                            .and_then(|size| dir.checked_mul(size))
+                        {
+                            builder.bb.add_instruction(mir::instr::add_u_imm(
+                                new_reg,
+                                in_reg,
+                                offset as u16,
+                            ));
+                        } else {
+                            let offset_reg = s.load_int_constant(builder, size as i128);
+                            builder
+                                .bb
+                                .add_instruction(mir::instr::add_u(new_reg, in_reg, offset_reg));
+                        }
+                    }
+                    None => {
+                        builder
+                            .bb
+                            .add_instruction(mir::instr::add_u_imm(new_reg, in_reg, dir as u16));
+                    }
+                }
+                match op_type {
+                    IncDecType::Postfix => (new_reg, in_reg.into()),
+                    IncDecType::Prefix => (new_reg, new_reg.into()),
+                }
+            },
+            |s, in_reg, ffmt, builder| {
+                let dir_reg = match ffmt {
+                    mir::FFmt::S => {
+                        let label = s.root_generator.add_float_constant(dir as f32).clone();
+                        s.load_float(builder, label)
+                    }
+                    mir::FFmt::D => {
+                        let label = s.root_generator.add_double_constant(dir as f64).clone();
+                        s.load_double(builder, label)
+                    }
+                };
+                let new_reg = s.new_ffmt_register(ffmt);
+                builder
+                    .bb
+                    .add_instruction(mir::instr::add(ffmt, new_reg, in_reg, dir_reg));
+                match op_type {
+                    IncDecType::Postfix => (new_reg, in_reg.into()),
+                    IncDecType::Prefix => (new_reg, new_reg.into()),
+                }
+            },
+        )
+    }
+
     fn add_ir_reference(
         &mut self,
         builder: Builder,
         expr: &ir::LvalueExprNode,
-    ) -> (Builder, MipsValue) {
+    ) -> (Builder, MipsCondOrValue) {
         let (builder, value) = self.add_ir_lvalue_node(builder, expr);
         match value {
             MipsLvalue::Address(reg) => (builder, reg.into()),
@@ -412,15 +666,70 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         }
     }
 
+    fn add_ir_logical_and(
+        &mut self,
+        builder: Builder,
+        left_node: &ir::ExprNode,
+        right_node: &ir::ExprNode,
+        l_type: LogicalBuilderType,
+    ) -> (Builder, MipsCondOrValue) {
+        let (end_lable, mut end_builder) = self.create_new_builder(&builder);
+        let out_reg = self.new_register();
+        end_builder.bb.add_argument(out_reg.into());
+
+        let mut value_setter = |value: u16| {
+            let (label, mut builder) = self.create_new_builder(&builder);
+            let out_reg = self.new_register();
+            builder
+                .bb
+                .add_instruction(mir::instr::or_imm(out_reg, mir::Reg::ZERO, value));
+            let mut to_end = builder.create_block_ref(end_lable.clone());
+            to_end.arguments.push(out_reg.into());
+            self.function
+                .add_block(builder.bb.terminate(mir::term::jump(to_end)));
+            label
+        };
+
+        let set_one_label = value_setter(1);
+        let set_zero_label = value_setter(0);
+
+        let right_eval_label = self.function.create_block_label();
+        let (mut builder, left) = self.add_ir_expr_node(builder, left_node);
+
+        let (truthy, falsy) = match l_type {
+            LogicalBuilderType::And => (right_eval_label.clone(), set_zero_label.clone()),
+            LogicalBuilderType::Or => (set_one_label.clone(), right_eval_label.clone()),
+        };
+        let branch = self.make_condition(&mut builder, left, &left_node.ty, truthy, falsy);
+
+        let right_eval_builder = self.create_builder_with_label(right_eval_label, &builder);
+
+        self.function.add_block(builder.bb.terminate(branch));
+
+        let (mut right_eval_builder, right) = self.add_ir_expr_node(right_eval_builder, right_node);
+        let branch = self.make_condition(
+            &mut right_eval_builder,
+            right,
+            &right_node.ty,
+            set_one_label,
+            set_zero_label,
+        );
+        self.function
+            .add_block(right_eval_builder.bb.terminate(branch));
+
+        (end_builder, out_reg.into())
+    }
+
     fn add_ir_assign(
         &mut self,
         builder: Builder,
         to_node: &ir::LvalueExprNode,
         from_node: &ir::ExprNode,
-    ) -> (Builder, MipsValue) {
+    ) -> (Builder, MipsCondOrValue) {
         let (builder, to) = self.add_ir_lvalue_node(builder, to_node);
-        let (mut builder, from) = self.add_ir_expr_node(builder, from_node);
+        let (builder, from) = self.add_ir_expr_node(builder, from_node);
 
+        let (mut builder, from) = self.cond_to_value(builder, from);
         let from = self.value_into_reg(&mut builder, from, &from_node.ty);
 
         match to {
@@ -455,9 +764,10 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         builder: Builder,
         from: &ir::ExprNode,
         to_type: &CType,
-    ) -> (Builder, MipsValue) {
+    ) -> (Builder, MipsCondOrValue) {
         let from_ty = &from.ty;
-        let (mut builder, from) = self.add_ir_expr_node(builder, from);
+        let (builder, from) = self.add_ir_expr_node(builder, from);
+        let (mut builder, from) = self.cond_to_value(builder, from);
 
         let out_reg = match from {
             MipsValue::Imm(value) => match util::ctype_floating_fmt(to_type) {
@@ -475,20 +785,23 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                         out_reg,
                         int_in_float_reg,
                     ));
-                    MipsValue::FReg(out_reg)
+                    out_reg.into()
                 }
-                _ => {
-                    match to_type {
-                        CType::Scalar(ctype::Scalar::Pointer(_)) => {
-                            self.imm_to_reg(&mut builder, value, from_ty).into()
-                        }
-                        CType::Scalar(ctype::Scalar::Arithmetic(_)) => {
-                            // The other steps can all deal with imm's of arbritrary size
-                            MipsValue::Imm(value)
-                        }
-                        _ => unreachable!("ICE: invalid to cast type"),
+                _ => match to_type {
+                    CType::Scalar(ctype::Scalar::Pointer(_)) => {
+                        self.imm_to_reg(&mut builder, value, from_ty).into()
                     }
-                }
+                    CType::Scalar(ctype::Scalar::Arithmetic(_)) => {
+                        let to_size = util::ctype_props(to_type).size;
+                        let value = if to_size == mir::size::BYTE as u128 {
+                            value & 0xff
+                        } else {
+                            value
+                        };
+                        MipsCondOrValue::Value(MipsValue::Imm(value))
+                    }
+                    _ => unreachable!("ICE: invalid to cast type"),
+                },
             },
             MipsValue::Reg(reg) => match util::ctype_floating_fmt(to_type) {
                 Some(to_fmt) => {
@@ -503,7 +816,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                         out_reg,
                         int_in_float_reg,
                     ));
-                    MipsValue::FReg(out_reg)
+                    out_reg.into()
                 }
                 None => {
                     let from_size = util::ctype_props(from_ty).size;
@@ -550,7 +863,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                     util::ctype_floating_fmt(to_type),
                     util::ctype_floating_fmt(from_ty),
                 ) {
-                    (Some(to_fmt), Some(from_fmt)) if to_fmt == from_fmt => MipsValue::FReg(reg),
+                    (Some(to_fmt), Some(from_fmt)) if to_fmt == from_fmt => reg.into(),
                     (Some(to_fmt), Some(from_fmt)) => {
                         let out_reg = self.new_ffmt_register(to_fmt);
 
@@ -558,7 +871,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                             .bb
                             .add_instruction(mir::instr::convert(to_fmt, from_fmt, out_reg, reg));
 
-                        MipsValue::FReg(out_reg)
+                        out_reg.into()
                     }
                     (_, Some(from_fmt)) => {
                         let integer_in_freg = self.new_float_register();
@@ -573,7 +886,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                             .bb
                             .add_instruction(mir::instr::move_from_fpu(out_reg, integer_in_freg));
 
-                        MipsValue::Reg(out_reg)
+                        out_reg.into()
                     }
                     _ => unreachable!(),
                 }
@@ -622,9 +935,8 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         expr: &ir::ExprNode,
     ) -> (Builder, MipsLvalue) {
         let (builder, value) = self.add_ir_expr_node(builder, expr);
-        let reg = match value {
-            MipsValue::Reg(reg) => reg,
-            _ => unreachable!(),
+        let MipsCondOrValue::Value(MipsValue::Reg(reg)) = value else {
+            unreachable!()
         };
         (builder, MipsLvalue::Address(reg))
     }
@@ -634,23 +946,33 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
     fn make_condition(
         &mut self,
         builder: &mut Builder,
-        cond: mir::AnyReg,
+        cond: MipsCondOrValue,
+        value_type: &CType,
         truthy: mir::BlockLabel,
         falsy: mir::BlockLabel,
     ) -> mir::Terminator {
         let truthy_ref = builder.create_block_ref(truthy);
         let falsy_ref = builder.create_block_ref(falsy);
         match cond {
-            mir::AnyReg::R(reg) => {
+            MipsCondOrValue::FloatCond { inverse } => {
+                mir::term::branch_if_f_cond(!inverse, falsy_ref, truthy_ref)
+            }
+            MipsCondOrValue::Value(MipsValue::Reg(reg)) => {
                 mir::term::branch_if(mir::BCond::Eq, reg, mir::Reg::ZERO, falsy_ref, truthy_ref)
             }
-            mir::AnyReg::F(_reg) => todo!(),
+            MipsCondOrValue::Value(MipsValue::FReg(reg)) => {
+                self.add_float_zero_eq_check(builder, reg, value_type);
+                mir::term::branch_if_f_cond(false, falsy_ref, truthy_ref)
+            }
+            MipsCondOrValue::Value(MipsValue::Imm(value)) => match value {
+                0 => mir::term::jump(falsy_ref),
+                _ => mir::term::jump(truthy_ref),
+            },
         }
     }
 
     fn add_ir_if(&mut self, builder: Builder, node: &ir::IfStmtNode) -> Builder {
         let (mut start_builder, cond_value) = self.add_ir_expr_node(builder, &node.condition);
-        let cond_value = self.value_into_reg(&mut start_builder, cond_value, &node.condition.ty);
 
         let end_label = self.function.create_block_label();
 
@@ -676,10 +998,104 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
 
         let end_builder = self.create_builder_with_label(end_label, &start_builder);
 
-        let branching_terminator =
-            self.make_condition(&mut start_builder, cond_value, if_case_label, falsy_label);
+        let branching_terminator = self.make_condition(
+            &mut start_builder,
+            cond_value,
+            &node.condition.ty,
+            if_case_label,
+            falsy_label,
+        );
         self.function
             .add_block(start_builder.bb.terminate(branching_terminator));
+
+        end_builder
+    }
+
+    fn add_ir_switch(&mut self, builder: Builder, node: &ir::SwitchStmtNode) -> Builder {
+        let (builder, value) = self.add_ir_expr_node(builder, &node.expr);
+        let (mut builder, value) = self.cond_to_value(builder, value);
+        let value = match self.value_into_reg(&mut builder, value, &node.expr.ty) {
+            mir::AnyReg::R(reg) => reg,
+            mir::AnyReg::F(_) => unreachable!("ICE: non integer switch case"),
+        };
+
+        let (end_label, end_builder) = self.create_new_builder(&builder);
+
+        let mut cases_builder: Option<Builder> = None;
+        let mut switch_builder_and_expr_reg = (builder, value);
+
+        let mut default_label = None;
+
+        for case in &node.cases {
+            let cur_label = self.function.create_block_label();
+
+            let cur_builder = if let Some(prev_builder) = cases_builder {
+                let cur_builder = self.create_builder_with_label(cur_label.clone(), &prev_builder);
+
+                let jump_to_cur = mir::term::jump(prev_builder.create_block_ref(cur_label.clone()));
+                self.function
+                    .add_block(prev_builder.bb.terminate(jump_to_cur));
+
+                cur_builder
+            } else {
+                let mut cur_builder = self
+                    .create_builder_with_label(cur_label.clone(), &switch_builder_and_expr_reg.0);
+                cur_builder.break_label = Some(end_label.clone());
+                cur_builder
+            };
+
+            let body = match &case.data {
+                ir::SwitchStmtCase::Case { label, body } => {
+                    let (mut switch_builder, switch_expr_reg) = switch_builder_and_expr_reg;
+
+                    let (next_switch_label, mut next_switch_builder) =
+                        self.create_new_builder(&switch_builder);
+                    let label_reg = self.load_int_constant(&mut switch_builder, *label);
+
+                    let eq_ref = switch_builder.create_block_ref(cur_label.clone());
+                    let mut neq_ref = switch_builder.create_block_ref(next_switch_label);
+                    neq_ref.arguments.push(switch_expr_reg.into());
+
+                    let term = mir::term::branch_if(
+                        mir::BCond::Eq,
+                        switch_expr_reg,
+                        label_reg,
+                        eq_ref,
+                        neq_ref,
+                    );
+                    self.function.add_block(switch_builder.bb.terminate(term));
+
+                    let next_switch_expr_reg = self.new_register();
+                    next_switch_builder
+                        .bb
+                        .add_argument(next_switch_expr_reg.into());
+
+                    switch_builder_and_expr_reg = (next_switch_builder, next_switch_expr_reg);
+
+                    body
+                }
+                ir::SwitchStmtCase::Default { body } => {
+                    default_label = Some(cur_label);
+                    body
+                }
+            };
+            let cur_builder = self.add_ir_block_node(cur_builder, body);
+
+            cases_builder = Some(cur_builder);
+        }
+
+        if let Some(case_builder) = cases_builder {
+            let jump_to_end = mir::term::jump(case_builder.create_block_ref(end_label.clone()));
+            self.function
+                .add_block(case_builder.bb.terminate(jump_to_end));
+        }
+
+        let last_jump = default_label.unwrap_or(end_label);
+
+        let switch_builder = switch_builder_and_expr_reg.0;
+        let jump_to_last = mir::term::jump(switch_builder.create_block_ref(last_jump));
+        self.function
+            .add_block(switch_builder.bb.terminate(jump_to_last));
 
         end_builder
     }
@@ -687,19 +1103,39 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
     pub fn add_ir_loop(&mut self, builder: Builder, node: &ir::LoopStmtNode) -> Builder {
         let (start_label, start_builder) = self.create_new_builder(&builder);
 
-        let end_label = self.function.create_block_label();
+        let to_start = mir::term::jump(builder.create_block_ref(start_label.clone()));
+        self.function.add_block(builder.bb.terminate(to_start));
+
+        let (end_label, end_builder) = self.create_new_builder(&start_builder);
+
+        let continuation_label = match &node.continuation {
+            Some(_) => self.function.create_block_label(),
+            None => start_label.clone(),
+        };
+
+        if let Some(continuation_node) = &node.continuation {
+            let continuation_builder =
+                self.create_builder_with_label(continuation_label.clone(), &start_builder);
+            let continuation_builder = self
+                .add_ir_expr_node(continuation_builder, continuation_node)
+                .0;
+
+            let continuation_terminator =
+                mir::term::jump(continuation_builder.create_block_ref(start_label));
+            self.function
+                .add_block(continuation_builder.bb.terminate(continuation_terminator));
+        }
 
         let mut body_builder = if let Some(condition_node) = &node.condition {
             let (mut start_builder, cond_value) =
                 self.add_ir_expr_node(start_builder, condition_node);
-            let cond_value =
-                self.value_into_reg(&mut start_builder, cond_value, &condition_node.ty);
 
             let (body_label, body_builder) = self.create_new_builder(&start_builder);
 
             let branching_terminator = self.make_condition(
                 &mut start_builder,
                 cond_value,
+                &condition_node.ty,
                 body_label,
                 end_label.clone(),
             );
@@ -711,37 +1147,14 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             start_builder
         };
 
-        let continuation_label = match &node.continuation {
-            Some(_) => self.function.create_block_label(),
-            None => start_label.clone(),
-        };
-
         body_builder.continue_label = Some(continuation_label.clone());
-        body_builder.break_label = Some(end_label.clone());
+        body_builder.break_label = Some(end_label);
 
         let body_builder = self.add_ir_block_node(body_builder, &node.body);
-
-        if let Some(continuation_node) = &node.continuation {
-            let continuation_builder =
-                self.create_builder_with_label(continuation_label.clone(), &builder);
-            let continuation_builder = self
-                .add_ir_expr_node(continuation_builder, continuation_node)
-                .0;
-
-            let continuation_terminator =
-                mir::term::jump(continuation_builder.create_block_ref(start_label.clone()));
-            self.function
-                .add_block(continuation_builder.bb.terminate(continuation_terminator));
-        }
 
         let terminator = mir::term::jump(body_builder.create_block_ref(continuation_label));
         self.function
             .add_block(body_builder.bb.terminate(terminator));
-
-        let end_builder = self.create_builder_with_label(end_label, &builder);
-
-        let to_start = mir::term::jump(builder.create_block_ref(start_label));
-        self.function.add_block(builder.bb.terminate(to_start));
 
         end_builder
     }
@@ -775,7 +1188,8 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
     fn add_ir_return(&mut self, builder: Builder, node: Option<&ir::ExprNode>) -> Builder {
         let (builder, reg) = match node {
             Some(node) => {
-                let (mut builder, value) = self.add_ir_expr_node(builder, node);
+                let (builder, value) = self.add_ir_expr_node(builder, node);
+                let (mut builder, value) = self.cond_to_value(builder, value);
                 let reg = self.value_into_reg(&mut builder, value, &node.ty);
                 (builder, Some(reg))
             }
@@ -788,6 +1202,29 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             .add_block(builder.bb.terminate(mir::term::virt::return_(reg)));
 
         new_builder
+    }
+
+    // Adds the instructions to check if a floating point value equals zere, the result will be stored in teh
+    pub fn add_float_zero_eq_check(&mut self, builder: &mut Builder, reg: mir::FReg, ty: &CType) {
+        let fmt =
+            util::ctype_floating_fmt(ty).expect("foat equality check needs to have floating type");
+        let zero_reg = match fmt {
+            mir::FFmt::S => {
+                let zero_reg = self.new_float_register();
+                builder
+                    .bb
+                    .add_instruction(mir::instr::move_to_fpu(mir::Reg::ZERO, zero_reg));
+                zero_reg
+            }
+            mir::FFmt::D => {
+                //IDEA: Add virtual instruction to load zero into double register
+                let zero_const = self.root_generator.add_double_constant(0.0).clone();
+                self.load_double(builder, zero_const)
+            }
+        };
+        builder
+            .bb
+            .add_instruction(mir::instr::cmp(mir::FCmp::Eq(fmt), zero_reg, reg))
     }
 
     pub fn imm_to_reg(&mut self, builder: &mut Builder, value: u16, ty: &CType) -> mir::Reg {
@@ -804,13 +1241,12 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                         .add_instruction(mir::instr::or_imm(reg, mir::Reg::ZERO, value));
                 }
             }
-
             _ => panic!("ICE: non-arithmetic immediate"),
         }
         reg
     }
 
-    fn value_into_reg(
+    pub fn value_into_reg(
         &mut self,
         builder: &mut Builder,
         value: MipsValue,
@@ -820,6 +1256,43 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             MipsValue::Imm(imm) => self.imm_to_reg(builder, imm, value_type).into(),
             MipsValue::Reg(reg) => reg.into(),
             MipsValue::FReg(reg) => reg.into(),
+        }
+    }
+
+    pub fn cond_to_value(
+        &mut self,
+        builder: Builder,
+        value: MipsCondOrValue,
+    ) -> (Builder, MipsValue) {
+        match value {
+            MipsCondOrValue::FloatCond { inverse } => {
+                let (end_label, mut end_builder) = self.create_new_builder(&builder);
+                let out_reg = self.new_register();
+                end_builder.bb.add_argument(out_reg.into());
+
+                let mut value_setter = |value: u16| {
+                    let (label, mut builder) = self.create_new_builder(&builder);
+                    let out_reg = self.new_register();
+                    builder
+                        .bb
+                        .add_instruction(mir::instr::or_imm(out_reg, mir::Reg::ZERO, value));
+                    let mut to_end = builder.create_block_ref(end_label.clone());
+                    to_end.arguments.push(out_reg.into());
+                    self.function
+                        .add_block(builder.bb.terminate(mir::term::jump(to_end)));
+                    label
+                };
+
+                let set_one_label = value_setter(1);
+                let set_zero_label = value_setter(0);
+
+                let set_one_ref = builder.create_block_ref(set_one_label);
+                let set_zero_ref = builder.create_block_ref(set_zero_label);
+                let branch = mir::term::branch_if_f_cond(!inverse, set_one_ref, set_zero_ref);
+                self.function.add_block(builder.bb.terminate(branch));
+                (end_builder, out_reg.into())
+            }
+            MipsCondOrValue::Value(value) => (builder, value),
         }
     }
 

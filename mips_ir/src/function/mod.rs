@@ -423,6 +423,11 @@ impl BBBuilder {
         self.instructions.push(instruction);
     }
 
+    pub fn add_argument(&mut self, arg: AnyReg) {
+        self.arguments.push(arg);
+    }
+
+    #[must_use = "A BasicBlock nees to be added to a function to do something"]
     pub fn terminate(self, terminator: Terminator) -> BasicBlock {
         BasicBlock {
             label: self.label,

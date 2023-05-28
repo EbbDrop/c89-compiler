@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 llvm_ir = { path = "../llvm_ir" }
 mips_ir = { path = "../mips_ir" }
-vec1 = "^1.10.1"
 
 [dependencies.antlr-rust]
 git = "https://github.com/jonatcln/antlr4rust.git"
