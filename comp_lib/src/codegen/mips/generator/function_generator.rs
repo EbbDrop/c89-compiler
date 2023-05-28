@@ -60,7 +60,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         let params_info = ir_function
             .params
             .iter()
-            .map(|param| util::ctype_props(&param.ty).into())
+            .map(|param| util::ctype_props(&param.ty))
             .collect();
 
         Self {
@@ -97,7 +97,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
 
             let ref_reg = mir::ReferenceRegister {
                 register,
-                stack_info: props.into(),
+                stack_info: props,
             };
             self.function.add_reference_register(ref_reg);
         }
@@ -372,7 +372,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             let (b, value) = self.add_ir_expr_node(builder, argument);
             builder = b;
             let reg = self.value_into_reg(&mut builder, value, &argument.ty);
-            let stack_info = util::ctype_props(&argument.ty).into();
+            let stack_info = util::ctype_props(&argument.ty);
             reg_arguments.push((reg, stack_info));
         }
 

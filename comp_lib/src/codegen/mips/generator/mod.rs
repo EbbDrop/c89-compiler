@@ -162,5 +162,5 @@ fn compile_ir_global_var(ident: &str, global_var: &ir::GlobalVarNode) -> mir::Gl
         },
         None => mir::DataDirective::Space(props.size),
     };
-    mir::GlobalData::new(ident.into(), data).with_align(Some(props.align))
+    mir::GlobalData::new(ident.into(), data).with_align(Some(props.alignment))
 }

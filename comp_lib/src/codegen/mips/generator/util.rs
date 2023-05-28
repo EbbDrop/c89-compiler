@@ -1,25 +1,7 @@
 use crate::ir::ctype::{self, CType};
 use mips_ir as mir;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CTypeProps {
-    /// Exponent `n` indicating the ctype requires to be aligned at a `2.pow(n)`-byte boundary.
-    pub align: mir::AlignBoundary,
-    /// Number of bytes required to store a value of the ctype.
-    pub size: u128,
-    pub signed: bool,
-}
-
-impl From<CTypeProps> for mir::StackInfo {
-    fn from(value: CTypeProps) -> Self {
-        mir::StackInfo {
-            size: value.size,
-            aligement: value.align,
-        }
-    }
-}
-
-pub fn ctype_props(ctype: &CType) -> CTypeProps {
+pub fn ctype_props(ctype: &CType) -> mir::StackInfo {
     match ctype {
         CType::Scalar(scalar) => match scalar {
             ctype::Scalar::Arithmetic(arithmetic) => {
@@ -27,14 +9,14 @@ pub fn ctype_props(ctype: &CType) -> CTypeProps {
                 match arithmetic {
                     ctype::Arithmetic::Char
                     | ctype::Arithmetic::SignedChar
-                    | ctype::Arithmetic::UnsignedChar => CTypeProps {
-                        align: mir::AlignBoundary::BYTE,
+                    | ctype::Arithmetic::UnsignedChar => mir::StackInfo {
+                        alignment: mir::AlignBoundary::BYTE,
                         size: mir::size::BYTE as u128,
                         signed,
                     },
                     ctype::Arithmetic::SignedShortInt | ctype::Arithmetic::UnsignedShortInt => {
-                        CTypeProps {
-                            align: mir::AlignBoundary::HALF,
+                        mir::StackInfo {
+                            alignment: mir::AlignBoundary::HALF,
                             size: mir::size::HALF as u128,
                             signed,
                         }
@@ -43,40 +25,44 @@ pub fn ctype_props(ctype: &CType) -> CTypeProps {
                     | ctype::Arithmetic::UnsignedInt
                     | ctype::Arithmetic::SignedLongInt
                     | ctype::Arithmetic::UnsignedLongInt
-                    | ctype::Arithmetic::Float => CTypeProps {
-                        align: mir::AlignBoundary::WORD,
+                    | ctype::Arithmetic::Float => mir::StackInfo {
+                        alignment: mir::AlignBoundary::WORD,
                         size: mir::size::WORD as u128,
                         signed,
                     },
-                    ctype::Arithmetic::Double | ctype::Arithmetic::LongDouble => CTypeProps {
-                        align: mir::AlignBoundary::DOUBLE,
+                    ctype::Arithmetic::Double | ctype::Arithmetic::LongDouble => mir::StackInfo {
+                        alignment: mir::AlignBoundary::DOUBLE,
                         size: mir::size::DOUBLE as u128,
                         signed,
                     },
                 }
             }
-            ctype::Scalar::Pointer(_) => CTypeProps {
-                align: mir::AlignBoundary::WORD,
+            ctype::Scalar::Pointer(_) => mir::StackInfo {
+                alignment: mir::AlignBoundary::WORD,
                 size: mir::size::WORD as u128,
                 signed: false,
             },
         },
         CType::Aggregate(aggregate) => match aggregate {
             &ctype::Aggregate::Array(ctype::Array { ref inner, length }) => {
-                let CTypeProps { align, size, .. } = ctype_props(inner);
+                let mir::StackInfo {
+                    alignment: aligement,
+                    size,
+                    ..
+                } = ctype_props(inner);
                 assert!(
-                    (size % align.0 as u128) == 0,
+                    (size % aligement.0 as u128) == 0,
                     "Arrays where the size of the items is not a multiple of the allignment are not supported",
                 );
-                CTypeProps {
-                    align,
+                mir::StackInfo {
+                    alignment: aligement,
                     size: size * length,
                     signed: false,
                 }
             }
         },
-        CType::Void => CTypeProps {
-            align: mir::AlignBoundary::BYTE,
+        CType::Void => mir::StackInfo {
+            alignment: mir::AlignBoundary::BYTE,
             size: 0,
             signed: false,
         },

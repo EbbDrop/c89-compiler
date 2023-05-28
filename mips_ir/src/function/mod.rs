@@ -58,7 +58,8 @@ pub struct ReferenceRegister {
 #[derive(Debug, Clone)]
 pub struct StackInfo {
     pub size: u128,
-    pub aligement: AlignBoundary,
+    pub alignment: AlignBoundary,
+    pub signed: bool,
 }
 
 /// A Control Flow Graph of Basic Blocks with a global label.
