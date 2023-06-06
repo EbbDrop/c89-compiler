@@ -165,19 +165,11 @@ impl<'a, 'b> Devirtualizer<'a, 'b> {
                     stack_info.size
                 ),
             },
-            AnyReg::F(freg) if freg.is_double() => match stack_info.size as u32 {
-                DOUBLE => crate::instr::load_doubleword_to_fpu(freg, base, offset),
-                _ => panic!(
-                    "cannot load into double-precision fpu register \
-                         from stack space of size {}",
-                    stack_info.size
-                ),
-            },
             AnyReg::F(freg) => match stack_info.size as u32 {
+                DOUBLE => crate::instr::load_doubleword_to_fpu(freg, base, offset),
                 WORD => crate::instr::load_word_to_fpu(freg, base, offset),
                 _ => panic!(
-                    "cannot load into single-precision fpu register \
-                         from stack space of size {}",
+                    "cannot load into fpu register from stack space of size {}",
                     stack_info.size
                 ),
             },
@@ -197,19 +189,11 @@ impl<'a, 'b> Devirtualizer<'a, 'b> {
                     stack_info.size
                 ),
             },
-            AnyReg::F(freg) if freg.is_double() => match stack_info.size as u32 {
-                DOUBLE => crate::instr::store_doubleword_from_fpu(freg, base, offset),
-                _ => panic!(
-                    "cannot store from double-precision fpu register \
-                     to stack space of size {}",
-                    stack_info.size
-                ),
-            },
             AnyReg::F(freg) => match stack_info.size as u32 {
+                DOUBLE => crate::instr::store_doubleword_from_fpu(freg, base, offset),
                 WORD => crate::instr::store_word_from_fpu(freg, base, offset),
                 _ => panic!(
-                    "cannot store from single-precision fpu register \
-                     to stack space of size {}",
+                    "cannot store from fpu register to stack space of size {}",
                     stack_info.size
                 ),
             },

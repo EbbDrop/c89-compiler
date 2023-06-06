@@ -88,14 +88,14 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
             self.write_str("\t.text\n")?;
         }
 
-        for raw_text in value.raw_text() {
-            self.writeln()?;
-            self.write_str(raw_text)?;
-        }
-
         for function in value.functions() {
             self.writeln()?;
             self.write_function(function)?;
+        }
+
+        for raw_text in value.raw_text() {
+            self.writeln()?;
+            self.write_str(raw_text)?;
         }
 
         Ok(())
