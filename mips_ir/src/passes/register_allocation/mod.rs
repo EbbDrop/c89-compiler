@@ -3,6 +3,7 @@
 //! See https://doi.org/10.1007/11688839_20 for the paper on which this implementation is mainly
 //! based. For the pdf version, see https://compilers.cs.uni-saarland.de/papers/ra_ssa.pdf.
 
+mod coalescing;
 mod coloring;
 mod perm_optimizer;
 mod spilling;
@@ -74,7 +75,8 @@ fn run_function(function: &mut crate::Function) {
     }
     crate::passes::pre_allocation::isolate_calls(function);
 
-    let coloring = coloring::color(&function.cfg);
+    let (coloring, conflict_graph) = coloring::color(&function.cfg);
+    let coalesed_color = coalescing::coales(&function.cfg, &coloring, &conflict_graph);
 
-    ssa_destruction::apply_coloring(function, &coloring);
+    ssa_destruction::apply_coloring(function, &coalesed_color);
 }

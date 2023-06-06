@@ -28,6 +28,13 @@ impl AnyReg {
             AnyReg::F(freg) => freg.stack_info(),
         }
     }
+
+    pub fn is_saved(&self) -> bool {
+        match self {
+            AnyReg::R(reg) => reg.is_saved(),
+            AnyReg::F(freg) => freg.is_saved(),
+        }
+    }
 }
 
 impl From<Reg> for AnyReg {
