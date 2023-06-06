@@ -135,7 +135,7 @@ impl CompileOptsBuilder {
     pub fn build(self) -> Result<CompileOpts, CompileOptsErr> {
         let output_format = match self.output_format {
             Some(format) => match (&self.target, &format) {
-                (Target::X86_64, OutputFormat::MipsAsm) => {
+                (Target::X86_64, OutputFormat::MipsAsm | OutputFormat::MipsDbg) => {
                     return Err(CompileOptsErr::IncompatibleFormatAndTarget(
                         format,
                         self.target,
@@ -245,16 +245,19 @@ fn run_compile(source: &str, source_name: &str, opts: &CompileOpts) -> Aggregate
                 mips_ir::MipsOutputConfig {
                     use_register_names: true,
                     allow_virtuals: true,
+                    allow_hidden_instructions: true,
                     show_block_arguments: true,
-                    show_all_blocks: false,
+                    show_all_blocks: true,
+                    show_comments: true,
                 }
             } else {
-                //TODO also do the other algos in this case
                 mips_ir::MipsOutputConfig {
                     use_register_names: true,
                     allow_virtuals: false,
+                    allow_hidden_instructions: false,
                     show_block_arguments: false,
                     show_all_blocks: false,
+                    show_comments: true,
                 }
             };
 

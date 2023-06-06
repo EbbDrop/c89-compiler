@@ -1,20 +1,21 @@
 use std::{
-    fs,
-    io::Write,
+    fs::{self},
+    io::{Read, Write},
     process::{Command, Stdio},
+    time::Duration,
 };
 
 use comp_lib::{
     compile::{CompileOptsBuilder, Target},
     diagnostic::{AggregateResult, Code, DiagnosticKind},
 };
+use temp_file::TempFileBuilder;
 
 include! {concat!(env!("OUT_DIR"), "/tests.rs")}
 
 pub fn compile(target: Target, file_name: &str, source: &str) -> AggregateResult<Vec<u8>> {
     let opts = CompileOptsBuilder::new()
         .target(target)
-        .output_format(comp_lib::compile::OutputFormat::LlvmIr)
         .for_assignments()
         .build()
         .unwrap();
@@ -48,31 +49,77 @@ fn run_lli(input_ir: Vec<u8>) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-fn output_test(file: &str, expected: &str) {
-    let source = fs::read(file).unwrap();
-    let source = String::from_utf8(source).unwrap();
-    let res = compile(Target::X86_64, file, &source);
-    if res.is_err() {
-        println!(
-            "Expected file `{}` to compile successfully but got the following diagnostics:",
-            file
-        );
-        for (t, d) in res.diagnostics() {
-            match t {
-                DiagnosticKind::Rec => println!("Rec: {d:?}"),
-                DiagnosticKind::Err => println!("Err: {d:?}"),
+fn run_mars(input_asm: Vec<u8>) -> String {
+    let mars_bin = std::env::var_os("MARS_BIN").unwrap_or_else(|| "mars-mips".into());
+
+    let temp_file = TempFileBuilder::new()
+        .suffix(".asm") // Need .asm suffix for mars to work
+        .build()
+        .unwrap()
+        .with_contents(&input_asm)
+        .unwrap();
+
+    let mut mars = Command::new(mars_bin)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .arg("nc") // Don't output copyright
+        .arg("sm") // Start execution in main label
+        .arg(temp_file.path())
+        .spawn()
+        .expect("Failed to spawn mars process");
+
+    use wait_timeout::ChildExt;
+    match mars.wait_timeout(Duration::from_secs(5)) {
+        Ok(Some(status)) => {
+            if !status.success() {
+                panic!("mars returned with a non successfull code!");
             }
         }
-        panic!();
+        Ok(None) => {
+            mars.kill().ok();
+            panic!("Hit timeout while running mars")
+        }
+        Err(_) => panic!("Faild to run mars"),
     }
-    let llvm = res.into_value().unwrap();
-    let output = run_lli(llvm);
 
-    pretty_assertions::assert_str_eq!(
-        output.trim_end(),
-        expected.trim_end(),
-        "The output of lli (left) does not match the expected output (right)",
-    );
+    let mut output = String::new();
+    mars.stdout.unwrap().read_to_string(&mut output).unwrap();
+
+    output
+}
+
+fn output_test(file: &str, expected_llvm: &str, expected_mips: &str) {
+    for target in [Target::X86_64, Target::Mips] {
+        let source = fs::read(file).unwrap();
+        let source = String::from_utf8(source).unwrap();
+        let res = compile(target, file, &source);
+        if res.is_err() {
+            println!(
+                "Expected file `{}` to compile successfully but got the following diagnostics:",
+                file
+            );
+            for (t, d) in res.diagnostics() {
+                match t {
+                    DiagnosticKind::Rec => println!("Rec: {d:?}"),
+                    DiagnosticKind::Err => println!("Err: {d:?}"),
+                }
+            }
+            panic!();
+        }
+        let comp_output = res.into_value().unwrap();
+        let (output, expected, runner) = if target == Target::X86_64 {
+            (run_lli(comp_output), expected_llvm, "lli")
+        } else {
+            (run_mars(comp_output), expected_mips, "mars")
+        };
+
+        pretty_assertions::assert_str_eq!(
+            output.trim_end(),
+            expected.trim_end(),
+            "The output of {runner} (left) does not match the expected output (right)",
+        );
+    }
 }
 
 fn diagnostics_test(file: &str, expected_codes: Vec<Code>, needs_err: bool) {

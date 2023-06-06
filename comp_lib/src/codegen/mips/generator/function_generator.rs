@@ -25,8 +25,8 @@ pub struct Builder {
     pub bb: mir::BBBuilder,
     pub var_registers: ir::table::Table<mir::AnyReg>,
     pub expr_res_stack: Vec<(mir::AnyReg, RegType)>,
-    pub continue_label: Option<mir::BlockLabel>,
-    pub break_label: Option<mir::BlockLabel>,
+    pub continue_label: Option<mir::BlockId>,
+    pub break_label: Option<mir::BlockId>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -50,7 +50,7 @@ impl Builder {
             .collect()
     }
 
-    fn create_block_ref(&self, label: mir::BlockLabel) -> BlockRef {
+    fn create_block_ref(&self, label: mir::BlockId) -> BlockRef {
         mir::BlockRef::new(label, self.get_all_registers())
     }
 
@@ -111,8 +111,6 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
     }
 
     pub fn generate(mut self) -> mir::Function {
-        let entry_point_label = self.function.create_block_label();
-
         let var_registers = self
             .register_types
             .clone()
@@ -147,7 +145,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             })
             .collect();
 
-        let bbbuilder = self.function.start_block(entry_point_label.clone(), params);
+        let bbbuilder = self.function.start_entry_block(params);
         let mut builder = Builder {
             bb: bbbuilder,
             var_registers,
@@ -162,25 +160,21 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
 
         self.function
             .add_block(builder.bb.terminate(mir::term::virt::return_(None)));
-        self.function.set_entry_block(entry_point_label.id());
         self.function
     }
 
     /// Creates a new builder with arguments for all the items, taking the continue and break
     /// labels from the given `prev_builder`
-    fn create_new_builder(&mut self, prev_builder: &Builder) -> (mir::BlockLabel, Builder) {
+    fn create_new_builder(&mut self, prev_builder: &Builder) -> (mir::BlockId, Builder) {
         let label = self.function.create_block_label();
-        (
-            label.clone(),
-            self.create_builder_with_label(label, prev_builder),
-        )
+        (label, self.create_builder_with_label(label, prev_builder))
     }
 
     /// Creates a new builder with arguments for all the items, taking the continue and break
     /// labels from the given `prev_builder`
     fn create_builder_with_label(
         &mut self,
-        label: mir::BlockLabel,
+        label: mir::BlockId,
         prev_builder: &Builder,
     ) -> Builder {
         let registers = self
@@ -207,8 +201,8 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             bb: new_block_builder,
             var_registers: registers,
             expr_res_stack: expr_regs,
-            continue_label: prev_builder.continue_label.clone(),
-            break_label: prev_builder.break_label.clone(),
+            continue_label: prev_builder.continue_label,
+            break_label: prev_builder.break_label,
         }
     }
 
@@ -219,8 +213,15 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         builder
     }
 
-    fn add_ir_stmt_node(&mut self, builder: Builder, stmt_node: &ir::StmtNode) -> Builder {
-        // TODO: add comments
+    fn add_ir_stmt_node(&mut self, mut builder: Builder, stmt_node: &ir::StmtNode) -> Builder {
+        if let Some(coments) = stmt_node.comments.clone() {
+            builder.bb.add_instruction(mir::instr::comment(coments))
+        }
+        for line in self.root_generator.source[std::ops::Range::from(stmt_node.span)].lines() {
+            builder
+                .bb
+                .add_instruction(mir::instr::comment(format!("## {line}")))
+        }
         match &stmt_node.stmt {
             ir::Stmt::Expr(node) => self.add_ir_expr_node(builder, node).0,
             ir::Stmt::IfStmt(node) => self.add_ir_if(builder, node),
@@ -683,7 +684,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             builder
                 .bb
                 .add_instruction(mir::instr::or_imm(out_reg, mir::Reg::ZERO, value));
-            let mut to_end = builder.create_block_ref(end_lable.clone());
+            let mut to_end = builder.create_block_ref(end_lable);
             to_end.arguments.push(out_reg.into());
             self.function
                 .add_block(builder.bb.terminate(mir::term::jump(to_end)));
@@ -697,8 +698,8 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         let (mut builder, left) = self.add_ir_expr_node(builder, left_node);
 
         let (truthy, falsy) = match l_type {
-            LogicalBuilderType::And => (right_eval_label.clone(), set_zero_label.clone()),
-            LogicalBuilderType::Or => (set_one_label.clone(), right_eval_label.clone()),
+            LogicalBuilderType::And => (right_eval_label, set_zero_label),
+            LogicalBuilderType::Or => (set_one_label, right_eval_label),
         };
         let branch = self.make_condition(&mut builder, left, &left_node.ty, truthy, falsy);
 
@@ -854,7 +855,14 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                             // the same size.
                             reg.into()
                         }
-                        _ => unreachable!(),
+                        (_, 0) => {
+                            // Casting to void, this value will not be usd later so its fine to
+                            // just return the from reg.
+                            reg.into()
+                        }
+                        (from, to) => {
+                            unreachable!("Unexpected sizes in cast. Form: {from}, to: {to}")
+                        }
                     }
                 }
             },
@@ -948,8 +956,8 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         builder: &mut Builder,
         cond: MipsCondOrValue,
         value_type: &CType,
-        truthy: mir::BlockLabel,
-        falsy: mir::BlockLabel,
+        truthy: mir::BlockId,
+        falsy: mir::BlockId,
     ) -> mir::Terminator {
         let truthy_ref = builder.create_block_ref(truthy);
         let falsy_ref = builder.create_block_ref(falsy);
@@ -983,16 +991,16 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             let (else_case_label, else_case_builder) = self.create_new_builder(&start_builder);
             let else_case_builder = self.add_ir_block_node(else_case_builder, else_brache);
 
-            let to_end_ref = mir::term::jump(else_case_builder.create_block_ref(end_label.clone()));
+            let to_end_ref = mir::term::jump(else_case_builder.create_block_ref(end_label));
             self.function
                 .add_block(else_case_builder.bb.terminate(to_end_ref));
 
             else_case_label
         } else {
-            end_label.clone()
+            end_label
         };
 
-        let to_end_ref = mir::term::jump(if_case_builder.create_block_ref(end_label.clone()));
+        let to_end_ref = mir::term::jump(if_case_builder.create_block_ref(end_label));
         self.function
             .add_block(if_case_builder.bb.terminate(to_end_ref));
 
@@ -1030,17 +1038,17 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             let cur_label = self.function.create_block_label();
 
             let cur_builder = if let Some(prev_builder) = cases_builder {
-                let cur_builder = self.create_builder_with_label(cur_label.clone(), &prev_builder);
+                let cur_builder = self.create_builder_with_label(cur_label, &prev_builder);
 
-                let jump_to_cur = mir::term::jump(prev_builder.create_block_ref(cur_label.clone()));
+                let jump_to_cur = mir::term::jump(prev_builder.create_block_ref(cur_label));
                 self.function
                     .add_block(prev_builder.bb.terminate(jump_to_cur));
 
                 cur_builder
             } else {
-                let mut cur_builder = self
-                    .create_builder_with_label(cur_label.clone(), &switch_builder_and_expr_reg.0);
-                cur_builder.break_label = Some(end_label.clone());
+                let mut cur_builder =
+                    self.create_builder_with_label(cur_label, &switch_builder_and_expr_reg.0);
+                cur_builder.break_label = Some(end_label);
                 cur_builder
             };
 
@@ -1052,7 +1060,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                         self.create_new_builder(&switch_builder);
                     let label_reg = self.load_int_constant(&mut switch_builder, *label);
 
-                    let eq_ref = switch_builder.create_block_ref(cur_label.clone());
+                    let eq_ref = switch_builder.create_block_ref(cur_label);
                     let mut neq_ref = switch_builder.create_block_ref(next_switch_label);
                     neq_ref.arguments.push(switch_expr_reg.into());
 
@@ -1085,7 +1093,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
         }
 
         if let Some(case_builder) = cases_builder {
-            let jump_to_end = mir::term::jump(case_builder.create_block_ref(end_label.clone()));
+            let jump_to_end = mir::term::jump(case_builder.create_block_ref(end_label));
             self.function
                 .add_block(case_builder.bb.terminate(jump_to_end));
         }
@@ -1103,19 +1111,19 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
     pub fn add_ir_loop(&mut self, builder: Builder, node: &ir::LoopStmtNode) -> Builder {
         let (start_label, start_builder) = self.create_new_builder(&builder);
 
-        let to_start = mir::term::jump(builder.create_block_ref(start_label.clone()));
+        let to_start = mir::term::jump(builder.create_block_ref(start_label));
         self.function.add_block(builder.bb.terminate(to_start));
 
         let (end_label, end_builder) = self.create_new_builder(&start_builder);
 
         let continuation_label = match &node.continuation {
             Some(_) => self.function.create_block_label(),
-            None => start_label.clone(),
+            None => start_label,
         };
 
         if let Some(continuation_node) = &node.continuation {
             let continuation_builder =
-                self.create_builder_with_label(continuation_label.clone(), &start_builder);
+                self.create_builder_with_label(continuation_label, &start_builder);
             let continuation_builder = self
                 .add_ir_expr_node(continuation_builder, continuation_node)
                 .0;
@@ -1137,7 +1145,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                 cond_value,
                 &condition_node.ty,
                 body_label,
-                end_label.clone(),
+                end_label,
             );
             self.function
                 .add_block(start_builder.bb.terminate(branching_terminator));
@@ -1147,7 +1155,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             start_builder
         };
 
-        body_builder.continue_label = Some(continuation_label.clone());
+        body_builder.continue_label = Some(continuation_label);
         body_builder.break_label = Some(end_label);
 
         let body_builder = self.add_ir_block_node(body_builder, &node.body);
@@ -1164,7 +1172,6 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
 
         let term_ref = builder
             .break_label
-            .clone()
             .expect("ICE: break while not in loop/switch");
         let terminator = mir::term::jump(builder.create_block_ref(term_ref));
         self.function.add_block(builder.bb.terminate(terminator));
@@ -1177,7 +1184,6 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
 
         let term_ref = builder
             .continue_label
-            .clone()
             .expect("ICE: continue while not in loop");
         let terminator = mir::term::jump(builder.create_block_ref(term_ref));
         self.function.add_block(builder.bb.terminate(terminator));
@@ -1276,7 +1282,7 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
                     builder
                         .bb
                         .add_instruction(mir::instr::or_imm(out_reg, mir::Reg::ZERO, value));
-                    let mut to_end = builder.create_block_ref(end_label.clone());
+                    let mut to_end = builder.create_block_ref(end_label);
                     to_end.arguments.push(out_reg.into());
                     self.function
                         .add_block(builder.bb.terminate(mir::term::jump(to_end)));

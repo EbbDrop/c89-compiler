@@ -834,11 +834,11 @@ impl BinaryExprGenerator<'_, '_, '_, '_, '_> {
                 if signed {
                     builder
                         .bb
-                        .add_instruction(mir::instr::set_lt_s(out_reg, left, right));
+                        .add_instruction(mir::instr::set_lt_s(lt_reg, left, right));
                 } else {
                     builder
                         .bb
-                        .add_instruction(mir::instr::set_lt_u(out_reg, left, right));
+                        .add_instruction(mir::instr::set_lt_u(lt_reg, left, right));
                 }
                 builder
                     .bb

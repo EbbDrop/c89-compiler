@@ -11,7 +11,7 @@ use std::{collections::HashMap, unreachable};
 pub struct Generator<'i, 's> {
     root: mir::Root,
     ir: &'i ir::Root,
-    _source: &'s str,
+    source: &'s str,
     float_constants: HashMap<u32, mir::Label>,
     double_constants: HashMap<u64, mir::Label>,
     string_constants: HashMap<Vec<u8>, mir::Label>,
@@ -22,7 +22,7 @@ impl<'i, 's> Generator<'i, 's> {
         Self {
             root: mir::Root::new(),
             ir,
-            _source: source,
+            source,
             float_constants: HashMap::new(),
             double_constants: HashMap::new(),
             string_constants: HashMap::new(),
@@ -39,7 +39,7 @@ impl<'i, 's> Generator<'i, 's> {
         let mut all_data = Vec::new();
         for (ident, global_var) in &self.ir.vars {
             // TODO: add comments
-            all_data.push(compile_ir_global_var(ident, global_var));
+            all_data.push(self.compile_ir_global_var(ident, global_var));
         }
         // TODO: use a better space-optimizing algorithm here, instead of ordering by reverse align.
         all_data.sort_unstable_by_key(|d| d.align());
@@ -108,46 +108,48 @@ impl<'i, 's> Generator<'i, 's> {
                 label
             })
     }
-}
 
-fn compile_ir_global_var(ident: &str, global_var: &ir::GlobalVarNode) -> mir::GlobalData {
-    let props = util::ctype_props(&global_var.ty);
-    let data = match &global_var.value {
-        Some(value) => match value {
-            ir::Constant::Integer(value) => match global_var.ty {
-                ctype::CType::Scalar(ctype::Scalar::Arithmetic(
-                    ctype::Arithmetic::Char
-                    | ctype::Arithmetic::SignedChar
-                    | ctype::Arithmetic::UnsignedChar,
-                )) => mir::DataDirective::Byte(*value as u8),
-                ctype::CType::Scalar(ctype::Scalar::Arithmetic(
-                    ctype::Arithmetic::SignedShortInt | ctype::Arithmetic::UnsignedShortInt,
-                )) => mir::DataDirective::Half(*value as u16),
-                ctype::CType::Scalar(ctype::Scalar::Arithmetic(
-                    ctype::Arithmetic::SignedInt
-                    | ctype::Arithmetic::UnsignedInt
-                    | ctype::Arithmetic::SignedLongInt
-                    | ctype::Arithmetic::UnsignedLongInt,
-                )) => mir::DataDirective::Word(*value as u32),
-                _ => unreachable!(),
-            },
-            ir::Constant::Float(value) => match global_var.ty {
-                ctype::CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::Float)) => {
-                    mir::DataDirective::Float(*value as f32)
+    fn compile_ir_global_var(
+        &mut self,
+        ident: &str,
+        global_var: &ir::GlobalVarNode,
+    ) -> mir::GlobalData {
+        let props = util::ctype_props(&global_var.ty);
+        let data = match &global_var.value {
+            Some(value) => match value {
+                ir::Constant::Integer(value) => match global_var.ty {
+                    ctype::CType::Scalar(ctype::Scalar::Arithmetic(
+                        ctype::Arithmetic::Char
+                        | ctype::Arithmetic::SignedChar
+                        | ctype::Arithmetic::UnsignedChar,
+                    )) => mir::DataDirective::Byte(*value as u8),
+                    ctype::CType::Scalar(ctype::Scalar::Arithmetic(
+                        ctype::Arithmetic::SignedShortInt | ctype::Arithmetic::UnsignedShortInt,
+                    )) => mir::DataDirective::Half(*value as u16),
+                    ctype::CType::Scalar(ctype::Scalar::Arithmetic(
+                        ctype::Arithmetic::SignedInt
+                        | ctype::Arithmetic::UnsignedInt
+                        | ctype::Arithmetic::SignedLongInt
+                        | ctype::Arithmetic::UnsignedLongInt,
+                    )) => mir::DataDirective::Word(*value as u32),
+                    _ => unreachable!(),
+                },
+                ir::Constant::Float(value) => match global_var.ty {
+                    ctype::CType::Scalar(ctype::Scalar::Arithmetic(ctype::Arithmetic::Float)) => {
+                        mir::DataDirective::Float(*value as f32)
+                    }
+                    ctype::CType::Scalar(ctype::Scalar::Arithmetic(
+                        ctype::Arithmetic::Double | ctype::Arithmetic::LongDouble,
+                    )) => mir::DataDirective::Double(*value),
+                    _ => unreachable!(),
+                },
+                ir::Constant::String(value) => {
+                    let label = self.add_string_constant(value);
+                    mir::DataDirective::LabelWord(label.clone())
                 }
-                ctype::CType::Scalar(ctype::Scalar::Arithmetic(
-                    ctype::Arithmetic::Double | ctype::Arithmetic::LongDouble,
-                )) => mir::DataDirective::Double(*value),
-                _ => unreachable!(),
             },
-            ir::Constant::String(value) => {
-                // SPIM has a bug where zero escapes imidiatly end the string, so have
-                // to use bytes
-                // Strings will always have atleast a nullbyte so this will never fail
-                mir::DataDirective::Bytes(value.clone().try_into().unwrap())
-            }
-        },
-        None => mir::DataDirective::Space(props.size),
-    };
-    mir::GlobalData::new(ident.into(), data).with_align(Some(props.alignment))
+            None => mir::DataDirective::Space(props.size),
+        };
+        mir::GlobalData::new(ident.into(), data).with_align(Some(props.alignment))
+    }
 }

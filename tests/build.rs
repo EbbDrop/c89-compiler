@@ -9,7 +9,7 @@ use std::{
 use walkdir::WalkDir;
 
 enum Test {
-    Output(String),
+    Output(String, String),
     Diagnostics(Vec<String>, bool),
     DiagnosticsAny(bool),
 }
@@ -32,15 +32,34 @@ where
     let tests = match first_line.as_str() {
         "//output:" => {
             let mut expected = String::new();
+            let mut expected_mips = String::new();
+
+            let mut adding_to_mips = false;
+
             while let Some(Ok(line)) = lines.next() {
                 if let Some(expect) = line.strip_prefix("//") {
-                    expected.push_str(expect);
-                    expected.push('\n');
+                    if expect == "output-mips:" {
+                        adding_to_mips = true;
+                        continue;
+                    }
+                    match adding_to_mips {
+                        true => {
+                            expected_mips.push_str(expect);
+                            expected_mips.push('\n');
+                        }
+                        false => {
+                            expected.push_str(expect);
+                            expected.push('\n');
+                        }
+                    }
                 } else {
                     break;
                 }
             }
-            Some(Test::Output(expected))
+            if !adding_to_mips {
+                expected_mips = expected.clone();
+            }
+            Some(Test::Output(expected, expected_mips))
         }
         "//fail:" | "//warn:" => {
             let mut expected_codes = Vec::new();
@@ -102,8 +121,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         let path = entry.path();
         if let Some((test, ignore)) = parse_file(path) {
             let test = match test {
-                Test::Output(expected) => {
-                    format!(r#"output_test("{}", "{}")"#, path.display(), expected)
+                Test::Output(expected, expected_mips) => {
+                    format!(
+                        r#"output_test("{}", "{}", "{}")"#,
+                        path.display(),
+                        expected,
+                        expected_mips
+                    )
                 }
                 Test::Diagnostics(expected_codes, need_err) => {
                     format!(

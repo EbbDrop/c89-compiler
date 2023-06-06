@@ -1,18 +1,31 @@
 #[cfg(test)]
 mod test;
 
+mod var_generator;
+
+pub use var_generator::*;
+
+use crate::StackInfo;
+
 /// Represents a (possibly virtual) MIPS register. Can be a CPU or a FPU register.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnyReg {
     R(Reg),
     F(FReg),
 }
 
 impl AnyReg {
-    pub fn is_virtual(self) -> bool {
+    pub fn is_virtual(&self) -> bool {
         match self {
             AnyReg::R(reg) => reg.is_virtual(),
             AnyReg::F(freg) => freg.is_virtual(),
+        }
+    }
+
+    pub fn stack_info(&self) -> StackInfo {
+        match self {
+            AnyReg::R(reg) => reg.stack_info(),
+            AnyReg::F(freg) => freg.stack_info(),
         }
     }
 }
@@ -26,6 +39,34 @@ impl From<Reg> for AnyReg {
 impl From<FReg> for AnyReg {
     fn from(value: FReg) -> Self {
         Self::F(value)
+    }
+}
+
+impl TryFrom<AnyReg> for Reg {
+    type Error = ();
+
+    fn try_from(value: AnyReg) -> Result<Self, Self::Error> {
+        match value {
+            AnyReg::R(reg) => Ok(reg),
+            AnyReg::F(_) => Err(()),
+        }
+    }
+}
+
+impl TryFrom<AnyReg> for FReg {
+    type Error = ();
+
+    fn try_from(value: AnyReg) -> Result<Self, Self::Error> {
+        match value {
+            AnyReg::R(_) => Err(()),
+            AnyReg::F(freg) => Ok(freg),
+        }
+    }
+}
+
+impl std::fmt::Debug for AnyReg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
     }
 }
 
@@ -56,7 +97,7 @@ impl std::fmt::Display for AnyReg {
 /// |`$29`        |`$sp`         | yes | stack pointer |
 /// |`$30`        |`$fp` or `$s8`| yes | frame pointer or another saved temporary |
 /// |`$31`        |`$ra`         | yes | return address (used by e.g. `jal`) |
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Reg {
     /// $0 - $31
     R(u8),
@@ -111,7 +152,7 @@ impl Reg {
     /// Returns `true` if the register is by convention preserved when calling a function.
     ///
     /// Virtual registers are considered to be preserved.
-    pub fn is_preserved_in_call(&self) -> bool {
+    pub fn is_saved(&self) -> bool {
         match *self {
             Self::ZERO => true,
             Self::AT => false,
@@ -154,6 +195,28 @@ impl Reg {
     /// pass then has to convert them to real registers.
     pub fn is_virtual(&self) -> bool {
         matches!(self, Self::Virtual(_))
+    }
+
+    /// Returns the physical register number of this register. Panics if this is a virtual register.
+    pub fn phy_num(&self) -> u8 {
+        match self {
+            Reg::R(n) => *n,
+            Reg::Virtual(_) => panic!("virtual register doesn't have physical number"),
+        }
+    }
+
+    pub fn stack_info(&self) -> StackInfo {
+        StackInfo {
+            signed: false,
+            size: crate::size::WORD as u128,
+            alignment: crate::AlignBoundary::WORD,
+        }
+    }
+}
+
+impl std::fmt::Debug for Reg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
     }
 }
 
@@ -225,7 +288,7 @@ impl std::fmt::Display for Reg {
 /// |`$f16` - `$f18` | no  | temporaries |
 /// |`$f20` - `$f30` | yes | saved temporaries |
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FReg {
     F(u8),
     /// Virtual single-precision FPU register.
@@ -259,6 +322,18 @@ impl FReg {
         }
     }
 
+    /// Returns `true` if the register is by convention preserved when calling a function.
+    ///
+    /// Virtual registers are considered to be preserved.
+    pub fn is_saved(&self) -> bool {
+        match *self {
+            Self::F(0..=19) => false,
+            Self::F(20..=31) => true,
+            Self::F(n) => panic!("encountered nonexisting register $f{n}"),
+            Self::VirtualSingle(_) | Self::VirtualDouble(_) => true,
+        }
+    }
+
     /// Returns `true` if this is a virtual FPU register.
     ///
     /// A virtual register is a register that yet has to be converted to a real register.
@@ -268,6 +343,45 @@ impl FReg {
     /// to convert them to real registers.
     pub fn is_virtual(&self) -> bool {
         !matches!(self, Self::F(_))
+    }
+
+    /// Returns the physical register number of this register. Panics if this is a virtual register.
+    pub fn phy_num(&self) -> u8 {
+        match self {
+            Self::F(n) => *n,
+            Self::VirtualSingle(_) | Self::VirtualDouble(_) => {
+                panic!("virtual register doesn't have physical number")
+            }
+        }
+    }
+
+    pub fn stack_info(&self) -> StackInfo {
+        if self.is_double() {
+            StackInfo {
+                signed: false,
+                size: crate::size::DOUBLE as u128,
+                alignment: crate::AlignBoundary::DOUBLE,
+            }
+        } else {
+            StackInfo {
+                signed: false,
+                size: crate::size::WORD as u128,
+                alignment: crate::AlignBoundary::WORD,
+            }
+        }
+    }
+
+    pub fn ffmt(&self) -> crate::FFmt {
+        match self.is_double() {
+            true => crate::FFmt::D,
+            false => crate::FFmt::S,
+        }
+    }
+}
+
+impl std::fmt::Debug for FReg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
     }
 }
 

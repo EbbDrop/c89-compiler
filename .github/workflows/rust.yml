@@ -16,8 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Cache
-      id: cache
+    - name: Cache Cargo dependencies & build files
+      id: cache-cargo
       uses: actions/cache@v3
       with:
         path: |
@@ -26,8 +26,19 @@ jobs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           target/
-          ./llvm
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-llvm-15
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    - name: Cache LLVM
+      id: cache-llvm
+      uses: actions/cache@v3
+      with:
+        path: ./.ci/llvm
+        key: llvm-15
+    - name: Cache MARS
+      id: cache-mars
+      uses: actions/cache@v3
+      with:
+        path: ./.ci/mars
+        key: Mars4_5
     - name: Format check
       run: cargo fmt --check --all
     - name: Clippy
@@ -38,6 +49,14 @@ jobs:
       uses: KyleMayes/install-llvm-action@v1
       with:
         version: "15"
-        cached: ${{ steps.cache.outputs.cache-hit }}
+        directory: ./.ci/llvm
+        cached: ${{ steps.cache-llvm.outputs.cache-hit }}
+    - name: Install MARS
+      if: ${{ !steps.cache-mars.outputs.cache-hit }}
+      run: |
+        wget http://courses.missouristate.edu/KenVollmar/mars/MARS_4_5_Aug2014/Mars4_5.jar \
+          -O ./.ci/mars/Mars4_5.jar
     - name: Run tests
       run: cargo test --all --verbose
+      env:
+        MARS_BIN: ../.ci/mars.sh

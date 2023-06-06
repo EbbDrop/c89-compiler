@@ -2,9 +2,9 @@
 mod test;
 
 use crate::{
-    AnyReg, BasicBlock, BlockRef, DataDirective, FReg, Function, FunctionCall, GlobalData, ImmOp1,
-    ImmOp2, Instruction, Label, PseudoInstruction, Reg, Root, Terminator, TrapCondImm,
-    VirtualInstruction, VirtualTerminator,
+    cfg::BlockRef, function::StackAddress, AnyReg, BlockId, DataDirective, FReg, Function,
+    FunctionCall, GlobalData, ImmOp1, ImmOp2, Instruction, Label, PseudoInstruction, Reg, Root,
+    Terminator, TrapCondImm, VirtualInstruction, VirtualTerminator,
 };
 use std::fmt::Result;
 
@@ -14,11 +14,16 @@ pub struct MipsOutputConfig {
     pub use_register_names: bool,
     /// If `false`, the outputter will panic when encountering virtual registers.
     pub allow_virtuals: bool,
+    /// If `false`, the outputter will panic when encountering instructions that are marked as
+    /// hidden by certain passes.
+    pub allow_hidden_instructions: bool,
     /// If `true`, block arguments will be shown when blocks are referenced and at the label that
     /// starts a block.
     pub show_block_arguments: bool,
     /// If `true`, all blocks in functions will be shown, even those which have no predecessors.
     pub show_all_blocks: bool,
+    /// If `true`, comments will be printed
+    pub show_comments: bool,
 }
 
 /// Can be used to format [`Root`]s to a writer.
@@ -82,10 +87,17 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
         if value.has_any_functions() {
             self.write_str("\t.text\n")?;
         }
+
+        for raw_text in value.raw_text() {
+            self.writeln()?;
+            self.write_str(raw_text)?;
+        }
+
         for function in value.functions() {
             self.writeln()?;
             self.write_function(function)?;
         }
+
         Ok(())
     }
 
@@ -111,8 +123,16 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
             DataDirective::Byte(x) => writeln!(self.writer, "\t.byte\t{x}"),
             DataDirective::Half(x) => writeln!(self.writer, "\t.half\t{x}"),
             DataDirective::Word(x) => writeln!(self.writer, "\t.word\t{x}"),
-            DataDirective::Float(x) => writeln!(self.writer, "\t.float\t{x}"),
-            DataDirective::Double(x) => writeln!(self.writer, "\t.double\t{x}"),
+            DataDirective::Float(x) => {
+                self.write_str("\t.float\t")?;
+                self.write_float_constant(*x)?;
+                self.writeln()
+            }
+            DataDirective::Double(x) => {
+                self.write_str("\t.double\t")?;
+                self.write_double_constant(*x)?;
+                self.writeln()
+            }
             DataDirective::Bytes(xs) => {
                 write!(self.writer, "\t.byte\t{}", xs.first())?;
                 for x in xs.iter().skip(1) {
@@ -135,18 +155,26 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
                 self.writeln()
             }
             DataDirective::Floats(xs) => {
-                write!(self.writer, "\t.float\t{}", xs.first())?;
+                self.write_str("\t.float\t")?;
+                self.write_float_constant(*xs.first())?;
                 for x in xs.iter().skip(1) {
-                    write!(self.writer, ", {x}")?
+                    self.write_str(", ")?;
+                    self.write_float_constant(*x)?;
                 }
                 self.writeln()
             }
             DataDirective::Doubles(xs) => {
-                write!(self.writer, "\t.double\t{}", xs.first())?;
+                self.write_str("\t.double\t")?;
+                self.write_double_constant(*xs.first())?;
                 for x in xs.iter().skip(1) {
-                    write!(self.writer, ", {x}")?
+                    self.write_str(", ")?;
+                    self.write_double_constant(*x)?;
                 }
                 self.writeln()
+            }
+            DataDirective::LabelWord(label) => {
+                self.write_str("\t.word\t")?;
+                self.write_label_ref(label)
             }
         }
     }
@@ -161,23 +189,29 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
             false => value.traverse(),
             true => value.traverse_all(),
         };
-        for block in traverser {
-            write!(self.writer, "{}", block.label())?;
-            self.write_arguments(&block.arguments)?;
-            self.write_str(":\n")?;
-            self.write_block(block)?;
+        for (id, _) in traverser {
+            self.write_basic_block(value, id)?;
         }
         Ok(())
     }
 
-    fn write_block(&mut self, value: &BasicBlock) -> Result {
-        for instruction in &value.instructions {
+    pub fn write_basic_block(&mut self, function: &Function, block_id: BlockId) -> Result {
+        let block = &function.cfg[block_id];
+        if function.cfg.n_predecessors(block_id) != 0
+            || (self.config.show_block_arguments
+                && (block_id != function.cfg.entry_block_id() || !block.arguments.is_empty()))
+        {
+            self.write_block_label(function, block_id)?;
+            self.write_arguments(&block.arguments)?;
+            self.write_str(":\n")?;
+        }
+        for instruction in &block.instructions {
             self.write_char('\t')?;
             self.write_instruction(instruction)?;
             self.writeln()?;
         }
         self.write_char('\t')?;
-        self.write_terminator(&value.terminator)?;
+        self.write_terminator(function, block.terminator())?;
         self.writeln()
     }
 
@@ -213,6 +247,15 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
                 } else {
                     self.write_imm_u(imm)
                 }
+            }
+            &Instruction::Mem(op, rt, base, offset) => {
+                write!(self.writer, "{op}\t")?;
+                self.write_reg(rt)?;
+                self.write_sep()?;
+                self.write_imm_u(offset)?;
+                self.write_char('(')?;
+                self.write_reg(base)?;
+                self.write_char(')')
             }
             &Instruction::Imm1(op, rt, imm) => {
                 write!(self.writer, "{op}\t")?;
@@ -259,14 +302,38 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
                 self.write_sep()?;
                 self.write_freg(fs)
             }
-            Instruction::Syscall => self.write_str("syscall"),
             Instruction::Break => self.write_str("break"),
+            Instruction::Call(target) => {
+                self.write_str("jal\t")?;
+                self.write_label_ref(target)
+            }
             Instruction::Pseudo(pseudo) => self.write_pseudo_instruction(pseudo),
             Instruction::Virtual(value) => {
                 if !self.config.allow_virtuals {
                     panic!("formatting virtual instruction not allowed");
                 }
                 self.write_virtual_instruction(value)
+            }
+            Instruction::Hidden(inner) => {
+                if !self.config.allow_hidden_instructions {
+                    panic!("formatting hidden instruction not allowed");
+                }
+                self.write_str("{")?;
+                self.write_instruction(inner)?;
+                self.write_str("}")
+            }
+            Instruction::Comment(comment) => {
+                if self.config.show_comments {
+                    for (i, line) in comment.lines().enumerate() {
+                        if i != 0 {
+                            self.writeln()?;
+                            self.write_char('\t')?;
+                        }
+                        self.write_char('#')?;
+                        self.write_str(line)?;
+                    }
+                }
+                Ok(())
             }
         }
     }
@@ -298,10 +365,44 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
                 self.write_label_ref(label)?;
                 self.write_arguments(&arguments.iter().map(|(reg, _)| *reg).collect::<Vec<_>>())
             }
+            &VirtualInstruction::Declare(reg) => {
+                self.write_str("@decl\t")?;
+                self.write_any_reg(reg)
+            }
+            &VirtualInstruction::Move { src, dst } => {
+                self.write_str("@move\t")?;
+                self.write_any_reg(dst)?;
+                self.write_sep()?;
+                self.write_any_reg(src)
+            }
+            &VirtualInstruction::LoadStackAddress { reg, stack_address } => {
+                self.write_str("@la\t")?;
+                self.write_reg(reg)?;
+                self.write_sep()?;
+                self.write_stack_address(stack_address)
+            }
+            &VirtualInstruction::LoadFromStack { reg, stack_address } => {
+                self.write_str("@load\t")?;
+                self.write_any_reg(reg)?;
+                self.write_sep()?;
+                self.write_stack_address(stack_address)
+            }
+            &VirtualInstruction::StoreToStack { reg, stack_address } => {
+                self.write_str("@store\t")?;
+                self.write_any_reg(reg)?;
+                self.write_sep()?;
+                self.write_stack_address(stack_address)
+            }
         }
     }
 
-    pub fn write_terminator(&mut self, value: &Terminator) -> Result {
+    fn write_stack_address(&mut self, value: StackAddress) -> Result {
+        self.write_str("0(")?;
+        write!(self.writer, "_{}", value.0)?;
+        self.write_char(')')
+    }
+
+    pub fn write_terminator(&mut self, function: &Function, value: &Terminator) -> Result {
         match value {
             Terminator::BranchIf(cond, rs, rt, true_target, false_target) => {
                 write!(self.writer, "b{cond}\t")?;
@@ -309,20 +410,20 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
                 self.write_sep()?;
                 self.write_reg(*rt)?;
                 self.write_sep()?;
-                self.write_block_ref(true_target)?;
+                self.write_block_ref(function, true_target)?;
                 if self.config.show_block_arguments {
                     self.write_sep()?;
-                    self.write_block_ref(false_target)?;
+                    self.write_block_ref(function, false_target)?;
                 }
             }
             Terminator::BranchIfZ(cond, rs, true_target, false_target) => {
                 write!(self.writer, "b{cond}\t")?;
                 self.write_reg(*rs)?;
                 self.write_sep()?;
-                self.write_block_ref(true_target)?;
+                self.write_block_ref(function, true_target)?;
                 if self.config.show_block_arguments {
                     self.write_sep()?;
-                    self.write_block_ref(false_target)?;
+                    self.write_block_ref(function, false_target)?;
                 }
             }
             Terminator::BranchIfZAndLink(cond, rs, true_target, false_target) => {
@@ -332,39 +433,40 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
                 self.write_label_ref(true_target)?;
                 if self.config.show_block_arguments {
                     self.write_sep()?;
-                    self.write_block_ref(false_target)?;
+                    self.write_block_ref(function, false_target)?;
                 }
             }
             Terminator::BranchIfFCond(b, true_target, false_target) => {
                 write!(self.writer, "bc1{}\t", if *b { 't' } else { 'f' })?;
-                self.write_block_ref(true_target)?;
+                self.write_block_ref(function, true_target)?;
                 if self.config.show_block_arguments {
                     self.write_sep()?;
-                    self.write_block_ref(false_target)?;
+                    self.write_block_ref(function, false_target)?;
                 }
             }
             Terminator::Jump(target) => {
                 self.write_str("j\t")?;
-                self.write_block_ref(target)?;
-            }
-            Terminator::JumpAndLink(target, next_block) => {
-                self.write_str("jal\t")?;
-                self.write_label_ref(target)?;
-                if self.config.show_block_arguments {
-                    self.write_sep()?;
-                    self.write_block_ref(next_block)?;
-                }
+                self.write_block_ref(function, target)?;
             }
             Terminator::ReturnToRa => {
                 self.write_str("jr\t")?;
                 self.write_reg(Reg::RA)?;
+            }
+            Terminator::Syscall(next_block) => {
+                self.write_str("syscall")?;
+                if self.config.show_block_arguments {
+                    if let Some(next_block) = next_block {
+                        self.write_str("; ")?;
+                        self.write_block_ref(function, next_block)?;
+                    }
+                }
             }
             Terminator::JumpAndLinkRa(rs, next_block) => {
                 self.write_str("jalr\t")?;
                 self.write_reg(*rs)?;
                 if self.config.show_block_arguments {
                     self.write_sep()?;
-                    self.write_block_ref(next_block)?;
+                    self.write_block_ref(function, next_block)?;
                 }
             }
             Terminator::JumpAndLinkReg(rd, rs, next_block) => {
@@ -374,7 +476,7 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
                 self.write_reg(*rs)?;
                 if self.config.show_block_arguments {
                     self.write_sep()?;
-                    self.write_block_ref(next_block)?;
+                    self.write_block_ref(function, next_block)?;
                 }
             }
             Terminator::Virtual(value) => {
@@ -409,9 +511,13 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
         write!(self.writer, "{value}")
     }
 
-    fn write_block_ref(&mut self, value: &BlockRef) -> Result {
-        write!(self.writer, "{}", value.label)?;
+    fn write_block_ref(&mut self, function: &Function, value: &BlockRef) -> Result {
+        self.write_block_label(function, value.id)?;
         self.write_arguments(&value.arguments)
+    }
+
+    fn write_block_label(&mut self, function: &Function, block_id: BlockId) -> Result {
+        write!(self.writer, "{}", function.block_label(block_id))
     }
 
     fn write_arguments(&mut self, args: &[AnyReg]) -> Result {
@@ -471,6 +577,22 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
         write!(self.writer, "{}", value)
     }
 
+    fn write_float_constant(&mut self, value: f32) -> Result {
+        let mut s = value.to_string();
+        if !s.contains('.') {
+            s += ".0";
+        }
+        self.write_str(&s)
+    }
+
+    fn write_double_constant(&mut self, value: f64) -> Result {
+        let mut s = value.to_string();
+        if !s.contains('.') {
+            s += ".0";
+        }
+        self.write_str(&s)
+    }
+
     /// Writes a separator: a comma followed by a space (`, `).
     #[inline]
     fn write_sep(&mut self) -> Result {
@@ -512,20 +634,6 @@ fn display_imm2_signed(op: ImmOp2) -> bool {
         ImmOp2::ShiftRightArithmetic => false,
         ImmOp2::SetLtS => true,
         ImmOp2::SetLtU => true,
-        ImmOp2::LoadByteS => true,
-        ImmOp2::LoadByteU => true,
-        ImmOp2::LoadHalfS => true,
-        ImmOp2::LoadHalfU => true,
-        ImmOp2::LoadWord => true,
-        ImmOp2::LoadWordLeft => true,
-        ImmOp2::LoadWordRight => true,
-        ImmOp2::StoreByte => true,
-        ImmOp2::StoreHalf => true,
-        ImmOp2::StoreWord => true,
-        ImmOp2::StoreWordLeft => true,
-        ImmOp2::StoreWordRight => true,
-        ImmOp2::LoadLinkedWord => true,
-        ImmOp2::StoreConditionalWord => true,
     }
 }
 

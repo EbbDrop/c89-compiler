@@ -1,4 +1,4 @@
-use crate::{AnyReg, BasicBlock, FReg, Function, Root};
+use crate::{dfa::uda::UdAnalyzable, AnyReg, BasicBlock, FReg, Function, Root};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,10 +22,10 @@ pub enum InvalidityReason {
     DuplicateSuccessor,
     /// If a basic block has the same argument more than once.
     DuplicateArgument,
-    /// If a registers is defined more than once (SSA violation).
+    /// If a virtual registers is defined more than once (SSA violation).
     MultipleDefs,
-    /// If a register is used before it is defined (SSA violation).
-    UseBeforeDef,
+    /// If a virtual register is used before it is defined, or not defined at all (SSA violation).
+    UndefUse,
     /// If a block is referenced but not in the graph.
     MissingBlock,
     /// If a label is referenced but not in the root.
@@ -91,17 +91,17 @@ fn validate_basic_block(function: &Function, block: &BasicBlock) -> Result<(), I
         }
     }
 
-    let def_reg = |defs: &mut HashSet<_>, reg: AnyReg| match defs.insert(reg) {
+    let def_reg = |defs: &mut HashSet<_>, reg: AnyReg| match !reg.is_virtual() || defs.insert(reg) {
         true => Ok(()),
         false => Err(InvalidityReason::MultipleDefs),
     };
-    let use_reg = |defs: &HashSet<_>, reg: AnyReg| match defs.contains(&reg) {
+    let use_reg = |defs: &HashSet<_>, reg: AnyReg| match !reg.is_virtual() || defs.contains(&reg) {
         true => Ok(()),
-        false => Err(InvalidityReason::UseBeforeDef),
+        false => Err(InvalidityReason::UndefUse),
     };
 
     for instr in &block.instructions {
-        let usedefs = instr.reg_usedefs();
+        let usedefs = instr.ud_info();
         for reg in usedefs.uses {
             use_reg(&defs, reg)?;
         }
@@ -110,7 +110,7 @@ fn validate_basic_block(function: &Function, block: &BasicBlock) -> Result<(), I
         }
     }
 
-    let term_usedefs = block.terminator.reg_usedefs();
+    let term_usedefs = block.terminator.ud_info();
     for reg in term_usedefs.uses {
         use_reg(&defs, reg)?;
     }

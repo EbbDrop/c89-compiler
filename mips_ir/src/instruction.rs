@@ -1,4 +1,4 @@
-use crate::{AnyReg, BlockRef, FReg, Label, Reg, StackInfo};
+use crate::{cfg::BlockRef, function::StackAddress, AnyReg, FReg, Label, Reg, StackInfo};
 
 pub mod instr {
     use super::*;
@@ -172,79 +172,79 @@ pub mod instr {
     /// Load byte from memory and store sign-extended in the first register.
     /// Memory address computed by adding the value in the second register to the immediate value.
     pub fn load_byte_s(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::LoadByteS, rt, rs, imm)
+        Instruction::Mem(MemOp::LoadByteS, rt, rs, imm)
     }
 
     /// Load byte from memory and store zero-extended in the first register.
     /// Memory address computed by adding the value in the second register to the immediate value.
     pub fn load_byte_u(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::LoadByteU, rt, rs, imm)
+        Instruction::Mem(MemOp::LoadByteU, rt, rs, imm)
     }
 
     /// Load half from memory and store sign-extended in the first register.
     /// Memory address computed by adding the value in the second register to the immediate value.
     pub fn load_half_s(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::LoadHalfS, rt, rs, imm)
+        Instruction::Mem(MemOp::LoadHalfS, rt, rs, imm)
     }
 
     /// Load half from memory and store zero-extended in the first register.
     /// Memory address computed by adding the value in the second register to the immediate value.
     pub fn load_half_u(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::LoadHalfU, rt, rs, imm)
+        Instruction::Mem(MemOp::LoadHalfU, rt, rs, imm)
     }
 
     /// Load word from memory and store in the first register.
     /// Memory address computed by adding the value in the second register to the immediate value.
     pub fn load_word(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::LoadWord, rt, rs, imm)
+        Instruction::Mem(MemOp::LoadWord, rt, rs, imm)
     }
 
     pub fn load_word_left(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::LoadWordLeft, rt, rs, imm)
+        Instruction::Mem(MemOp::LoadWordLeft, rt, rs, imm)
     }
 
     pub fn load_word_right(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::LoadWordRight, rt, rs, imm)
+        Instruction::Mem(MemOp::LoadWordRight, rt, rs, imm)
     }
 
     /// Store the low-order 8 bits of the first register in memory.
     /// Memory address computed by adding the value in the second register to the immediate value.
     pub fn store_byte(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::StoreByte, rt, rs, imm)
+        Instruction::Mem(MemOp::StoreByte, rt, rs, imm)
     }
 
     /// Store the low-order 16 bits of the first register in memory.
     /// Memory address computed by adding the value in the second register to the immediate value.
     pub fn store_half(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::StoreHalf, rt, rs, imm)
+        Instruction::Mem(MemOp::StoreHalf, rt, rs, imm)
     }
 
     /// Store the word of the first register in memory.
     /// Memory address computed by adding the value in the second register to the immediate value.
     pub fn store_word(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::StoreWord, rt, rs, imm)
+        Instruction::Mem(MemOp::StoreWord, rt, rs, imm)
     }
 
     pub fn store_word_left(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::StoreWordLeft, rt, rs, imm)
+        Instruction::Mem(MemOp::StoreWordLeft, rt, rs, imm)
     }
 
     pub fn store_word_right(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::StoreWordRight, rt, rs, imm)
+        Instruction::Mem(MemOp::StoreWordRight, rt, rs, imm)
     }
 
     /// Load a word from memory into the first registor for an atomic read-modify-write.
     ///
     /// Available from MIPS II.
     pub fn load_linked_word(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::LoadLinkedWord, rt, rs, imm)
+        Instruction::Mem(MemOp::LoadLinkedWord, rt, rs, imm)
     }
 
     /// Store a word from the first register to memory to complete an atomic read-modify-write.
     ///
     /// Available from MIPS II.
     pub fn store_conditional_word(rt: Reg, rs: Reg, imm: u16) -> Instruction {
-        Instruction::Imm2(ImmOp2::StoreConditionalWord, rt, rs, imm)
+        Instruction::Mem(MemOp::StoreConditionalWord, rt, rs, imm)
     }
 
     /// Set high-order 16 bits of the first register to the 16-bit immediate and the low-order
@@ -366,13 +366,18 @@ pub mod instr {
         Instruction::MoveToFpu(rt, fs)
     }
 
-    /// Execute the system call specified by the value in $v0
-    pub fn syscall() -> Instruction {
-        Instruction::Syscall
-    }
-
     pub fn break_() -> Instruction {
         Instruction::Break
+    }
+
+    /// Store the address of the next instruction in `$ra` and jump to `target`. Restricted version
+    /// of `jal`.
+    pub fn call(target: Label) -> Instruction {
+        Instruction::Call(target)
+    }
+
+    pub fn comment(s: String) -> Instruction {
+        Instruction::Comment(s)
     }
 
     // Pseudo instructions supported by the assembler but not directly available in the MIPS ISA.
@@ -385,7 +390,7 @@ pub mod instr {
     }
 
     pub mod virt {
-        use crate::FunctionCall;
+        use crate::function::StackAddress;
 
         use super::*;
 
@@ -399,6 +404,26 @@ pub mod instr {
                 return_reg,
                 arguments,
             }))
+        }
+
+        pub fn declare(reg: AnyReg) -> Instruction {
+            Instruction::Virtual(VirtualInstruction::Declare(reg))
+        }
+
+        pub fn move_(dst: AnyReg, src: AnyReg) -> Instruction {
+            Instruction::Virtual(VirtualInstruction::Move { src, dst })
+        }
+
+        pub fn load_stack_address(reg: Reg, stack_address: StackAddress) -> Instruction {
+            Instruction::Virtual(VirtualInstruction::LoadStackAddress { reg, stack_address })
+        }
+
+        pub fn load_from_stack(reg: AnyReg, stack_address: StackAddress) -> Instruction {
+            Instruction::Virtual(VirtualInstruction::LoadFromStack { reg, stack_address })
+        }
+
+        pub fn store_to_stack(reg: AnyReg, stack_address: StackAddress) -> Instruction {
+            Instruction::Virtual(VirtualInstruction::StoreToStack { reg, stack_address })
         }
     }
 }
@@ -443,12 +468,6 @@ pub mod term {
         Terminator::Jump(target)
     }
 
-    /// Store the address of the next instruction in `$ra` and jump to `target`. The address of
-    /// `next_block` will be linked, so it should be the next sequential block.
-    pub fn jump_and_link(target: Label, next_block: BlockRef) -> Terminator {
-        Terminator::JumpAndLink(target, next_block)
-    }
-
     /// Jump to the return address in `$ra`.
     pub fn return_to_ra() -> Terminator {
         Terminator::ReturnToRa
@@ -465,6 +484,12 @@ pub mod term {
     /// sequential block.
     pub fn jump_and_link_reg(rd: Reg, rs: Reg, next_block: BlockRef) -> Terminator {
         Terminator::JumpAndLinkReg(rd, rs, next_block)
+    }
+
+    /// Execute the system call specified by the value in $v0. If `next_block` is `None`, the
+    /// syscall should diverge (i.e. never return).
+    pub fn syscall(next_block: Option<BlockRef>) -> Terminator {
+        Terminator::Syscall(next_block)
     }
 
     pub mod virt {
@@ -485,6 +510,7 @@ pub enum Instruction {
     Reg2(RegOp2, Reg, Reg),
     Reg1(RegOp1, Reg),
     Imm2(ImmOp2, Reg, Reg, u16),
+    Mem(MemOp, Reg, Reg, u16),
     Imm1(ImmOp1, Reg, u16),
     FReg3(FRegOp3, FReg, FReg, FReg),
     FReg2(FRegOp2, FReg, FReg),
@@ -493,12 +519,67 @@ pub enum Instruction {
     MoveFromFpu(Reg, FReg),
     /// Copy the word from the second register to the first (FPU) register.
     MoveToFpu(Reg, FReg),
-    /// Execute the system call specified by the value in $v0
-    Syscall,
     Break,
+    Call(Label),
     // Pseudo instructions supported by the assembler but not directly available in the MIPS ISA.
     Pseudo(PseudoInstruction),
     Virtual(VirtualInstruction),
+    Hidden(Box<Instruction>),
+    Comment(String),
+}
+
+impl Instruction {
+    /// Replaces `self` by `Instruction::Nop` and returns what `self` was before.
+    pub fn take(&mut self) -> Self {
+        let mut nop = Self::Nop;
+        std::mem::swap(self, &mut nop);
+        nop
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        matches!(self, Self::Hidden(_))
+    }
+
+    pub fn as_unhidden(&self) -> &Instruction {
+        match self {
+            Instruction::Hidden(inner) => inner.as_ref(),
+            _ => self,
+        }
+    }
+
+    pub fn as_unhidden_mut(&mut self) -> &mut Instruction {
+        match self {
+            Instruction::Hidden(inner) => inner.as_mut(),
+            _ => self,
+        }
+    }
+
+    pub fn to_unhidden(self) -> Instruction {
+        match self {
+            Instruction::Hidden(inner) => *inner,
+            _ => self,
+        }
+    }
+
+    pub fn unhide(&mut self) {
+        if let Instruction::Hidden(inner) = self {
+            *self = inner.take()
+        }
+    }
+
+    pub fn to_hidden(self) -> Instruction {
+        match self {
+            Instruction::Hidden(_) => self,
+            _ => Instruction::Hidden(Box::new(self)),
+        }
+    }
+
+    pub fn hide(&mut self) {
+        match self {
+            Instruction::Hidden(_) => {}
+            _ => *self = Instruction::Hidden(Box::new(self.take())),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -516,6 +597,23 @@ pub struct FunctionCall {
 #[derive(Debug, Clone)]
 pub enum VirtualInstruction {
     FunctionCall(FunctionCall),
+    Declare(AnyReg),
+    Move {
+        src: AnyReg,
+        dst: AnyReg,
+    },
+    LoadStackAddress {
+        reg: Reg,
+        stack_address: StackAddress,
+    },
+    LoadFromStack {
+        reg: AnyReg,
+        stack_address: StackAddress,
+    },
+    StoreToStack {
+        reg: AnyReg,
+        stack_address: StackAddress,
+    },
 }
 
 /// An instruction that branches and is used to terminate basic blocks.
@@ -526,9 +624,10 @@ pub enum Terminator {
     BranchIfZAndLink(BZalCond, Reg, Label, BlockRef),
     BranchIfFCond(bool, BlockRef, BlockRef),
     Jump(BlockRef),
-    JumpAndLink(Label, BlockRef),
     /// Unconditional jump to `$ra`. Replaces the `jr` instruction for now.
     ReturnToRa,
+    /// Execute the system call specified by the value in $v0
+    Syscall(Option<BlockRef>),
     JumpAndLinkRa(Reg, BlockRef),
     JumpAndLinkReg(Reg, Reg, BlockRef),
     Virtual(VirtualTerminator),
@@ -696,9 +795,10 @@ pub enum ImmOp2 {
     /// Set the first register to 1 if the unsigned value in the second register is less than the
     /// unsigned immediate value, otherwise set to 0.
     SetLtU,
-    //----------------------------------------------------------------------------------------------
-    // Memory loads & stores
-    //----------------------------------------------------------------------------------------------
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemOp {
     /// Load byte from memory and store sign-extended in the first register.
     /// Memory address computed by adding the value in the second register to the immediate value.
     LoadByteS,
@@ -750,7 +850,13 @@ impl std::fmt::Display for ImmOp2 {
             Self::ShiftRightArithmetic => f.write_str("sra"),
             Self::SetLtS => f.write_str("slti"),
             Self::SetLtU => f.write_str("sltiu"),
-            // Memory loads & stores
+        }
+    }
+}
+
+impl std::fmt::Display for MemOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
             Self::LoadByteS => f.write_str("lb"),
             Self::LoadByteU => f.write_str("lbu"),
             Self::LoadHalfS => f.write_str("lh"),
@@ -873,7 +979,7 @@ impl std::fmt::Display for FRegOp2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Abs(fmt) => write!(f, "abs.{fmt}"),
-            Self::Neg(fmt) => write!(f, "neq.{fmt}"),
+            Self::Neg(fmt) => write!(f, "neg.{fmt}"),
             Self::Sqrt(fmt) => write!(f, "sqrt.{fmt}"),
             Self::Cmp(cmp) => write!(f, "c.{cmp}"),
             Self::Convert(to, from) => write!(f, "cvt.{to}.{from}"),

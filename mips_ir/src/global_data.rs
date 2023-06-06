@@ -12,8 +12,18 @@ impl AlignBoundary {
     pub const DOUBLE: Self = Self(3);
 
     /// Returns the actual align boundary in bytes. Equivalent to `2.pow(*self)`.
+    #[inline]
     pub fn bytes(self) -> u128 {
         1 << self.0
+    }
+
+    #[inline]
+    pub fn next_multiple_from(&self, start: u32) -> u32 {
+        // Based on the implementation of `core::u32::next_multiple_of`.
+        match start % self.bytes() as u32 {
+            0 => start,
+            r => start + (self.bytes() as u32 - r),
+        }
     }
 }
 
@@ -54,6 +64,7 @@ pub enum DataDirective {
     Words(Vec1<u32>),
     Floats(Vec1<f32>),
     Doubles(Vec1<f64>),
+    LabelWord(Label),
 }
 
 impl DataDirective {
@@ -65,6 +76,7 @@ impl DataDirective {
             DataDirective::Byte(_) => AlignBoundary::BYTE,
             DataDirective::Half(_) => AlignBoundary::HALF,
             DataDirective::Word(_) => AlignBoundary::WORD,
+            DataDirective::LabelWord(_) => AlignBoundary::WORD,
             DataDirective::Float(_) => AlignBoundary::WORD,
             DataDirective::Double(_) => AlignBoundary::DOUBLE,
             DataDirective::Bytes(_) => AlignBoundary::BYTE,

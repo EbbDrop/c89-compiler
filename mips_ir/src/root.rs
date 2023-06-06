@@ -12,6 +12,7 @@ pub struct Root {
     functions: HashMap<Label, Function>,
     /// All referenced labels that are not defined in this file.
     external_labels: HashSet<Label>,
+    raw_text: Vec<String>,
 }
 
 impl Root {
@@ -55,6 +56,14 @@ impl Root {
     /// Returns `true` if at least one global data item was added to this root.
     pub fn has_any_data(&self) -> bool {
         !self.data.is_empty()
+    }
+
+    /// Returns an iterator over all labels that define functions in an undefined order. Note that
+    /// this order isn't necessary equal to the order of [`functions`] or [`functions_mut`].
+    ///
+    /// Semantically equivalent to `self.functions().map(|f| f.label())`.
+    pub fn function_labels(&self) -> impl Iterator<Item = &Label> {
+        self.functions.keys()
     }
 
     /// Returns an iterator over all functions in an undefined order.
@@ -106,6 +115,18 @@ impl Root {
         self.data.push(data);
     }
 
+    /// Removes global data. Returns the removed global data if the label actually referred to
+    /// existing data.
+    pub fn remove_data(&mut self, label: &Label) -> Option<GlobalData> {
+        if !self.has_label(label) {
+            panic!("label doesn't exist: {label}");
+        }
+        self.data
+            .iter()
+            .position(|d| d.label() == label)
+            .map(|i| self.data.remove(i))
+    }
+
     /// Adds a function. Panics if the function's label is already used.
     pub fn add_function(&mut self, function: Function) {
         let label = function.label();
@@ -113,6 +134,23 @@ impl Root {
             panic!("label already exists: {label}");
         }
         self.functions.insert(label.deref().clone(), function);
+    }
+
+    /// Removes a function. Returns the removed function if the label actually referred to an
+    /// existing function.
+    pub fn remove_function(&mut self, label: &Label) -> Option<Function> {
+        if !self.has_label(label) {
+            panic!("label doesn't exist: {label}");
+        }
+        self.functions.remove(label)
+    }
+
+    pub fn raw_text(&self) -> &[String] {
+        self.raw_text.as_slice()
+    }
+
+    pub fn add_raw_text(&mut self, raw_text: String) {
+        self.raw_text.push(raw_text);
     }
 
     /// Creates the label as external (i.e. will be defined in another file). Panics if the label is
@@ -124,5 +162,11 @@ impl Root {
         }
         self.external_labels.insert(label.clone());
         label
+    }
+
+    pub fn remove_external_label(&mut self, label: &Label) {
+        if !self.external_labels.remove(label) {
+            panic!("label didn't exist: {label}");
+        }
     }
 }

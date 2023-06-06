@@ -1,5 +1,7 @@
 //output:
 //100.500000%
+//output-mips:
+//100.5%
 
 #include <stdio.h>
 

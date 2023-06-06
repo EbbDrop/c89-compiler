@@ -5,15 +5,25 @@ mod label;
 mod outputter;
 mod reg;
 mod root;
+mod scanner;
 
+pub mod cfg;
+pub mod dfa;
 pub mod fixer;
-pub mod uda;
-pub mod validator;
+pub mod linker;
+pub mod optimizer;
+pub mod passes;
+// pub mod validator;
 
-pub use function::*;
-pub use global_data::*;
-pub use instruction::*;
-pub use label::*;
+pub use cfg::{BlockId, BlockRef};
+pub use function::{BBBuilder, BasicBlock, Function, ReferenceRegister, StackInfo};
+pub use global_data::{size, AlignBoundary, DataDirective, GlobalData};
+pub use instruction::{
+    instr, term, BCond, BZCond, BZalCond, FCmp, FFmt, FImmOp, FRegOp2, FRegOp3, FunctionCall,
+    ImmOp1, ImmOp2, Instruction, PseudoInstruction, RegOp1, RegOp2, RegOp3, Terminator, TrapCond,
+    TrapCondImm, VirtualInstruction, VirtualTerminator,
+};
+pub use label::Label;
 pub use outputter::*;
-pub use reg::*;
-pub use root::*;
+pub use reg::{AnyReg, FReg, Reg, VARGenerator};
+pub use root::Root;
