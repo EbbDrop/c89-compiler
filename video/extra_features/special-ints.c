@@ -1,4 +1,4 @@
-// Extra feature: Assing in expresions
+// Extra feature: hex and octal number literals
 
 #include <stdio.h>
 

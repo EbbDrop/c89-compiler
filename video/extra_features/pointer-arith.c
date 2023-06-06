@@ -8,7 +8,7 @@ int main() {
     int* ptri2 = ptri + 1;
     printf("%i\n", (int)ptri2 - (int)ptri);
     // subtracting raw pointers divides by the size of the pointer, so should be 1
-    printf("%li\n", ptri2 - ptri);
+    printf("%i\n", ptri2 - ptri);
 
     char c = 'a';
     char* ptrc = &c;
@@ -17,7 +17,7 @@ int main() {
     printf("%i\n", (int)ptrc2 - (int)ptrc);
 
     // subtracting raw pointers divides by the size of the pointer, so should be 1
-    printf("%li\n", ptrc2 - ptrc);
+    printf("%i\n", ptrc2 - ptrc);
 
     int j = 0;
     int* p = &j;
@@ -28,7 +28,7 @@ int main() {
 
     // subtracting raw pointers divides by the size of the pointer.
     // so should be 1 independent of proccessor
-    printf("%li\n", ptrp2 - ptrp);
+    printf("%i\n", ptrp2 - ptrp);
 
     return 0;
 }

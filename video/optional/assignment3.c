@@ -3,7 +3,7 @@
 //   – Comment machine instructions with the original C statement
 
 // Global singe line comment here
-int a = 4;
+int aa = 4;
 
 /*
 Multi line comment here
@@ -11,7 +11,7 @@ Multi line comment here
 - more lines
 - 42
 */
-int b = 4;
+int bb = 4;
 
 // multiple types
 /* of comments */

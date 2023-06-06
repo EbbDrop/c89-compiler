@@ -37,3 +37,5 @@ int with_switch(int i) {
       return 2;
   }
 }
+
+int main() { return 0; }

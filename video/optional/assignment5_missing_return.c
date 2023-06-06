@@ -18,3 +18,5 @@ int break_blocks_return(int i) {
     return 1; // does not count becouse of break
   }
 }
+
+int main() { return 0; }

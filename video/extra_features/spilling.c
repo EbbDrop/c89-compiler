@@ -1,3 +1,5 @@
+#include <stdio.h>
+
 void func() {}
 
 int main() {
@@ -15,5 +17,6 @@ int main() {
   // Call to make shure ONLY saved registers can be used,
   // limiting the amout of usable registers to 7
   func();
-  return a + b + c + d + e + f + g + h + i + j + k;
+  printf("%i", a + b + c + d + e + f + g + h + i + j + k);
+  return 0;
 }
