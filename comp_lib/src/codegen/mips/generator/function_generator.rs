@@ -158,8 +158,24 @@ impl<'g, 'i, 's> FunctionGenerator<'g, 'i, 's> {
             builder = self.add_ir_block_node(builder, block);
         }
 
-        self.function
-            .add_block(builder.bb.terminate(mir::term::virt::return_(None)));
+        let implicit_return_value = match &self.ir.return_type {
+            CType::Scalar(scalar) => match scalar {
+                ctype::Scalar::Arithmetic(arithmetic) => match arithmetic.is_floating() {
+                    true => None, // implicit floating point returns are undefined
+                    false => Some(mir::Reg::ZERO.into()),
+                },
+                ctype::Scalar::Pointer(_) => Some(mir::Reg::ZERO.into()),
+            },
+            CType::Aggregate(_) => {
+                unreachable!("aggregate values cannot be returned from functions")
+            }
+            CType::Void => None,
+        };
+        self.function.add_block(
+            builder
+                .bb
+                .terminate(mir::term::virt::return_(implicit_return_value)),
+        );
         self.function
     }
 
