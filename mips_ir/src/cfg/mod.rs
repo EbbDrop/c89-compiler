@@ -269,6 +269,31 @@ impl Cfg {
             .clone()
     }
 
+    pub fn dominance_frontiers(&self) -> BTreeMap<BlockId, BTreeSet<BlockId>> {
+        let mut dominance_frontiers: BTreeMap<BlockId, BTreeSet<BlockId>> =
+            self.blocks().map(|(id, _)| (id, BTreeSet::new())).collect();
+
+        let dominator_tree = self.dominator_tree();
+        for (block_id, _) in self.blocks() {
+            if self.n_predecessors(block_id) < 2 {
+                continue;
+            }
+            let idom = dominator_tree.immediate_dominator(block_id).unwrap();
+            for (pred_id, _) in self.predecessors(block_id) {
+                let mut runner = pred_id;
+                while runner != idom {
+                    dominance_frontiers
+                        .get_mut(&runner)
+                        .unwrap()
+                        .insert(block_id);
+                    runner = dominator_tree.immediate_dominator(runner).unwrap();
+                }
+            }
+        }
+
+        dominance_frontiers
+    }
+
     pub fn du_chain(&self, reg: AnyReg) -> uda::DuChain {
         if let Some(du_chains) = &self.cache.borrow().du_chains {
             return du_chains[reg].clone();

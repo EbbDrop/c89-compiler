@@ -2,6 +2,7 @@ use super::{util::alias_reg_from, N_CPU_REGS, N_FPU_D_REGS, N_SAVED_CPU_REGS, N_
 use crate::cfg::BlockId;
 use crate::function::StackAddress;
 use crate::{
+    cfg::Cfg,
     dfa::uda::{GlobalLocation, Location},
     AnyReg, FReg, Function, Instruction, Reg,
 };
@@ -545,43 +546,65 @@ impl<'a, 'b, 'c> BeladyBlock<'a, 'b, 'c> {
         location: isize,
         reg: AnyReg,
     ) -> Option<usize> {
-        let du_chain = &self.function.cfg.du_chains()[reg];
-        if du_chain.def_block() == block_id && location < du_chain.def_location().as_location().0 {
-            // If the CFG is proper SSA, there can be no uses before the def.
-            return None;
-        }
-        if !self.function.cfg.live_sets()[block_id]
-            .live_outs
-            .contains(&reg)
-        {
-            // Last use is in this block.
-            return du_chain
-                .uses_in(block_id)
-                .filter(|&loc| location < loc.0)
+        fn rec(
+            cfg: &Cfg,
+            block_id: BlockId,
+            location: isize,
+            reg: AnyReg,
+            visited_stack: &mut Vec<(BlockId, AnyReg)>,
+        ) -> Option<usize> {
+            if visited_stack.contains(&(block_id, reg)) {
+                return None;
+            }
+            let du_chain = &cfg.du_chains()[reg];
+            if du_chain.def_block() == block_id
+                && location <= du_chain.def_location().as_location().0
+            {
+                // If the CFG is proper SSA, there can be no uses before (or at) the def.
+                return None;
+            }
+            if !cfg.live_sets()[block_id].live_outs.contains(&reg) {
+                // Last use is in this block.
+                return du_chain
+                    .uses_in(block_id)
+                    .filter(|&loc| location < loc.0)
+                    .min()
+                    .map(|loc| (loc.0 - location + 1) as usize);
+            }
+            // `reg` is live-out and `location` comes after (or on) the def location (or it is not
+            // defined in this block, but is live-in (since it's live-out)).
+            let block = &cfg[block_id];
+            visited_stack.push((block_id, reg));
+            let distance_to_nearest_next_use = block
+                .successors()
+                .filter_map(|succ_bref| {
+                    rec(cfg, succ_bref.id, -1, reg, visited_stack)
+                        .into_iter()
+                        .chain(
+                            succ_bref
+                                .arguments
+                                .iter()
+                                .zip(&cfg[succ_bref.id].arguments)
+                                .filter(|(&arg, _)| arg == reg)
+                                .flat_map(|(_, &param)| {
+                                    rec(cfg, block_id, -1, param, visited_stack)
+                                }),
+                        )
+                        .min()
+                })
                 .min()
-                .map(|loc| (loc.0 - location + 1) as usize);
+                .map(|d| block.instructions.len() - (location + 1) as usize + 1 + d);
+            visited_stack.pop();
+            distance_to_nearest_next_use
         }
-        // `reg` is live-out and `location` comes after (or on) the def location (or it is not
-        // defined in this block, but is live-in (since it's live-out)).
-        let block = &self.function.cfg[block_id];
-        block
-            .successors()
-            .flat_map(|succ_bref| {
-                self.distance_to_next_use_after(succ_bref.id, -1, reg)
-                    .into_iter()
-                    .chain(
-                        succ_bref
-                            .arguments
-                            .iter()
-                            .zip(&self.function.cfg[succ_bref.id].arguments)
-                            .filter(|(&arg, _)| arg == reg)
-                            .flat_map(|(_, &param)| {
-                                self.distance_to_next_use_after(block_id, -1, param)
-                            }),
-                    )
-            })
-            .min()
-            .map(|d| block.instructions.len() - (location + 1) as usize + 1 + d)
+        let mut visited_stack = Vec::new();
+        rec(
+            &self.function.cfg,
+            block_id,
+            location,
+            reg,
+            &mut visited_stack,
+        )
     }
 }
 

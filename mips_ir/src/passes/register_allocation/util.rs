@@ -38,35 +38,40 @@ pub fn alias_reg_from(
     }
 
     // Assign each block the same alias initially.
-    let mut aliases = BTreeMap::from_iter(affected.iter().map(|&block_id| (block_id, alias)));
+    let mut aliases =
+        BTreeMap::from_iter(affected.iter().map(|&block_id| (block_id, (alias, false))));
 
     let mut changing = true;
     while changing {
         changing = false;
         for &block_id in &affected {
-            let pred_aliases =
-                HashSet::<_>::from_iter(cfg.predecessor_ids(block_id).filter_map(|pred_id| {
+            let mut pred_aliases =
+                HashSet::<_>::from_iter(cfg.predecessor_ids(block_id).map(|pred_id| {
                     if pred_id == location.block_id {
-                        Some(alias)
+                        alias
                     } else {
-                        aliases.get(&pred_id).copied()
+                        aliases.get(&pred_id).map(|(r, _)| *r).unwrap_or(reg)
                     }
                 }));
-            // Check the number of unique pred aliases
-            match pred_aliases.len() {
-                0 => unreachable!(
-                    "at least one pred must have an alias for the block to be in `affected`"
-                ),
-                1 => {
+            let (block_alias, is_block_alias_original) = aliases[&block_id];
+            let original_len = pred_aliases.len();
+            pred_aliases.remove(&block_alias);
+            // Check the number of unique pred aliases (excl. the block's own alias)
+            match (original_len, pred_aliases.len()) {
+                (0, _) => {
+                    unreachable!("a block must have at least one pred to be in `affected`")
+                }
+                (_, 0) => {}
+                (1, _) => {
                     let pred_alias = pred_aliases.into_iter().next().unwrap();
-                    match aliases.insert(block_id, pred_alias) {
-                        Some(old_alias) if old_alias == pred_alias => (),
-                        _ => changing = true,
-                    }
+                    aliases.insert(block_id, (pred_alias, false));
+                    changing = true;
                 }
                 _ => {
-                    aliases.insert(block_id, new_alias());
-                    changing = true;
+                    if !is_block_alias_original {
+                        aliases.insert(block_id, (new_alias(), true));
+                        changing = true;
+                    }
                 }
             }
         }
@@ -83,13 +88,13 @@ pub fn alias_reg_from(
         .map_all_uses(|r| if r == reg { alias } else { r });
 
     for block_id in affected {
-        let block_alias = aliases[&block_id];
+        let (block_alias, _) = aliases[&block_id];
         let mut pred_same_alias = true;
         for pred_id in cfg.predecessor_ids(block_id).collect::<Vec<_>>() {
             let pred_alias = if pred_id == location.block_id {
                 alias
             } else {
-                aliases.get(&pred_id).copied().unwrap_or(reg)
+                aliases.get(&pred_id).map(|(r, _)| *r).unwrap_or(reg)
             };
             if pred_alias != block_alias {
                 cfg[pred_id]
@@ -112,5 +117,8 @@ pub fn alias_reg_from(
             .map_all_uses(|r| if r == reg { block_alias } else { r });
     }
 
-    (alias, aliases)
+    (
+        alias,
+        aliases.into_iter().map(|(b, (r, _))| (b, r)).collect(),
+    )
 }

@@ -16,7 +16,11 @@ pub fn purge_root(root: &mut Root) {
 /// Assumes the function is validated.
 pub fn purge_function(function: &mut Function) {
     remove_unreachable_blocks(function);
+    eliminate_unused_regs(function);
+    remove_redundant_phi_args(function);
+}
 
+fn eliminate_unused_regs(function: &mut Function) {
     let mut to_eliminate = HashSet::new();
 
     let du_chains = function.cfg.du_chains();
@@ -124,5 +128,52 @@ fn eliminate_reg(function: &mut Function, block_id: BlockId, to_eliminate: &Hash
         .any(|r| to_eliminate.contains(&r))
     {
         panic!("cannot eliminate register used in a terminator");
+    }
+}
+
+fn remove_redundant_phi_args(function: &mut Function) {
+    let mut changing = true;
+    while changing {
+        changing = false;
+        for block_id in function.cfg.blocks().map(|(id, _)| id).collect::<Vec<_>>() {
+            let pred_ids: Vec<_> = function.cfg.predecessor_ids(block_id).collect();
+            for idx in (0..function.cfg[block_id].arguments.len()).rev() {
+                let mut ins = pred_ids
+                    .iter()
+                    .map(|&id| function.cfg[id].successor(block_id).unwrap().arguments[idx]);
+                let Some(first) = ins.next() else { continue };
+                if ins.any(|r| r != first) {
+                    continue;
+                }
+                std::mem::drop(ins);
+                changing = true;
+                for &pred_id in &pred_ids {
+                    function.cfg[pred_id]
+                        .successor_mut(block_id)
+                        .unwrap()
+                        .arguments
+                        .remove(idx);
+                }
+                let param = function.cfg[block_id].arguments.remove(idx);
+                map_reg(function, param, first);
+            }
+        }
+    }
+}
+
+fn map_reg(function: &mut Function, from: AnyReg, to: AnyReg) {
+    for (_, block) in function.cfg.blocks_mut() {
+        for arg in &mut block.arguments {
+            if *arg == from {
+                *arg = to;
+            }
+        }
+        for instr in &mut block.instructions {
+            instr.map_uses(|r| if r == from { to } else { r });
+            instr.map_defs(|r| if r == from { to } else { r });
+        }
+        block
+            .terminator_mut()
+            .map_all_uses(|r| if r == from { to } else { r });
     }
 }
