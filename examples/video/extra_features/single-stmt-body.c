@@ -35,3 +35,5 @@ void fors(int i) {
   // yes this is suported by C89
   for(;i;i++) ;
 }
+
+int main() { return 0; }

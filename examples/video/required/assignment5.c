@@ -6,33 +6,33 @@
 #include <stdio.h>
 
 // Global variables
-int a = 3;
-int b = 4;
+int aa = 3;
+int bb = 4;
 
-void function_scope(int b) {
-    int a = 1;
+void function_scope(int bb) {
+    int aa = 1;
     {
-        int b = 2;
-        printf("local a = %i; local b = %i\n", a, b);
+        int bb = 2;
+        printf("local aa = %i; local bb = %i\n", aa, bb);
     }
-    printf("local a = %i; param b = %i\n", a, b);
+    printf("local aa = %i; param bb = %i\n", aa, bb);
 }
 
 int main() {
-    printf("global a = %i; global b = %i\n", a, b);
+    printf("global aa = %i; global bb = %i\n", aa, bb);
     function_scope(9);
 
-    int a = -2;
-    printf("local a = %i; global b = %i\n", a, b);
+    int aa = -2;
+    printf("local aa = %i; global bb = %i\n", aa, bb);
 
     {
-        int b = -6;
-        printf("local a = %i; local b = %i\n", a, b);
+        int bb = -6;
+        printf("local aa = %i; local bb = %i\n", aa, bb);
     }
 
-    b = 0; // set global b to 0
+    bb = 0; // set global bb to 0
 
-    printf("local a = %i; global b = %i\n", a, b);
+    printf("local aa = %i; global bb = %i\n", aa, bb);
 
     return 0;
 }

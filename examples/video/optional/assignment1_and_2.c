@@ -19,7 +19,7 @@ int main() {
   printf(
     "5 %% 3 = %i\n"    // expect 2
     "4 %% 5 = %i\n\n", // expect 4
-    4 % 3,
+    5 % 3,
     4 % 5
   );
 

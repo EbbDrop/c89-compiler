@@ -24,3 +24,9 @@ int always_false() {
   }
   return a;
 }
+
+int main() {
+  always_true();
+  always_false();
+  return 0;
+}
