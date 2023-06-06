@@ -1,21 +1,9 @@
+use super::util::alias_reg_from;
 use crate::{
     cfg::{BasicBlock, BlockId, BlockRef},
     dfa::uda::{GlobalLocation, Location},
-    Function, FunctionCall, Instruction, Root, VirtualInstruction,
+    Function, FunctionCall, Instruction, VirtualInstruction,
 };
-
-use super::register_allocation::util::alias_reg_from;
-
-pub fn run(root: &mut Root) {
-    for function in root.functions_mut() {
-        prepare_function(function);
-    }
-}
-
-/// Prepare this function for further passes s.a. register allocation
-fn prepare_function(function: &mut Function) {
-    isolate_calls(function);
-}
 
 pub(crate) fn isolate_calls(function: &mut Function) {
     let block_ids: Vec<_> = function.cfg.blocks().map(|(id, _)| id).collect();

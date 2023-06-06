@@ -1,19 +1,17 @@
+mod cfg;
+mod dfa;
+mod fixer;
 mod function;
 mod global_data;
 mod instruction;
 mod label;
+mod linker;
+mod optimizer;
 mod outputter;
+mod passes;
 mod reg;
 mod root;
 mod scanner;
-
-pub mod cfg;
-pub mod dfa;
-pub mod fixer;
-pub mod linker;
-pub mod optimizer;
-pub mod passes;
-// pub mod validator;
 
 pub use cfg::{BlockId, BlockRef};
 pub use function::{BBBuilder, BasicBlock, Function, ReferenceRegister, StackInfo};
@@ -24,6 +22,17 @@ pub use instruction::{
     TrapCondImm, VirtualInstruction, VirtualTerminator,
 };
 pub use label::Label;
-pub use outputter::*;
+pub use outputter::{MipsOutputConfig, MipsOutputter};
 pub use reg::{AnyReg, FReg, Reg, VARGenerator};
 pub use root::Root;
+
+pub fn compile_and_link(root: &mut Root) {
+    passes::patcher::patch_root(root);
+    dfa::dce::purge_root(root);
+    passes::register_allocation::run(root);
+    passes::stack_frame_builder::run(root);
+    passes::devirtualizer::run(root);
+    optimizer::simplifier::simplify_root(root);
+    fixer::fix_root(root);
+    linker::link(root).expect("linking failed");
+}

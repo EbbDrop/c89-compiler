@@ -3,6 +3,7 @@
 //! See https://doi.org/10.1007/11688839_20 for the paper on which this implementation is mainly
 //! based. For the pdf version, see https://compilers.cs.uni-saarland.de/papers/ra_ssa.pdf.
 
+mod call_isolation;
 mod coalescing;
 mod coloring;
 mod perm_optimizer;
@@ -63,6 +64,8 @@ pub fn run(root: &mut crate::Root) {
 }
 
 fn run_function(function: &mut crate::Function) {
+    call_isolation::isolate_calls(function);
+
     spilling::spill_belady(function);
 
     // Removing unused (phi) defs is required for the following passes to work
@@ -73,7 +76,7 @@ fn run_function(function: &mut crate::Function) {
     for (_, block) in function.cfg.blocks_mut() {
         block.is_call_block = false;
     }
-    crate::passes::pre_allocation::isolate_calls(function);
+    call_isolation::isolate_calls(function);
 
     let (coloring, conflict_graph) = coloring::color(&function.cfg);
     let coalesed_color = coalescing::coales(&function.cfg, &coloring, &conflict_graph);

@@ -1,21 +1,24 @@
-use mips_ir as mir;
+use crate::{
+    dfa::uda::{DefUseError, DuChains},
+    Function, Root,
+};
 
 /// Patches "undef use" problems by inserting no-op "Declare" instructions.
 /// Note that this cannot fix "use before def" problems, i.e. when a definition exists but comes
 /// after its first use. This only works for registers used but never defined.
-pub fn patch_root(root: &mut mir::Root) {
+pub fn patch_root(root: &mut Root) {
     root.functions_mut().for_each(patch_function);
 }
 
 /// See [`patch_root`].
-pub fn patch_function(function: &mut mir::Function) {
-    match mir::dfa::uda::DuChains::try_build_from(&function.cfg) {
+pub fn patch_function(function: &mut Function) {
+    match DuChains::try_build_from(&function.cfg) {
         Ok(_) => (),
-        Err(mir::dfa::uda::DefUseError::MultipleDefs(multiple_defs)) => {
+        Err(DefUseError::MultipleDefs(multiple_defs)) => {
             dbg!(function);
             panic!("cannot patch: codegen generated multiple defs: {multiple_defs:#?}")
         }
-        Err(mir::dfa::uda::DefUseError::UndefUses(undef_uses)) => {
+        Err(DefUseError::UndefUses(undef_uses)) => {
             let dominator_tree = function.cfg.dominator_tree();
             for (reg, locations) in undef_uses {
                 let common_dominator_id = dominator_tree
@@ -31,7 +34,7 @@ pub fn patch_function(function: &mut mir::Function) {
                     .unwrap_or(common_dominator.instructions.len());
                 common_dominator
                     .instructions
-                    .insert(first_use, mir::instr::virt::declare(reg));
+                    .insert(first_use, crate::instr::virt::declare(reg));
             }
         }
     }

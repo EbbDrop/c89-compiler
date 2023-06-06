@@ -181,10 +181,6 @@ impl<'w, W: std::fmt::Write> MipsOutputter<'w, W> {
 
     pub fn write_function(&mut self, value: &Function) -> Result {
         self.write_label(value.label())?;
-        // TODO: FIXME: Patch the graph such that there are no two nodes with the same default
-        // successor (i.e. such that every node has exactly one predecessor for which it is the
-        // default successor) and such that there is no node which has the entry point as default
-        // successor.
         let traverser = match self.config.show_all_blocks {
             false => value.traverse(),
             true => value.traverse_all(),

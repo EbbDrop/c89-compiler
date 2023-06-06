@@ -131,8 +131,8 @@ fn destruct_stack_frame(function: &mut Function) {
     builder.add_instruction(crate::instr::add_u_imm(Reg::SP, Reg::SP, stack_frame_size));
 
     // Jump to $ra.
+    let exit_block_id = builder.id();
     let exit_block = builder.terminate(crate::term::return_to_ra());
-    let exit_block_id = exit_block.id();
     function.add_block(exit_block);
     function.exit_block_id = Some(exit_block_id);
 }

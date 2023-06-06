@@ -1,6 +1,8 @@
 use crate::{
-    cfg::BlockId, function::StackAddress, AnyReg, BlockRef, FFmt, FReg, Function, FunctionCall,
-    Instruction, Reg, Root, StackInfo, Terminator, VirtualInstruction, VirtualTerminator,
+    cfg::{BlockId, BlockRef},
+    function::StackAddress,
+    AnyReg, FFmt, FReg, Function, FunctionCall, Instruction, Reg, Root, StackInfo, Terminator,
+    VirtualInstruction, VirtualTerminator,
 };
 
 pub fn run(root: &mut Root) {

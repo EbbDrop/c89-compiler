@@ -1,6 +1,6 @@
 use crate::{Function, Label, Reg, Root};
 
-pub fn run(root: &mut Root) -> Result<(), String> {
+pub fn link(root: &mut Root) -> Result<(), String> {
     let label_main = Label::from("main");
     if !root.exports_label(&label_main) {
         return Err("no main symbol exported".to_owned());
