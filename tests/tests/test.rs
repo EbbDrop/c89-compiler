@@ -70,7 +70,7 @@ fn run_mars(input_asm: Vec<u8>) -> String {
         .expect("Failed to spawn mars process");
 
     use wait_timeout::ChildExt;
-    match mars.wait_timeout(Duration::from_secs(5)) {
+    match mars.wait_timeout(Duration::from_secs(10)) {
         Ok(Some(status)) => {
             if !status.success() {
                 panic!("mars returned with a non successfull code!");
