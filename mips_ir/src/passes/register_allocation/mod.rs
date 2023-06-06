@@ -1,7 +1,7 @@
 //! Register Allocation and SSA destruction
 //!
 //! See https://doi.org/10.1007/11688839_20 for the paper on which this implementation is mainly
-//! based.
+//! based. For the pdf version, see https://compilers.cs.uni-saarland.de/papers/ra_ssa.pdf.
 
 mod coloring;
 mod perm_optimizer;
