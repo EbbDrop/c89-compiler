@@ -1,5 +1,7 @@
 //output:
 //5; 0.500000; c
+//output-mips:
+//5; 0.5; c
 
 #include <stdio.h>
 

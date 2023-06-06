@@ -1,5 +1,4 @@
 // Extra feature: Only when needed (like here) is stack memory used
-#include <stdio.h>
 
 void func() {}
 
@@ -18,6 +17,5 @@ int main() {
   // Call to make sure ONLY saved registers can be used,
   // limiting the amount of usable registers to 7
   func();
-  printf("%i", a + b + c + d + e + f + g + h + i + j + k);
-  return 0;
+  return a + b + c + d + e + f + g + h + i + j + k;
 }

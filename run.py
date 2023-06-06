@@ -33,13 +33,14 @@ for (
 
         full_out_path = os.path.join(root, name)
         full_out_path_llvm = os.path.splitext(full_out_path)[0] + ".ll"
+        full_out_path_mips = os.path.splitext(full_out_path)[0] + ".asm"
         full_out_path_ast_dot = os.path.splitext(full_out_path)[0] + ".ast.dot"
         full_out_path_ir_dot = os.path.splitext(full_out_path)[0] + ".ir.dot"
         full_out_path_text = os.path.splitext(full_out_path)[0] + ".txt"
 
         if not os.path.isfile(full_in_path):
             continue
-        print(f"== Testing file: {full_in_path}")
+        print(f"== Running file: {full_in_path}")
         subprocess.run(
             [
                 "cargo",
@@ -50,6 +51,21 @@ for (
                 "--emit=llvm-ir",
                 "--output",
                 full_out_path_llvm,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            [
+                "cargo",
+                "run",
+                "--release",
+                "--",
+                full_in_path,
+                "--emit=mips-asm",
+                "--target=mips",
+                "--output",
+                full_out_path_mips,
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
