@@ -85,6 +85,9 @@ fn construct_stack_frame(function: &mut Function) {
     // Store the stack pointer.
     instructions.push(crate::instr::virt::move_(Reg::FP.into(), Reg::SP.into()));
 
+    // Mark the end of stack frame construction
+    instructions.push(crate::instr::comment("#".repeat(63)));
+
     let entry_block = function.cfg.entry_block_mut();
     instructions.extend_from_slice(&entry_block.instructions);
     entry_block.instructions = instructions;
@@ -94,6 +97,9 @@ fn construct_stack_frame(function: &mut Function) {
 
 fn destruct_stack_frame(function: &mut Function) {
     let mut builder = function.start_new_block(Vec::new());
+
+    // Mark the beginning of stack frame deconstruction
+    builder.add_instruction(crate::instr::comment("#".repeat(63)));
 
     // Restore the stack pointer.
     builder.add_instruction(crate::instr::virt::move_(Reg::SP.into(), Reg::FP.into()));

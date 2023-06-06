@@ -22,11 +22,17 @@ fn link_main(main: &mut Function) {
     // Make sure the stack is 8-byte aligned before entering main.
     let entry_block = main.cfg.entry_block_mut();
     let mut new_entry_instructions = Vec::with_capacity(entry_block.instructions.len() + 4);
+    new_entry_instructions.push(crate::instr::comment(
+        " Make sure the stack is 8-byte aligned as required by the ABI".to_owned(),
+    ));
     new_entry_instructions.push(crate::instr::add_u_imm(Reg::SP, Reg::SP, 0b111));
     new_entry_instructions.push(crate::instr::shift_right_logical_imm(Reg::SP, Reg::SP, 3));
     new_entry_instructions.push(crate::instr::shift_left_logical_imm(Reg::SP, Reg::SP, 3));
-    // Reserve the space for arg0 to arg3 that every function expects.
+    new_entry_instructions.push(crate::instr::comment(
+        " Reserve stack space for arg0 to arg3 as required by the ABI".to_owned(),
+    ));
     new_entry_instructions.push(crate::instr::add_u_imm(Reg::SP, Reg::SP, (-16i16) as u16));
+    new_entry_instructions.push(crate::instr::comment("#".repeat(63)));
     new_entry_instructions.append(&mut entry_block.instructions);
     entry_block.instructions = new_entry_instructions;
 
@@ -34,7 +40,13 @@ fn link_main(main: &mut Function) {
     if let Some(exit_block) = main.exit_block_id.map(|id| &mut main.cfg[id]) {
         exit_block
             .instructions
-            .push(crate::instr::or_imm(Reg::V0, Reg::ZERO, 10));
+            .push(crate::instr::comment("#".repeat(63)));
+        exit_block
+            .instructions
+            .push(crate::instr::or(Reg::A0, Reg::V0, Reg::ZERO));
+        exit_block
+            .instructions
+            .push(crate::instr::or_imm(Reg::V0, Reg::ZERO, 17));
         *exit_block.terminator_mut() = crate::term::syscall(None);
     }
 }
