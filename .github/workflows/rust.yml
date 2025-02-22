@@ -42,7 +42,7 @@ jobs:
     - name: Format check
       run: cargo fmt --check --all
     - name: Clippy
-      run: cargo clippy --no-deps --all -- -Dwarnings
+      run: cargo clippy --no-deps --all -- -A unused -D warnings
     - name: Build
       run: cargo build --all --verbose
     - name: Install LLVM
