@@ -1,9 +1,6 @@
 # Comp
 
-A C89 compiler written in ~~Python~~ Rust.
-
-## Video
-_[redacted]_
+A C89 compiler written in Rust.
 
 ## Prerequisites
 
