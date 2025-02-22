@@ -54,7 +54,7 @@ jobs:
     - name: Install MARS
       if: ${{ !steps.cache-mars.outputs.cache-hit }}
       run: |
-        wget http://courses.missouristate.edu/KenVollmar/mars/MARS_4_5_Aug2014/Mars4_5.jar \
+        wget https://github.com/dpetersanderson/MARS/releases/download/v.4.5.1/Mars4_5.jar \
           -O ./.ci/mars/Mars4_5.jar
     - name: Run tests
       run: cargo test --all --verbose
