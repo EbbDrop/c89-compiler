@@ -15,7 +15,7 @@ impl ConflictGraph {
     // Panics if there is a reg in `already_live` that has not been used in prevouis call
     // as `new_live`
     pub fn new_live(&mut self, new_live: AnyReg, already_live: impl Iterator<Item = AnyReg>) {
-        self.0.entry(new_live).or_insert_with(HashSet::new);
+        self.0.entry(new_live).or_default();
         for already_live_reg in already_live {
             self.0.get_mut(&new_live).unwrap().insert(already_live_reg);
             self.0.get_mut(&already_live_reg).unwrap().insert(new_live);

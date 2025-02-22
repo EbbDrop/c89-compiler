@@ -1,6 +1,5 @@
 use crate::{Function, GlobalData, Label};
 use std::collections::{HashMap, HashSet};
-use std::ops::Deref;
 
 #[derive(Debug, Default)]
 pub struct Root {
@@ -133,7 +132,7 @@ impl Root {
         if self.has_label(label) {
             panic!("label already exists: {label}");
         }
-        self.functions.insert(label.deref().clone(), function);
+        self.functions.insert(label.clone(), function);
     }
 
     /// Removes a function. Returns the removed function if the label actually referred to an

@@ -670,7 +670,7 @@ impl<'a, 'b, 'g> UnaryBuilder<'a, 'b, 'g> {
     }
 }
 
-impl<'s> ValueUnaryBuilder<'s> {
+impl ValueUnaryBuilder<'_> {
     fn build<R, F>(self, rule: R, name: &str, build: F) -> AggregateResult<ExprNode>
     where
         R: TypeRuleUn,
@@ -767,7 +767,7 @@ struct BinaryBuilder<'s> {
     settings: &'s Settings,
 }
 
-impl<'s> BinaryBuilder<'s> {
+impl BinaryBuilder<'_> {
     fn build<R, F>(self, rule: R, name: &str, build: F) -> AggregateResult<ExprNode>
     where
         R: TypeRuleBin,
@@ -853,7 +853,7 @@ impl<'s> BinaryBuilder<'s> {
         let rule = UsualArithConversions::new()
             .or(CompatPointer)
             .map_out_ty_bin(SIGNED_INT);
-        return self.build(rule, op.long_name(), |l, r| Expr::Relation(l, op, r));
+        self.build(rule, op.long_name(), |l, r| Expr::Relation(l, op, r))
     }
 
     fn bitwise_op(self, op: BitwiseOp) -> AggregateResult<ExprNode> {

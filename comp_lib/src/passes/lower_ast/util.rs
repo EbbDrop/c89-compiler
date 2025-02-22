@@ -21,7 +21,7 @@ pub struct FunctionScope<'a, 'g> {
     pub in_loop: bool,
 }
 
-impl<'s, 'g> FunctionScope<'s, 'g> {
+impl FunctionScope<'_, '_> {
     pub fn new_scope(&mut self) -> FunctionScope {
         FunctionScope {
             global: self.global,

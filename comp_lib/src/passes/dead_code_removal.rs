@@ -65,7 +65,7 @@ struct FunctionCodeRemover<'a> {
     diagnostics: &'a mut LinkedList<Diagnostic>,
 }
 
-impl<'a> FunctionCodeRemover<'a> {
+impl FunctionCodeRemover<'_> {
     fn remove(mut self, block: &mut BlockNode) -> StmtRes {
         self.block(block)
     }

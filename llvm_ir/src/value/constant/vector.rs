@@ -37,8 +37,7 @@ declare_base_constant! {
 impl Vector {
     /// A vector must contain at least one element.
     pub fn new(elements: Vec<Primitive>) -> Result<Self, String> {
-        let element_type = elements
-            .get(0)
+        let element_type = elements.first()
             .ok_or("invalid arguments to vector constant constructor: expected at least 1 element")?
             .ty();
 

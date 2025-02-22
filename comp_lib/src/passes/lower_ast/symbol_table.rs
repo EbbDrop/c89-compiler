@@ -62,7 +62,7 @@ pub struct ScopedHandle<'a, I = VariableItem> {
     start: usize,
 }
 
-impl<'a, I> ScopedHandle<'a, I> {
+impl<I> ScopedHandle<'_, I> {
     /// Get a reference to the root table associated with this scope.
     pub fn root_table(&self) -> &Table<I> {
         &self.root_table.table
@@ -122,7 +122,7 @@ impl<'a, I> ScopedHandle<'a, I> {
     }
 }
 
-impl<'a, I> Drop for ScopedHandle<'a, I> {
+impl<I> Drop for ScopedHandle<'_, I> {
     fn drop(&mut self) {
         self.root_table.idents.truncate(self.start);
     }

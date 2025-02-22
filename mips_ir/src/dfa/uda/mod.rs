@@ -5,7 +5,7 @@ mod instruction;
 mod terminator;
 
 pub use du_chains::{
-    DefLocation, DefUseError, DuChain, DuChains, GlobalDefLocation, GlobalLocation, Location,
+    DefLocation, DefUseError, DuChain, DuChains, GlobalLocation, Location,
 };
 
 use crate::AnyReg;

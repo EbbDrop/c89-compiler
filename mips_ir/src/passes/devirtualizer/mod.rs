@@ -48,7 +48,7 @@ struct Devirtualizer<'a, 'b> {
     instructions: &'b mut Vec<Instruction>,
 }
 
-impl<'a, 'b> Devirtualizer<'a, 'b> {
+impl Devirtualizer<'_, '_> {
     fn devirtualize_instruction(&mut self, instruction: Instruction) {
         let instruction = instruction.to_unhidden();
         let Instruction::Virtual(virt_instr) = instruction else {
