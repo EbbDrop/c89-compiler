@@ -156,7 +156,9 @@ mod llvm_ir_builder {
         /// Maps the existing declaration of the function to a definition. Does nothing if the
         /// function doesn't have a body;
         fn add_function_definition(&mut self, ident: &str, function_node: &ir::FunctionNode) {
-            let Some(body) = function_node.body.as_ref() else { return };
+            let Some(body) = function_node.body.as_ref() else {
+                return;
+            };
             let (fdecl_handle, _) = *self
                 .fdecl_table
                 .get(ident)
@@ -728,7 +730,9 @@ mod llvm_ir_builder {
             use lir::value::{Element, Primitive, Single};
             let cast_instruction: lir::instruction::YieldingInstruction = match inner {
                 Element::Single(Single::Primitive(from)) => {
-                    let ty::Element::Single(ty::Single::Primitive(to)) = to_ty else { unreachable!("primitive's should only be casted to other primitive's") };
+                    let ty::Element::Single(ty::Single::Primitive(to)) = to_ty else {
+                        unreachable!("primitive's should only be casted to other primitive's")
+                    };
 
                     let is_to_type_signed = is_ctype_signed(&outer_node.ty);
                     let is_from_type_signed = is_ctype_signed(&inner_node.ty);

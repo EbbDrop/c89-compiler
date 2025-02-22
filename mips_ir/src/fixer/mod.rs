@@ -55,7 +55,9 @@ pub fn fix_function(function: &mut Function) {
         // `cycle_base` will be the block of which we'll antichain the default successor to break
         // the cycle. If no cycle is found, we can successfully break from 'outer.
         let (cycle_base_id, dsucc_id) = loop {
-            let Some((block_id, block)) = traverser.next() else { break 'outer };
+            let Some((block_id, block)) = traverser.next() else {
+                break 'outer;
+            };
             if let Some(bref) = block.terminator().default_target() {
                 if traverser.has_traversed(bref.id) {
                     break (block_id, bref.id);

@@ -228,7 +228,9 @@ fn function_call(
     scope: &mut FunctionScope,
 ) -> AggregateResult<ExprNode> {
     let Some(func) = scope.global.functions.get(&fcall.ident.data) else {
-        return  AggregateResult::new_err(DiagnosticBuilder::new(fcall.ident.span).build_undeclared_function(&fcall.ident.data));
+        return AggregateResult::new_err(
+            DiagnosticBuilder::new(fcall.ident.span).build_undeclared_function(&fcall.ident.data),
+        );
     };
 
     match fcall.args.len().cmp(&func.params.len()) {

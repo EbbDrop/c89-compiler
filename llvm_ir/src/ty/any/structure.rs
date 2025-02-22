@@ -74,11 +74,19 @@ impl Type for Structure {
             _ => {}
         }
 
-        let Some(self_is_packed) = self.is_packed() else { return false; };
-        let Some(other_is_packed) = self.is_packed() else { return false; };
+        let Some(self_is_packed) = self.is_packed() else {
+            return false;
+        };
+        let Some(other_is_packed) = self.is_packed() else {
+            return false;
+        };
         self_is_packed == other_is_packed && {
-            let Some(self_body_types) = self.body_types() else { return false; };
-            let Some(other_body_types) = other.body_types() else { return false; };
+            let Some(self_body_types) = self.body_types() else {
+                return false;
+            };
+            let Some(other_body_types) = other.body_types() else {
+                return false;
+            };
             self_body_types
                 .iter()
                 .zip(other_body_types)
@@ -100,7 +108,9 @@ impl Type for Structure {
 
     /// Returns `false` for opaque structures.
     fn has_scalable_vec(&self) -> bool {
-        let Some(body_types) = self.body_types() else { return false; };
+        let Some(body_types) = self.body_types() else {
+            return false;
+        };
         body_types.iter().any(|t| t.has_scalable_vec())
     }
 

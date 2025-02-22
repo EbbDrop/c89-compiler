@@ -451,7 +451,9 @@ impl DominatorTree {
                         continue;
                     }
                     let mut pred_doms = cfg.predecessor_ids(block).map(|pred| &dominators[&pred]);
-                    let Some(first_pred_doms) = pred_doms.next() else { continue };
+                    let Some(first_pred_doms) = pred_doms.next() else {
+                        continue;
+                    };
                     let mut new_dominators = BTreeSet::from_iter(first_pred_doms.iter().copied());
                     for doms in pred_doms {
                         new_dominators.retain(|r| doms.contains(r))

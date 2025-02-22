@@ -74,7 +74,9 @@ impl<'a, 'b> Devirtualizer<'a, 'b> {
     }
 
     fn devirtualize_terminator(&mut self, terminator: &mut Terminator) {
-        let Terminator::Virtual(virt_term) = terminator else { return };
+        let Terminator::Virtual(virt_term) = terminator else {
+            return;
+        };
         match virt_term {
             VirtualTerminator::Return(ret_val) => {
                 match *ret_val {

@@ -87,7 +87,9 @@ pub fn spill_belady(function: &mut Function) {
                             GlobalLocation::new(new_block_id, Location(instr_idx as isize)),
                         );
                         for (&block_id, &other_alias) in aliases.iter() {
-                            let Some(info) = belady_info.get_mut(&block_id) else { continue };
+                            let Some(info) = belady_info.get_mut(&block_id) else {
+                                continue;
+                            };
                             if info.in_regs.remove(&reg) {
                                 info.in_regs.insert(other_alias);
                             }
@@ -513,7 +515,9 @@ impl<'a, 'b, 'c> BeladyBlock<'a, 'b, 'c> {
             }
         }
         for (&block_id, &other_alias) in &aliases {
-            let Some(info) = self.belady_info.get_mut(&block_id) else { continue };
+            let Some(info) = self.belady_info.get_mut(&block_id) else {
+                continue;
+            };
             if info.in_regs.remove(&reg) {
                 info.in_regs.insert(other_alias);
             }

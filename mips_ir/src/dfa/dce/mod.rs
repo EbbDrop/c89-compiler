@@ -47,7 +47,9 @@ fn eliminate_unused_regs(function: &mut Function) {
         for &reg in &to_eliminate {
             let du_chain = &du_chains[reg];
             if du_chain.uses().any(|loc| {
-                let Some(instr) = function.cfg.instruction(loc) else { return true };
+                let Some(instr) = function.cfg.instruction(loc) else {
+                    return true;
+                };
                 instr.uses().any(|r| !to_eliminate.contains(&r))
                     || instr.defs().any(|r| !to_eliminate.contains(&r))
             }) || du_chain.phi_uses().any(|loc| {

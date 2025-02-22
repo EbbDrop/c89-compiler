@@ -59,7 +59,9 @@ impl<V: value::AggregateValue> ExtractValue<V> {
             ty: &ty::Element,
             mut remaining_indices: impl Iterator<Item = &'a value::constant::Integer>,
         ) -> Result<ty::Element, ()> {
-            let Some(index) = remaining_indices.next() else { return Ok(ty.clone()) };
+            let Some(index) = remaining_indices.next() else {
+                return Ok(ty.clone());
+            };
             match ty {
                 // NOTE: extractvalue cannot index into vectors, while GEP can
                 ty::Element::Single(_) => Err(()),
@@ -163,7 +165,9 @@ impl<T: ty::ElementType> IntoValidated<YieldingInstruction> for GetElementPtr<T>
             ty: &ty::Element,
             mut remaining_indices: impl Iterator<Item = &'a value::Integer>,
         ) -> bool {
-            let Some(index) = remaining_indices.next() else { return true };
+            let Some(index) = remaining_indices.next() else {
+                return true;
+            };
             match ty {
                 ty::Element::Single(ty::Single::Primitive(_)) => false,
                 // NOTE: GEP can index into vectors (while extractvalue cannot)
