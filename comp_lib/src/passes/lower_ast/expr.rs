@@ -561,7 +561,7 @@ enum LvalueBuildErr {
     WrongType(TypeCat),
 }
 
-impl<'a, 'b, 'g> UnaryBuilder<'a, 'b, 'g> {
+impl<'a> UnaryBuilder<'a, '_, '_> {
     fn lvalue_build<R, F>(
         self,
         rule: R,

@@ -65,7 +65,7 @@ pub enum Expr {
     /// Either
     /// * Each operand will be the same arithmetic type,
     /// * Or Both arguments are pointers to compatible types
-    /// In both cases the out type will be int
+    ///   In both cases the out type will be int
     ///
     /// (Void pointers will already be converted to real pointers)
     Relation(Box<ExprNode>, RelationOp, Box<ExprNode>),
@@ -121,14 +121,14 @@ pub enum BinaryOp {
     /// Either
     /// * Each operand and the out type will be the same arithmetic type,
     /// * Or one operand will be a pointer and the other will be a integral type
-    /// the out type is than the same type as the pointer
+    ///   the out type is than the same type as the pointer
     Add,
     /// 3.3.6
     /// Either
     /// * Each operand and the out type will be the same arithmetic type,
     /// * Or Both arguments are pointers to compatible types, the out type will be a integral type
     /// * Or the left operand will be a pointer and the right will be a integral type
-    /// the out type is than the same type as the pointer
+    ///   the out type is than the same type as the pointer
     Sub,
 
     /// 3.3.7

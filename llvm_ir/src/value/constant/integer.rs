@@ -65,8 +65,8 @@ impl TryFrom<Integer> for Boolean {
             ConstantInteger::Undef => crate::constant::Undef(ty::I1).into(),
             ConstantInteger::Poison => crate::constant::Poison(ty::I1).into(),
             ConstantInteger::ZeroInitializer => crate::constant::ZeroInitializer(ty::I1).into(),
-            ConstantInteger::Number(i) if i == 0 => Boolean::new(false),
-            ConstantInteger::Number(i) if i == 1 => Boolean::new(true),
+            ConstantInteger::Number(0) => Boolean::new(false),
+            ConstantInteger::Number(1) => Boolean::new(true),
             _ => return Err(ValueConversionError::new::<Integer, Self>(value)),
         })
     }

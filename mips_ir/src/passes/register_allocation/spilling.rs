@@ -303,7 +303,7 @@ impl<'a, 'b, 'c> BeladyBlock<'a, 'b, 'c> {
             let mut n_in_saved_fpu_d_regs = 0; // saved
             while let Some(&candidate) = candidates.iter().min_by_key(|&&reg| {
                 self.distance_to_next_use_after(self.block_id, -1, reg)
-                    .unwrap_or(std::usize::MAX)
+                    .unwrap_or(usize::MAX)
             }) {
                 candidates.remove(&candidate);
                 match candidate {
@@ -374,7 +374,7 @@ impl<'a, 'b, 'c> BeladyBlock<'a, 'b, 'c> {
                             self.location as isize - 1,
                             reg.into(),
                         )
-                        .unwrap_or(std::usize::MAX)
+                        .unwrap_or(usize::MAX)
                     })
                     .unwrap();
                 self.current_cpu_regs.remove(&to_remove);
@@ -389,7 +389,7 @@ impl<'a, 'b, 'c> BeladyBlock<'a, 'b, 'c> {
                             self.location as isize - 1,
                             reg.into(),
                         )
-                        .unwrap_or(std::usize::MAX)
+                        .unwrap_or(usize::MAX)
                     })
                     .unwrap();
                 self.current_fpu_regs.remove(&to_remove);
@@ -455,7 +455,7 @@ impl<'a, 'b, 'c> BeladyBlock<'a, 'b, 'c> {
             let reg_to_displace = regs
                 .max_by_key(|&r| {
                     self.distance_to_next_use_after(self.block_id, location, r.into())
-                        .unwrap_or(std::usize::MAX)
+                        .unwrap_or(usize::MAX)
                 })
                 .unwrap();
             displaced.insert(reg_to_displace.into());
@@ -467,7 +467,7 @@ impl<'a, 'b, 'c> BeladyBlock<'a, 'b, 'c> {
             let reg_to_displace = regs
                 .max_by_key(|&r| {
                     self.distance_to_next_use_after(self.block_id, location, r.into())
-                        .unwrap_or(std::usize::MAX)
+                        .unwrap_or(usize::MAX)
                 })
                 .unwrap();
             displaced.insert(reg_to_displace.into());
